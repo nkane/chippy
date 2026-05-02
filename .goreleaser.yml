@@ -1,0 +1,116 @@
+# goreleaser config for chippy
+# https://goreleaser.com
+version: 2
+
+project_name: chippy
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: chippy
+    main: ./cmd/chippy
+    binary: chippy
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: '{{ incpatch .Version }}-next'
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - 'merge conflict'
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: 'Features'
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: 'Bug fixes'
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: 'Other changes'
+      order: 999
+
+brews:
+  - name: chippy
+    repository:
+      owner: nkane
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/nkane/chippy"
+    description: "TUI 6502 emulator + ca65/cc65 source-level debugger"
+    license: "MIT"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "brew: bump {{ .ProjectName }} to {{ .Tag }}"
+    directory: Formula
+    test: |
+      system "#{bin}/chippy", "--help"
+    install: |
+      bin.install "chippy"
+
+release:
+  github:
+    owner: nkane
+    name: chippy
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## chippy {{ .Tag }}
+
+    A TUI 6502 emulator with a ca65/cc65 source-level debugger.
+  footer: |
+    ---
+    **Install via Homebrew**
+    ```
+    brew tap nkane/tap
+    brew install chippy
+    ```
+
+    **Or download a binary** from the assets below and drop it on your `$PATH`.
