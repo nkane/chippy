@@ -1,11 +1,18 @@
 # chippy
 
-A TUI 6502 emulator with built-in debugger, written in Go.
+A TUI 6502 emulator and debugger, written in Go.
 
 `chippy` emulates the NMOS 6502 CPU and presents a terminal UI built with
 [Bubble Tea](https://github.com/charmbracelet/bubbletea) for inspecting
 registers, flags, the stack, live disassembly, and memory while you single-step
 or free-run a program.
+
+It speaks the ca65/cc65 toolchain natively: load a `.bin`, `.prg`, `.hex`, or
+even an unlinked `.o` (chippy will run `ld65` for you), and any sibling
+`.dbg` symbol file is auto-detected so the disassembly shows real names and
+breakpoints can resolve to source lines.
+
+---
 
 ## Install
 
@@ -13,84 +20,191 @@ or free-run a program.
 go install github.com/nkane/chippy/cmd/chippy@latest
 ```
 
-Or build from this repo:
+Or build from a checkout:
 
 ```sh
+git clone git@github.com:nkane/chippy.git
+cd chippy
 go build ./cmd/chippy
+go test ./...
 ```
 
-## Usage
+Optional: install [cc65](https://cc65.github.io/) to assemble your own
+programs.
 
-Run the built-in demo program:
+---
+
+## Quick start
 
 ```sh
+# Built-in dummy program (no flags)
 ./chippy
+
+# Load a raw binary at $8000 (the default load address)
+./chippy -rom program.bin
+
+# Load and let chippy invoke ld65 for you
+./chippy -rom program.o -cfg linker.cfg
+
+# Try the bundled example
+cd example
+make                              # produces load_five.bin + load_five.dbg
+../chippy -rom load_five.bin
 ```
 
-### Loading programs
+Once it's running, press `?` for an in-app help modal, or `:` to open the
+command line.
 
-`chippy` auto-detects format by file extension:
+---
 
-| Extension | Format                                                |
-|-----------|-------------------------------------------------------|
-| `.bin`    | Raw bytes — placed at `-addr` (default `$8000`)       |
-| `.prg`    | Commodore-style: first 2 bytes = LE load address      |
-| `.hex`    | Intel HEX (record types `00` data, `01` EOF)          |
-| `.o`      | ca65/cc65 object — linked via `ld65` (requires `-cfg`)|
+## Loading programs
+
+`chippy` auto-detects format by extension:
+
+| Extension | Format                                                        |
+|-----------|---------------------------------------------------------------|
+| `.bin`    | Raw bytes — placed at `-addr` (default `$8000`)               |
+| `.prg`    | Commodore-style: first 2 bytes = LE load address              |
+| `.hex`    | Intel HEX (record types `00` data, `01` EOF)                  |
+| `.o`      | ca65/cc65 object — linked via `ld65` (requires `-cfg`)        |
+
+Flags:
+
+| Flag     | Default | Meaning                                                |
+|----------|---------|--------------------------------------------------------|
+| `-rom`   | —       | Path to program (`.bin`, `.prg`, `.hex`, `.o`)         |
+| `-addr`  | `32768` | Load address for raw `.bin` (ignored for other types)  |
+| `-cfg`   | —       | ld65 linker config (required for `.o`)                 |
+| `-dbg`   | auto    | cc65 `.dbg` symbol file; `<rom>.dbg` is tried by default |
+| `-reset` | `0`     | Override reset vector. `0` keeps the existing `$FFFC/D` bytes (or falls back to the load address if those are zero) |
+
+Examples:
 
 ```sh
 ./chippy -rom program.bin -addr 0x8000 -reset 0x8000
-./chippy -rom program.prg                  # load addr from header
-./chippy -rom program.hex                  # load addr from records
-./chippy -rom program.o -cfg nes.cfg       # ld65 invoked for you
+./chippy -rom program.prg                   # load addr from header
+./chippy -rom program.hex                   # load addr from records
+./chippy -rom program.o -cfg nes.cfg        # ld65 invoked for you
+./chippy -rom program.bin -dbg /tmp/x.dbg   # explicit debug file
 ```
 
-If `-reset` is omitted, chippy uses the bytes already at `$FFFC/$FFFD`,
-falling back to the file's load address if those bytes are zero.
+---
 
-### ca65 / cc65 workflow
+## ca65 / cc65 workflow
 
-The recommended path is to assemble + link yourself, then load the `.bin`.
-chippy will auto-load a sibling `.dbg` for symbols:
+Recommended path — assemble + link yourself, then load the `.bin`. The
+sibling `.dbg` is picked up automatically:
 
 ```sh
 ca65 -g prog.s -o prog.o
 ld65 -C linker.cfg -o prog.bin --dbgfile prog.dbg prog.o
-./chippy -rom prog.bin                     # picks up prog.dbg automatically
+./chippy -rom prog.bin
 ```
 
-You can also point chippy directly at the `.o` and let it run `ld65`:
+Or hand chippy the `.o` and let it run `ld65`:
 
 ```sh
 ./chippy -rom prog.o -cfg linker.cfg
 ```
 
 In this mode the `.dbg` is generated in a temp directory and loaded
-automatically. Pass `-dbg path/to/file.dbg` to override symbol-file detection.
+automatically.
 
-When symbols are loaded, the disassembly shows names instead of raw addresses
-(`JSR init` rather than `JSR $8042`) and labels are printed inline above their
-target instruction.
+When symbols are loaded:
+
+- Disassembly shows names instead of raw addresses (`JSR init` rather than
+  `JSR $8042`)
+- Labels are printed inline above their target instruction
+- `:bp main`, `:goto main`, `:watch score` etc. accept symbol names
+- Source-line breakpoints (`:bp main.s:42`) work — see below
+- Source view (`v`) shows your `.s` file with the current line highlighted
+
+---
 
 ## Keybinds
 
-| Key       | Action                                |
-|-----------|---------------------------------------|
-| `s`       | Single-step one instruction           |
-| `r`       | Toggle run / pause                    |
-| `R`       | Hard reset CPU                        |
-| `b`       | Toggle breakpoint at current `PC`     |
-| `B`       | Open breakpoint manager (`e` enable, `d` delete) |
-| `[` `]`   | Scroll disassembly by 1 / `'` follows PC |
-| `j` / `k` | Scroll memory view by `$10`           |
-| `J` / `K` | Scroll memory view by `$100`          |
-| `:`       | Command line                          |
-| `?`       | Help modal                            |
-| `q`       | Quit                                  |
+### Execution
 
-## Breakpoints
+| Key   | Action                                            |
+|-------|---------------------------------------------------|
+| `s`   | Single-step one instruction                       |
+| `S`   | Step 16 instructions (stops on bp / mem watch)    |
+| `n`   | Step over (skips JSR by setting one-shot bp at return) |
+| `f`   | Run to next source line (uses `.dbg` info)        |
+| `r`   | Toggle run / pause                                |
+| `R`   | Hard reset CPU                                    |
+| `+` `=` | Increase target speed                           |
+| `-` `_` | Decrease target speed                           |
+| `0`   | Speed: max (no throttle)                          |
 
-Sigils in the disasm/source gutter mirror nvim-DAP:
+### Breakpoints
+
+| Key   | Action                                            |
+|-------|---------------------------------------------------|
+| `b`   | Toggle plain breakpoint at current `PC`           |
+| `B`   | Open breakpoint manager modal                     |
+
+In the BP manager modal: `j/k` move cursor, `e` toggle enable, `d` (or `x`,
+`Delete`) delete, `enter` jump PC to bp, `esc/q/B` close.
+
+### Views
+
+| Key       | Action                                       |
+|-----------|----------------------------------------------|
+| `v`       | Toggle source view ↔ disassembly view        |
+| `[` `]`   | Scroll disasm by 1                           |
+| `{` `}`   | Scroll disasm by 8                           |
+| `'`       | Re-anchor disasm to follow PC                |
+| `j` `k`   | Scroll memory view by `$10` (also `↓`/`↑`)   |
+| `J` `K`   | Scroll memory view by `$100` (also `PgDn`/`PgUp`) |
+| `g` `G`   | Memory view to `$0000` / `$FF00`             |
+
+### Other
+
+| Key   | Action                                            |
+|-------|---------------------------------------------------|
+| `:`   | Open command line                                 |
+| `?`   | Help modal (`q` to dismiss)                       |
+| `q`   | Quit (saves state)                                |
+
+---
+
+## Commands
+
+Type `:` to open the command line, then any of:
+
+### Navigation
+
+| Command                     | Effect                                       |
+|-----------------------------|----------------------------------------------|
+| `:goto $XXXX` / `:g $XXXX`  | Jump memory view to address (or symbol)      |
+| `:pc $XXXX`                 | Force `PC` to address                        |
+| `:run $XXXX`                | Set one-shot bp at address and start running |
+| `:speed N`                  | Throttle to N Hz (`0` = unthrottled)         |
+
+### Breakpoints
+
+`:bp` accepts an address, symbol, or `file.s:line` source location, plus
+optional modifiers:
+
+| Form                                | Effect                                  |
+|-------------------------------------|-----------------------------------------|
+| `:bp $8042`                         | Toggle plain bp at address              |
+| `:bp main`                          | Toggle bp at symbol `main`              |
+| `:bp main.s:14`                     | Toggle bp at source line (needs `.dbg`) |
+| `:bp $8042 once`                    | One-shot bp (deletes itself on hit)     |
+| `:bp loop hits 5`                   | Break on the 5th hit                    |
+| `:bp main if A==$FF`                | Conditional (🔶) — see expression syntax |
+| `:bp $8000 log A={A} PC={PC}`       | Log point (📜) — prints, never pauses   |
+
+Modifiers can be combined: `:bp main.s:42 if A==$FF hits 3 log A={A} X={X}`.
+
+If a `file.s:line` reference can't be resolved (missing `.dbg`, file not in
+debug info, no instruction emitted on that line), the bp is created in the
+**rejected** state (💩) so you see it in the BP manager rather than just a
+status flash.
+
+#### Sigils (gutter glyphs)
 
 | Sigil | Meaning                                |
 |-------|----------------------------------------|
@@ -100,66 +214,167 @@ Sigils in the disasm/source gutter mirror nvim-DAP:
 | 💩    | Rejected (unresolved source line)      |
 | 👉    | Current `PC`                           |
 
-`:bp` accepts an address, symbol, or `file.s:42` source location, plus
-optional modifiers:
-
-```
-:bp main                       toggle plain bp at symbol `main`
-:bp $8042 once                 one-shot, deletes itself on hit
-:bp loop hits 5                only break on the 5th hit
-:bp main if A==$FF             conditional (cond uses A,X,Y,P,SP,PC, flags
-                               N V Z C, hex literals, [$XXXX] memory deref)
-:bp $8000 log A={A} PC={PC}    log point — prints and continues
-```
-
-State (breakpoints, watches, mem-view position, throttle) is persisted to
-`~/.chippy/state-<rom>.json` and restored on next launch.
-
-## Memory watchpoints
+### Memory watchpoints
 
 Trigger when the CPU reads or writes a tracked address. Same modifier
-syntax as `:bp`.
+syntax as `:bp` (`once`, `hits N`, `if EXPR`, `log MSG`).
 
-```
-:bpr  $0200                    break on any read of $0200
-:bpw  ram_flag                 break on write to symbol `ram_flag`
-:bprw $FFFC                    break on either
-:bpw  $0200 if A==$FF          conditional
-:bpw  score log score={[$0200]} PC={PC}    log point — never pauses
-:rmbpr $0200  /  :rmbpw  /  :rmbprw
-```
+| Command                                      | Effect                              |
+|----------------------------------------------|-------------------------------------|
+| `:bpr $0200`                                 | Break on any **read** of $0200      |
+| `:bpw ram_flag`                              | Break on **write** to symbol        |
+| `:bprw $FFFC`                                | Break on **either** read or write   |
+| `:bpw $0200 if A==$FF`                       | Conditional                         |
+| `:bpw score log score={[$0200]} PC={PC}`     | Log point — never pauses            |
+| `:rmbpr $0200` / `:rmbpw …` / `:rmbprw …`    | Remove                              |
 
 Watched bytes are colored in the memory hex view:
 
-| Color  | Meaning           |
-|--------|-------------------|
-| Blue   | 👁  read watch    |
-| Red    | ✏  write watch    |
-| Magenta| 🔁 read + write   |
+| Color   | Meaning           |
+|---------|-------------------|
+| Blue    | 👁 read watch     |
+| Red     | ✏ write watch     |
+| Magenta | 🔁 read + write   |
+
+### Watches
+
+The watch panel shows live values of registers and memory cells.
+
+| Command                                  | Effect                              |
+|------------------------------------------|-------------------------------------|
+| `:watch $0200`                           | Watch byte at $0200                 |
+| `:watch $0200 word`                      | Watch 16-bit LE word                |
+| `:watch score`                           | Watch by symbol                     |
+| `:watch $0200 byte player x`             | Watch with custom label             |
+| `:watch reg A`                           | Watch CPU register                  |
+| `:watch reg A accumulator`               | Register watch with label           |
+| `:rmwatch $0200` / `:rmwatch reg A`      | Remove a single watch               |
+| `:clearwatch`                            | Remove all watches                  |
+
+Aliases: `:w` for `:watch`, `:unwatch` for `:rmwatch`.
+
+### Misc
+
+| Command         | Effect                                |
+|-----------------|---------------------------------------|
+| `:help` / `:?`  | Open help modal                       |
+| `:q` / `:quit`  | (Hint to use `q` outside the prompt)  |
+
+---
+
+## Expression syntax (conditions and log templates)
+
+Used by `:bp ... if EXPR` and `:bpw ... if EXPR` for conditions, and inside
+`{...}` substitutions in `log MSG` templates.
+
+### Operands
+
+- **Registers:** `A`, `X`, `Y`, `P`, `SP` (`S` is an alias), `PC`
+- **Flags:** `N`, `V`, `B`, `D`, `I`, `Z`, `C` — evaluate to `0` or `1`
+- **Numeric literals:** `$FF` / `0xFF` / `255` / `0b1010`
+- **Symbols:** any name in the loaded `.dbg` (resolves to its address)
+- **Memory deref:** `[$XXXX]` — the byte at that address (works with symbols
+  too: `[score]`)
+
+### Operators
+
+`==` `!=` `<` `<=` `>` `>=` `&&` `||` `!` `+` `-` `*` `/` `%` `&` `|` `^` `<<` `>>` `( )`
+
+### Examples
+
+```
+A == $FF
+X > 0 && Y < 10
+[score] >= $64
+P & $80 != 0
+(A + X) == $42
+```
+
+### Log point template
+
+`{EXPR}` substitutes the value of EXPR (formatted as `$XX` for bytes, `$XXXX`
+for words). Anything else is literal text.
+
+```
+:bp main log entered main, A={A} X={X} PC={PC}
+:bpw score log score={[score]} cycle={cycles}
+```
+
+`{cycles}` is recognized as a special token that prints the CPU cycle count.
+
+---
+
+## Persistence
+
+Per-ROM state is saved to `~/.chippy/state-<basename>.json` and reloaded on
+next launch. Persisted:
+
+- Plain + rich breakpoints (with conditions, hit limits, log messages,
+  source tags)
+- Memory watchpoints
+- Memory view position
+- Watch panel entries
+- Throttle speed
+- Disasm scroll anchor
+
+Conditions are recompiled at load time; if a previously-good condition
+becomes invalid (e.g. you removed the symbol it referenced), the bp loads
+with `condFn` nil and effectively becomes a plain bp.
+
+---
 
 ## Layout
 
 ```
-┌ Registers ──┐ ┌ Disassembly ─────────────┐
-│ A:00 X:00 Y │ │ > $8000  LDA #$00         │
-│ SP:FD PC:80 │ │   $8002  TAX              │
-└─────────────┘ │   ...                     │
-┌ Flags ──────┐ └───────────────────────────┘
-│ n v U b d I │ ┌ Memory ───────────────────┐
-└─────────────┘ │ $0000: 00 00 ... ........ │
-┌ Stack ──────┐ └───────────────────────────┘
-│ $01FE: 00   │
-└─────────────┘
+┌ Registers ──┐ ┌ Disassembly ────────────────┐
+│ A:00 X:00 Y │ │ > $8000  LDA #$00           │
+│ SP:FD PC:80 │ │   $8002  TAX                │
+└─────────────┘ │   ...                       │
+┌ Flags ──────┐ └─────────────────────────────┘
+│ n v U b d I │ ┌ Memory ─────────────────────┐
+└─────────────┘ │ $0000: 00 00 ... ........   │
+┌ Stack ──────┐ └─────────────────────────────┘
+│ $01FE: 00   │ ┌ Watches ────────────────────┐
+└─────────────┘ │ score  $0200  $00           │
+                └─────────────────────────────┘
+status: ready
 ```
+
+The disassembly panel is replaced by a source view when you press `v` (if
+a `.dbg` is loaded). A breakpoint manager modal opens with `B`; the help
+modal opens with `?`.
+
+---
 
 ## Status
 
-Implements all official NMOS 6502 opcodes. Decimal mode arithmetic adjustments
-are not yet applied (flag is tracked but `ADC`/`SBC` operate in binary mode).
-Unofficial / illegal opcodes currently behave as 1-byte NOPs.
+Implements all official NMOS 6502 opcodes. Known gaps tracked as GitHub
+issues:
+
+- [#1](https://github.com/nkane/chippy/issues/1) — Decimal mode (BCD) for `ADC`/`SBC` (flag tracked, math is binary)
+- [#2](https://github.com/nkane/chippy/issues/2) — Unofficial / illegal opcodes (currently 1-byte NOPs)
+
+---
 
 ## Tests
 
 ```sh
 go test ./...
+```
+
+The TUI package has headless tests for the memory watchpoint data plane
+(`internal/tui/membp_test.go`) that exercise `WBus` + `processMemHits`
+without the bubble-tea runtime.
+
+---
+
+## Project layout
+
+```
+cmd/chippy/         CLI entrypoint, flag parsing, loader/wiring
+internal/cpu/       6502 core: CPU, RAM, opcodes, disassembler
+internal/loader/    .bin/.prg/.hex/.o loaders
+internal/symbols/   cc65 .dbg parser, symbol + source-line tables
+internal/tui/       Bubble Tea model, panels, modals, commands
+example/            Bundled load_five demo (ca65 source + Makefile)
 ```
