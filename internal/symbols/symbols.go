@@ -361,7 +361,7 @@ func LoadSourceMap(dbgPath string) (*SourceMap, error) {
 				}
 				ids = append(ids, id)
 			}
-			if file > 0 && ln > 0 && len(ids) > 0 {
+			if ln > 0 && len(ids) > 0 {
 				lines = append(lines, lineR{file: file, line: ln, spans: ids})
 			}
 		}
