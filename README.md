@@ -16,6 +16,22 @@ breakpoints can resolve to source lines.
 
 ## Install
 
+### Homebrew (macOS / Linux)
+
+```sh
+brew tap nkane/tap
+brew install chippy
+```
+
+### Prebuilt binaries
+
+Grab a release archive for your platform from the
+[releases page](https://github.com/nkane/chippy/releases) and drop the
+`chippy` binary on your `$PATH`. Builds available for darwin/linux on
+amd64+arm64 and windows on amd64.
+
+### From source
+
 ```sh
 go install github.com/nkane/chippy/cmd/chippy@latest
 ```
