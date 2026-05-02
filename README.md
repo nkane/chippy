@@ -80,9 +80,40 @@ target instruction.
 | `r`       | Toggle run / pause                    |
 | `R`       | Hard reset CPU                        |
 | `b`       | Toggle breakpoint at current `PC`     |
+| `B`       | Open breakpoint manager (`e` enable, `d` delete) |
+| `[` `]`   | Scroll disassembly by 1 / `'` follows PC |
 | `j` / `k` | Scroll memory view by `$10`           |
 | `J` / `K` | Scroll memory view by `$100`          |
+| `:`       | Command line                          |
+| `?`       | Help modal                            |
 | `q`       | Quit                                  |
+
+## Breakpoints
+
+Sigils in the disasm/source gutter mirror nvim-DAP:
+
+| Sigil | Meaning                                |
+|-------|----------------------------------------|
+| 🛑    | Plain breakpoint                       |
+| 🔶    | Conditional breakpoint                 |
+| 📜    | Log point (prints, never pauses)       |
+| 💩    | Rejected (unresolved source line)      |
+| 👉    | Current `PC`                           |
+
+`:bp` accepts an address, symbol, or `file.s:42` source location, plus
+optional modifiers:
+
+```
+:bp main                       toggle plain bp at symbol `main`
+:bp $8042 once                 one-shot, deletes itself on hit
+:bp loop hits 5                only break on the 5th hit
+:bp main if A==$FF             conditional (cond uses A,X,Y,P,SP,PC, flags
+                               N V Z C, hex literals, [$XXXX] memory deref)
+:bp $8000 log A={A} PC={PC}    log point — prints and continues
+```
+
+State (breakpoints, watches, mem-view position, throttle) is persisted to
+`~/.chippy/state-<rom>.json` and restored on next launch.
 
 ## Layout
 

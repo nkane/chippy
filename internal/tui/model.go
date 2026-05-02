@@ -51,7 +51,7 @@ type Model struct {
 	RAM         *cpu.RAM
 	Syms        *symbols.Table
 	Running     bool
-	Breakpoints map[uint16]bool
+	Breakpoints map[uint16]*Breakpoint
 	MemViewAddr uint16
 	Status      string
 
@@ -102,7 +102,7 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 	return Model{
 		CPU:         c,
 		RAM:         r,
-		Breakpoints:  map[uint16]bool{},
+		Breakpoints:  map[uint16]*Breakpoint{},
 		MemViewAddr:  0x0000,
 		Status:       "ready",
 		TargetHz:     0,
@@ -208,8 +208,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			for i := 0; i < 16 && !m.CPU.Halted; i++ {
 				m.CPU.Step()
-				if m.Breakpoints[m.CPU.PC] {
+				if pause, msg := m.shouldBreakAt(m.CPU.PC); pause {
 					break
+				} else if msg != "" {
+					m.Status = msg
 				}
 			}
 			m.statusAfterStep("stepped x16")
@@ -232,10 +234,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.CPU.Reset()
 			m.Status = "reset"
 		case "b":
-			if m.Breakpoints[m.CPU.PC] {
+			if _, ok := m.Breakpoints[m.CPU.PC]; ok {
 				delete(m.Breakpoints, m.CPU.PC)
 			} else {
-				m.Breakpoints[m.CPU.PC] = true
+				m.Breakpoints[m.CPU.PC] = newBP(m.CPU.PC)
 			}
 			m.Status = fmt.Sprintf("toggle bp $%04X", m.CPU.PC)
 			m.saveState()
@@ -284,10 +286,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.Status = fmt.Sprintf("halted at $%04X", m.CPU.PC)
 					break
 				}
-				if m.Breakpoints[m.CPU.PC] {
+				if pause, msg := m.shouldBreakAt(m.CPU.PC); pause {
 					m.Running = false
 					m.Status = fmt.Sprintf("hit bp $%04X", m.CPU.PC)
 					break
+				} else if msg != "" {
+					m.Status = msg
 				}
 			}
 		}
@@ -302,7 +306,7 @@ func (m *Model) statusAfterStep(normal string) {
 		m.Status = fmt.Sprintf("halted at $%04X", m.CPU.PC)
 		return
 	}
-	if m.Breakpoints[m.CPU.PC] {
+	if pause, _ := m.shouldBreakAt(m.CPU.PC); pause {
 		m.Status = fmt.Sprintf("hit bp $%04X", m.CPU.PC)
 		return
 	}
@@ -333,9 +337,11 @@ func (m *Model) stepOver() {
 			m.Status = fmt.Sprintf("step-over -> $%04X", retPC)
 			return
 		}
-		if m.Breakpoints[m.CPU.PC] {
+		if pause, msg := m.shouldBreakAt(m.CPU.PC); pause {
 			m.Status = fmt.Sprintf("hit bp $%04X (in subroutine)", m.CPU.PC)
 			return
+		} else if msg != "" {
+			m.Status = msg
 		}
 	}
 	m.Status = "step-over guard hit (2M cycles)"
@@ -360,9 +366,11 @@ func (m *Model) runToNextLine() {
 			m.Status = fmt.Sprintf("halted at $%04X", m.CPU.PC)
 			return
 		}
-		if m.Breakpoints[m.CPU.PC] {
+		if pause, msg := m.shouldBreakAt(m.CPU.PC); pause {
 			m.Status = fmt.Sprintf("hit bp $%04X", m.CPU.PC)
 			return
+		} else if msg != "" {
+			m.Status = msg
 		}
 		loc, ok := m.PCToSrc[m.CPU.PC]
 		if ok && (loc.File != startLoc.File || loc.Line != startLoc.Line) {
@@ -461,6 +469,13 @@ func (m Model) updateBPManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.BPCursor--
 			}
 			m.saveState()
+		}
+	case "e":
+		if m.BPCursor < len(bps) {
+			if bp := m.Breakpoints[bps[m.BPCursor]]; bp != nil {
+				bp.Enabled = !bp.Enabled
+				m.saveState()
+			}
 		}
 	case "enter":
 		if m.BPCursor < len(bps) {
@@ -656,10 +671,18 @@ func (m Model) helpModal() string {
 			{"'", "follow PC again"},
 		}},
 		{"General", [][2]string{
-			{":", "command line (:goto :pc :watch :speed)"},
+			{":", "command line (:goto :pc :watch :speed :bp)"},
 			{"v", "toggle source / disassembly view"},
 			{"? / h", "toggle this help"},
 			{"q / ^C", "quit"},
+		}},
+		{"Breakpoints", [][2]string{
+			{":bp X", "toggle plain bp at addr/symbol/file.s:42"},
+			{":bp X once", "one-shot (auto-delete on hit)"},
+			{":bp X hits N", "break only on Nth hit"},
+			{":bp X if E", "conditional (E uses A,X,Y,P,SP,PC,N,V,Z,C,[$XX])"},
+			{":bp X log M", "log point: prints M, doesn't pause"},
+			{"sigils", "🛑 plain  🔶 cond  📜 log  💩 reject  👉 PC"},
 		}},
 	}
 
@@ -696,12 +719,37 @@ func (m Model) bpModal() string {
 		b.WriteString(help.Render("  (none — press `b` at PC to add)"))
 	} else {
 		for i, addr := range bps {
-			marker := "  "
-			line := fmt.Sprintf("%s $%04X", marker, addr)
-			if m.Syms != nil {
-				if name := m.Syms.Lookup(addr); name != "" {
-					line += "  " + labelStyle.Render(name)
+			bp := m.Breakpoints[addr]
+			marker := bp.marker()
+			var line string
+			if bp.Rejected {
+				line = fmt.Sprintf("%s (unresolved)", marker)
+			} else {
+				line = fmt.Sprintf("%s $%04X", marker, addr)
+				if m.Syms != nil {
+					if name := m.Syms.Lookup(addr); name != "" {
+						line += "  " + labelStyle.Render(name)
+					}
 				}
+			}
+			if bp.Source != "" {
+				line += dimAddr.Render("  " + bp.Source)
+			}
+			if !bp.Enabled {
+				line += dimAddr.Render("  [disabled]")
+			}
+			if bp.HitLimit > 0 {
+				line += dimAddr.Render(fmt.Sprintf("  [%d/%d]", bp.Hits, bp.HitLimit))
+			} else if bp.HitLimit == -1 {
+				line += dimAddr.Render("  [once]")
+			} else if bp.Hits > 0 {
+				line += dimAddr.Render(fmt.Sprintf("  [%d hits]", bp.Hits))
+			}
+			if bp.Cond != "" {
+				line += dimAddr.Render("  if " + bp.Cond)
+			}
+			if bp.Log != "" {
+				line += dimAddr.Render("  log " + bp.Log)
 			}
 			if i == m.BPCursor {
 				line = curLine.Render(line)
@@ -710,7 +758,7 @@ func (m Model) bpModal() string {
 		}
 	}
 	b.WriteString("\n")
-	b.WriteString(help.Render("  j/k move  d delete  enter set PC  esc close"))
+	b.WriteString(help.Render("  j/k move  d delete  e enable/disable  enter set PC  esc close"))
 	return lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
 		BorderForeground(lipgloss.Color("196")).
@@ -887,9 +935,19 @@ func (m Model) disasmView(w, h int) string {
 		if m.isDataAddr(a) {
 			text = fmt.Sprintf(".byte $%02X", m.RAM.Read(a))
 		}
-		marker := "  "
-		if m.Breakpoints[a] {
-			marker = bpLine.Render(" \u25CF")
+		// Marker column: PC cursor wins, then breakpoint sigil, else blank.
+		// Wide emoji (2 cells) consumes the marker slot; we drop the leading
+		// space to keep the address column aligned with non-PC rows.
+		var marker string
+		switch {
+		case a == pc:
+			marker = "\U0001F449"
+		default:
+			if bp, ok := m.Breakpoints[a]; ok {
+				marker = bp.marker()
+			} else {
+				marker = "  "
+			}
 		}
 		line := fmt.Sprintf("%s %s  %s", marker, dimAddr.Render(fmt.Sprintf("$%04X", a)), text)
 		if a == pc {
@@ -1090,11 +1148,13 @@ func (m Model) sourceView(w, h int) string {
 		}
 	}
 
-	// Find which lines are breakpointable (any PC mapped to that line has bp set).
-	bpLines := map[int]bool{}
-	for pc := range m.Breakpoints {
+	// Per-line breakpoint lookup: first matching bp wins for marker selection.
+	bpLines := map[int]*Breakpoint{}
+	for pc, bp := range m.Breakpoints {
 		if l, ok := m.PCToSrc[pc]; ok && l.File == loc.File {
-			bpLines[l.Line] = true
+			if _, dup := bpLines[l.Line]; !dup {
+				bpLines[l.Line] = bp
+			}
 		}
 	}
 
@@ -1102,9 +1162,16 @@ func (m Model) sourceView(w, h int) string {
 	title := fmt.Sprintf("Source — %s:%d", loc.File, loc.Line)
 	for i := start; i < end; i++ {
 		lineNum := i + 1
-		marker := "  "
-		if bpLines[lineNum] {
-			marker = bpLine.Render(" \u25CF")
+		var marker string
+		switch {
+		case lineNum == loc.Line:
+			marker = "\U0001F449"
+		default:
+			if bp, ok := bpLines[lineNum]; ok {
+				marker = bp.marker()
+			} else {
+				marker = "  "
+			}
 		}
 		text := fmt.Sprintf("%s %s  %s", marker, dimAddr.Render(fmt.Sprintf("%4d", lineNum)), lines[i])
 		if lineNum == loc.Line {

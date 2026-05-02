@@ -80,8 +80,10 @@ func (m *Model) runCommand(line string) string {
 		if err != nil {
 			return err.Error()
 		}
-		// Set a temporary breakpoint and start running.
-		m.Breakpoints[addr] = true
+		// Set a one-shot breakpoint and start running.
+		bp := newBP(addr)
+		bp.HitLimit = -1
+		m.Breakpoints[addr] = bp
 		m.Running = true
 		return fmt.Sprintf("running to $%04X", addr)
 	case "watch", "w":
@@ -191,18 +193,7 @@ func (m *Model) runCommand(line string) string {
 		if len(args) == 0 {
 			return fmt.Sprintf("%d breakpoints", len(m.Breakpoints))
 		}
-		addr, err := m.parseAddrSym(args[0])
-		if err != nil {
-			return err.Error()
-		}
-		if m.Breakpoints[addr] {
-			delete(m.Breakpoints, addr)
-			m.saveState()
-			return fmt.Sprintf("bp -$%04X", addr)
-		}
-		m.Breakpoints[addr] = true
-		m.saveState()
-		return fmt.Sprintf("bp +$%04X", addr)
+		return m.cmdBP(args)
 	case "help", "?":
 		m.ShowHelp = true
 		return "help"

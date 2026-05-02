@@ -6,11 +6,16 @@ import (
 	"path/filepath"
 )
 
+// savedState is what we persist to ~/.chippy/state-<rom>.json.
+//
+// Breakpoints uses json.RawMessage so we can accept either the new shape
+// ([]Breakpoint) or the legacy shape ([]uint16). New writes always use the
+// rich form.
 type savedState struct {
-	Breakpoints []uint16 `json:"breakpoints"`
-	MemViewAddr uint16   `json:"mem_view_addr"`
-	Watches     []Watch  `json:"watches"`
-	TargetHz    int      `json:"target_hz"`
+	Breakpoints json.RawMessage `json:"breakpoints,omitempty"`
+	MemViewAddr uint16          `json:"mem_view_addr"`
+	Watches     []Watch         `json:"watches"`
+	TargetHz    int             `json:"target_hz"`
 }
 
 func loadState(m *Model, path string) {
@@ -22,12 +27,56 @@ func loadState(m *Model, path string) {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return
 	}
-	for _, a := range s.Breakpoints {
-		m.Breakpoints[a] = true
-	}
 	m.MemViewAddr = s.MemViewAddr
 	m.Watches = s.Watches
 	m.TargetHz = s.TargetHz
+	if m.Breakpoints == nil {
+		m.Breakpoints = make(map[uint16]*Breakpoint)
+	}
+	if len(s.Breakpoints) == 0 {
+		return
+	}
+	// Try new shape first.
+	var bps []Breakpoint
+	if err := json.Unmarshal(s.Breakpoints, &bps); err == nil && looksLikeBPArray(s.Breakpoints) {
+		for i := range bps {
+			bp := bps[i]
+			b := bp // copy
+			if b.Cond != "" {
+				if fn, cerr := compileCondition(b.Cond, m.Syms); cerr == nil {
+					b.condFn = fn
+				} else {
+					// Bad cond on disk: mark rejected so user sees it.
+					b.Rejected = true
+				}
+			}
+			m.Breakpoints[b.Addr] = &b
+		}
+		return
+	}
+	// Fall back to legacy []uint16.
+	var legacy []uint16
+	if err := json.Unmarshal(s.Breakpoints, &legacy); err == nil {
+		for _, a := range legacy {
+			m.Breakpoints[a] = newBP(a)
+		}
+	}
+}
+
+// looksLikeBPArray returns true if the raw json is an array whose first
+// element is an object (new shape) rather than a number (legacy shape).
+func looksLikeBPArray(raw json.RawMessage) bool {
+	for _, b := range raw {
+		switch b {
+		case ' ', '\t', '\n', '\r', '[':
+			continue
+		case '{':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func (m *Model) saveState() {
@@ -37,12 +86,19 @@ func (m *Model) saveState() {
 	if err := os.MkdirAll(filepath.Dir(m.StatePath), 0o755); err != nil {
 		return
 	}
-	bps := make([]uint16, 0, len(m.Breakpoints))
-	for a := range m.Breakpoints {
-		bps = append(bps, a)
+	bps := make([]Breakpoint, 0, len(m.Breakpoints))
+	for _, bp := range m.Breakpoints {
+		if bp == nil {
+			continue
+		}
+		bps = append(bps, *bp)
+	}
+	raw, err := json.Marshal(bps)
+	if err != nil {
+		return
 	}
 	s := savedState{
-		Breakpoints: bps,
+		Breakpoints: raw,
 		MemViewAddr: m.MemViewAddr,
 		Watches:     m.Watches,
 		TargetHz:    m.TargetHz,
