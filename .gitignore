@@ -1,0 +1,19 @@
+# Build artifacts (binary at repo root only, not the cmd/chippy package)
+/chippy
+*.bin
+*.o
+*.dbg
+*.prg
+*.hex
+*.lst
+*.map
+
+# Local state
+.chippy/
+~/.chippy/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
