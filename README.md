@@ -384,3 +384,11 @@ internal/symbols/   cc65 .dbg parser, symbol + source-line tables
 internal/tui/       Bubble Tea model, panels, modals, commands
 example/            Bundled load_five demo (ca65 source + Makefile)
 ```
+
+---
+
+## Support
+
+If chippy is useful to you, consider buying me a coffee:
+
+<a href="https://buymeacoffee.com/nkane" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="60" width="217"></a>
