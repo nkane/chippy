@@ -26,6 +26,9 @@ var (
 	statusBar  = lipgloss.NewStyle().Background(lipgloss.Color("57")).Foreground(lipgloss.Color("231")).Padding(0, 1)
 	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("207")).Bold(true)
 	dimAddr    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	memBPRead  = lipgloss.NewStyle().Foreground(lipgloss.Color("33")).Bold(true)  // 👁 blue
+	memBPWrite = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true) // ✏ red
+	memBPRW    = lipgloss.NewStyle().Foreground(lipgloss.Color("213")).Bold(true) // 🔁 magenta
 )
 
 const (
@@ -49,9 +52,11 @@ type Watch struct {
 type Model struct {
 	CPU         *cpu.CPU
 	RAM         *cpu.RAM
+	WBus        *WBus // optional: bus wrapper that records mem watch hits
 	Syms        *symbols.Table
 	Running     bool
 	Breakpoints map[uint16]*Breakpoint
+	MemBPs      map[uint16]*MemBP
 	MemViewAddr uint16
 	Status      string
 
@@ -103,6 +108,7 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 		CPU:         c,
 		RAM:         r,
 		Breakpoints:  map[uint16]*Breakpoint{},
+		MemBPs:       map[uint16]*MemBP{},
 		MemViewAddr:  0x0000,
 		Status:       "ready",
 		TargetHz:     0,
@@ -110,6 +116,17 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 		W:            120,
 		H:            40,
 	}
+}
+
+// WithWBus attaches a bus wrapper that records memory watchpoint hits. The
+// CPU should already be using this same WBus as its bus. Call after New.
+func (m Model) WithWBus(w *WBus) Model {
+	m.WBus = w
+	if w != nil {
+		w.AttachCPU(m.CPU)
+		w.SetWatches(m.MemBPs)
+	}
+	return m
 }
 
 func (m Model) WithSymbols(s *symbols.Table) Model {
@@ -208,6 +225,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			for i := 0; i < 16 && !m.CPU.Halted; i++ {
 				m.CPU.Step()
+				if mpause, mmsg := m.processMemHits(); mpause {
+					m.Status = mmsg
+					break
+				} else if mmsg != "" {
+					m.Status = mmsg
+				}
 				if pause, msg := m.shouldBreakAt(m.CPU.PC); pause {
 					break
 				} else if msg != "" {
@@ -286,6 +309,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.Status = fmt.Sprintf("halted at $%04X", m.CPU.PC)
 					break
 				}
+				if mpause, mmsg := m.processMemHits(); mpause {
+					m.Running = false
+					m.Status = mmsg
+					break
+				} else if mmsg != "" {
+					m.Status = mmsg
+				}
 				if pause, msg := m.shouldBreakAt(m.CPU.PC); pause {
 					m.Running = false
 					m.Status = fmt.Sprintf("hit bp $%04X", m.CPU.PC)
@@ -304,6 +334,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) statusAfterStep(normal string) {
 	if m.CPU.Halted {
 		m.Status = fmt.Sprintf("halted at $%04X", m.CPU.PC)
+		return
+	}
+	if mpause, mmsg := m.processMemHits(); mpause {
+		m.Status = mmsg
+		return
+	} else if mmsg != "" {
+		m.Status = mmsg
 		return
 	}
 	if pause, _ := m.shouldBreakAt(m.CPU.PC); pause {
@@ -337,6 +374,12 @@ func (m *Model) stepOver() {
 			m.Status = fmt.Sprintf("step-over -> $%04X", retPC)
 			return
 		}
+		if mpause, mmsg := m.processMemHits(); mpause {
+			m.Status = mmsg
+			return
+		} else if mmsg != "" {
+			m.Status = mmsg
+		}
 		if pause, msg := m.shouldBreakAt(m.CPU.PC); pause {
 			m.Status = fmt.Sprintf("hit bp $%04X (in subroutine)", m.CPU.PC)
 			return
@@ -365,6 +408,12 @@ func (m *Model) runToNextLine() {
 		if m.CPU.Halted {
 			m.Status = fmt.Sprintf("halted at $%04X", m.CPU.PC)
 			return
+		}
+		if mpause, mmsg := m.processMemHits(); mpause {
+			m.Status = mmsg
+			return
+		} else if mmsg != "" {
+			m.Status = mmsg
 		}
 		if pause, msg := m.shouldBreakAt(m.CPU.PC); pause {
 			m.Status = fmt.Sprintf("hit bp $%04X", m.CPU.PC)
@@ -492,6 +541,15 @@ func (m Model) updateBPManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) sortedBPs() []uint16 {
 	out := make([]uint16, 0, len(m.Breakpoints))
 	for a := range m.Breakpoints {
+		out = append(out, a)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func (m Model) sortedMemBPs() []uint16 {
+	out := make([]uint16, 0, len(m.MemBPs))
+	for a := range m.MemBPs {
 		out = append(out, a)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
@@ -684,6 +742,14 @@ func (m Model) helpModal() string {
 			{":bp X log M", "log point: prints M, doesn't pause"},
 			{"sigils", "🛑 plain  🔶 cond  📜 log  💩 reject  👉 PC"},
 		}},
+		{"Memory watchpoints", [][2]string{
+			{":bpr X", "watch reads at X"},
+			{":bpw X", "watch writes at X"},
+			{":bprw X", "watch both reads and writes"},
+			{":rmbpr X", "remove (also :rmbpw / :rmbprw)"},
+			{"modifiers", "same: once / hits N / if E / log M"},
+			{"sigils", "👁 read  ✏ write  🔁 read+write"},
+		}},
 	}
 
 	var b strings.Builder
@@ -758,6 +824,21 @@ func (m Model) bpModal() string {
 		}
 	}
 	b.WriteString("\n")
+	if len(m.MemBPs) > 0 {
+		b.WriteString(titleStyle.Render("Memory watchpoints"))
+		b.WriteString("\n\n")
+		mbps := m.sortedMemBPs()
+		for _, addr := range mbps {
+			line := m.MemBPs[addr].describe()
+			if m.Syms != nil {
+				if name := m.Syms.Lookup(addr); name != "" {
+					line += "  " + labelStyle.Render(name)
+				}
+			}
+			b.WriteString(line + "\n")
+		}
+		b.WriteString("\n")
+	}
 	b.WriteString(help.Render("  j/k move  d delete  e enable/disable  enter set PC  esc close"))
 	return lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
@@ -1199,8 +1280,20 @@ func (m Model) memView(w, h int) string {
 		b.WriteString(dimAddr.Render(fmt.Sprintf("$%04X:", base)))
 		var ascii strings.Builder
 		for col := 0; col < 16; col++ {
-			v := m.RAM.Read(base + uint16(col))
-			b.WriteString(fmt.Sprintf(" %02X", v))
+			a := base + uint16(col)
+			v := m.RAM.Read(a)
+			cell := fmt.Sprintf(" %02X", v)
+			if mbp, ok := m.MemBPs[a]; ok && mbp != nil {
+				switch mbp.Kind {
+				case MemBPRead:
+					cell = " " + memBPRead.Render(fmt.Sprintf("%02X", v))
+				case MemBPWrite:
+					cell = " " + memBPWrite.Render(fmt.Sprintf("%02X", v))
+				case MemBPReadWrite:
+					cell = " " + memBPRW.Render(fmt.Sprintf("%02X", v))
+				}
+			}
+			b.WriteString(cell)
 			if v >= 32 && v < 127 {
 				ascii.WriteByte(v)
 			} else {

@@ -194,6 +194,26 @@ func (m *Model) runCommand(line string) string {
 			return fmt.Sprintf("%d breakpoints", len(m.Breakpoints))
 		}
 		return m.cmdBP(args)
+	case "bpr":
+		return m.cmdMemBP(args, MemBPRead)
+	case "bpw":
+		return m.cmdMemBP(args, MemBPWrite)
+	case "bprw":
+		return m.cmdMemBP(args, MemBPReadWrite)
+	case "rmbpr", "rmbpw", "rmbprw":
+		if len(args) == 0 {
+			return "usage: :" + cmd + " ADDR"
+		}
+		addr, err := m.parseAddrSym(args[0])
+		if err != nil {
+			return err.Error()
+		}
+		if _, ok := m.MemBPs[addr]; !ok {
+			return fmt.Sprintf("no mem bp at $%04X", addr)
+		}
+		delete(m.MemBPs, addr)
+		m.saveState()
+		return fmt.Sprintf("mem bp -$%04X", addr)
 	case "help", "?":
 		m.ShowHelp = true
 		return "help"

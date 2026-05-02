@@ -13,6 +13,7 @@ import (
 // rich form.
 type savedState struct {
 	Breakpoints json.RawMessage `json:"breakpoints,omitempty"`
+	MemBPs      json.RawMessage `json:"mem_bps,omitempty"`
 	MemViewAddr uint16          `json:"mem_view_addr"`
 	Watches     []Watch         `json:"watches"`
 	TargetHz    int             `json:"target_hz"`
@@ -61,6 +62,31 @@ func loadState(m *Model, path string) {
 			m.Breakpoints[a] = newBP(a)
 		}
 	}
+	loadMemBPs(m, s.MemBPs)
+}
+
+// loadMemBPs populates m.MemBPs from the persisted JSON. Same condition
+// recompile dance as the exec breakpoint loader.
+func loadMemBPs(m *Model, raw json.RawMessage) {
+	if m.MemBPs == nil {
+		m.MemBPs = make(map[uint16]*MemBP)
+	}
+	if len(raw) == 0 {
+		return
+	}
+	var bps []MemBP
+	if err := json.Unmarshal(raw, &bps); err != nil {
+		return
+	}
+	for i := range bps {
+		b := bps[i]
+		if b.Cond != "" {
+			if fn, cerr := compileCondition(b.Cond, m.Syms); cerr == nil {
+				b.condFn = fn
+			}
+		}
+		m.MemBPs[b.Addr] = &b
+	}
 }
 
 // looksLikeBPArray returns true if the raw json is an array whose first
@@ -97,8 +123,20 @@ func (m *Model) saveState() {
 	if err != nil {
 		return
 	}
+	mbps := make([]MemBP, 0, len(m.MemBPs))
+	for _, bp := range m.MemBPs {
+		if bp == nil {
+			continue
+		}
+		mbps = append(mbps, *bp)
+	}
+	mraw, err := json.Marshal(mbps)
+	if err != nil {
+		return
+	}
 	s := savedState{
 		Breakpoints: raw,
+		MemBPs:      mraw,
 		MemViewAddr: m.MemViewAddr,
 		Watches:     m.Watches,
 		TargetHz:    m.TargetHz,
