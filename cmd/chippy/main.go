@@ -96,7 +96,14 @@ func main() {
 
 	c := cpu.New(ram)
 
-	model := tui.New(c, ram)
+	// Wrap the bus with WBus so memory watchpoints can intercept reads/writes.
+	// We construct CPU on raw RAM first (to keep cpu.New's signature simple),
+	// then swap c.Bus to the wrapper. WithWBus attaches the CPU pointer and
+	// hands the watch map to the wrapper.
+	wbus := tui.NewWBus(ram)
+	c.Bus = wbus
+
+	model := tui.New(c, ram).WithWBus(wbus)
 	if syms != nil {
 		model = model.WithSymbols(syms)
 	}

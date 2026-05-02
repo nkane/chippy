@@ -115,6 +115,28 @@ optional modifiers:
 State (breakpoints, watches, mem-view position, throttle) is persisted to
 `~/.chippy/state-<rom>.json` and restored on next launch.
 
+## Memory watchpoints
+
+Trigger when the CPU reads or writes a tracked address. Same modifier
+syntax as `:bp`.
+
+```
+:bpr  $0200                    break on any read of $0200
+:bpw  ram_flag                 break on write to symbol `ram_flag`
+:bprw $FFFC                    break on either
+:bpw  $0200 if A==$FF          conditional
+:bpw  score log score={[$0200]} PC={PC}    log point — never pauses
+:rmbpr $0200  /  :rmbpw  /  :rmbprw
+```
+
+Watched bytes are colored in the memory hex view:
+
+| Color  | Meaning           |
+|--------|-------------------|
+| Blue   | 👁  read watch    |
+| Red    | ✏  write watch    |
+| Magenta| 🔁 read + write   |
+
 ## Layout
 
 ```
