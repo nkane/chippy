@@ -352,9 +352,13 @@ Implements all official NMOS 6502 opcodes, including packed-BCD `ADC`/`SBC`
 when the `D` flag is set (NMOS semantics — the binary path drives N/V/Z and
 the decimal path drives C and A).
 
-Known gaps tracked as GitHub issues:
-
-- [#2](https://github.com/nkane/chippy/issues/2) — Unofficial / illegal opcodes (currently 1-byte NOPs)
+Stable undocumented ("illegal") opcodes are also implemented:
+`LAX`, `SAX`, `DCP`, `ISC`, `SLO`, `RLA`, `SRE`, `RRA`, `ANC`, `ALR`, `ARR`,
+`SBX`, the `SBC` alias at `$EB`, and the family of multi-byte/multi-cycle
+NOPs that real silicon decodes at undocumented slots. `RRA` and `ISC` honor
+decimal mode. The unstable opcodes (AHX/SHA, SHY, SHX, TAS, LAS, XAA, KIL/JAM)
+remain decoded as 1-byte NOPs since their behavior depends on bus capacitance
+or halts the CPU.
 
 ---
 
