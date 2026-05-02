@@ -348,10 +348,12 @@ modal opens with `?`.
 
 ## Status
 
-Implements all official NMOS 6502 opcodes. Known gaps tracked as GitHub
-issues:
+Implements all official NMOS 6502 opcodes, including packed-BCD `ADC`/`SBC`
+when the `D` flag is set (NMOS semantics — the binary path drives N/V/Z and
+the decimal path drives C and A).
 
-- [#1](https://github.com/nkane/chippy/issues/1) — Decimal mode (BCD) for `ADC`/`SBC` (flag tracked, math is binary)
+Known gaps tracked as GitHub issues:
+
 - [#2](https://github.com/nkane/chippy/issues/2) — Unofficial / illegal opcodes (currently 1-byte NOPs)
 
 ---

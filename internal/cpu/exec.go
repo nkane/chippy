@@ -74,11 +74,23 @@ func opBIT(c *CPU, addr uint16, m AddrMode) {
 	c.setFlag(FlagV, v&0x40 != 0)
 }
 
+// opADC — Add with Carry. Branches on the D flag for packed-BCD mode.
+// NMOS 6502 BCD semantics per Bruce Clark
+// (http://www.6502.org/tutorials/decimal_mode.html):
+//   - C is set correctly for the decimal result
+//   - Z reflects the *binary* result (so it's effectively undefined for BCD
+//     operands, matching real silicon behaviour)
+//   - N and V reflect the partially-adjusted high nibble (also "undefined"
+//     on NMOS but deterministic, and Bruce Clark's vectors check them)
 func opADC(c *CPU, addr uint16, m AddrMode) {
 	v := c.Bus.Read(addr)
 	carry := uint16(0)
 	if c.hasFlag(FlagC) {
 		carry = 1
+	}
+	if c.hasFlag(FlagD) {
+		adcDecimal(c, v, carry)
+		return
 	}
 	sum := uint16(c.A) + uint16(v) + carry
 	c.setFlag(FlagC, sum > 0xFF)
@@ -87,17 +99,73 @@ func opADC(c *CPU, addr uint16, m AddrMode) {
 	c.setZN(c.A)
 }
 
+// opSBC — Subtract with Carry (carry acts as ~borrow). Branches on D for BCD.
+// NMOS BCD: N/V/Z/C are computed from the *binary* path (matching real
+// hardware where those flags are documented as undefined but in fact reflect
+// the parallel binary subtract); A holds the decimal result.
 func opSBC(c *CPU, addr uint16, m AddrMode) {
-	v := c.Bus.Read(addr) ^ 0xFF
+	v := c.Bus.Read(addr)
 	carry := uint16(0)
 	if c.hasFlag(FlagC) {
 		carry = 1
 	}
-	sum := uint16(c.A) + uint16(v) + carry
+	if c.hasFlag(FlagD) {
+		sbcDecimal(c, v, carry)
+		return
+	}
+	w := v ^ 0xFF
+	sum := uint16(c.A) + uint16(w) + carry
 	c.setFlag(FlagC, sum > 0xFF)
-	c.setFlag(FlagV, (^(uint16(c.A)^uint16(v))&(uint16(c.A)^sum))&0x80 != 0)
+	c.setFlag(FlagV, (^(uint16(c.A)^uint16(w))&(uint16(c.A)^sum))&0x80 != 0)
 	c.A = byte(sum)
 	c.setZN(c.A)
+}
+
+// adcDecimal performs the NMOS packed-BCD ADC. carry is 0 or 1.
+func adcDecimal(c *CPU, v byte, carry uint16) {
+	a := uint16(c.A)
+	// Low nibble add with carry-in.
+	al := (a & 0x0F) + (uint16(v) & 0x0F) + carry
+	if al >= 0x0A {
+		al = ((al + 0x06) & 0x0F) + 0x10
+	}
+	// High nibble add (with the possibly-bumped low result already shifted).
+	ah := (a & 0xF0) + (uint16(v) & 0xF0) + al // signed-ish wide add
+	// N and V latched from the partially-adjusted AH.
+	c.setFlag(FlagN, ah&0x80 != 0)
+	c.setFlag(FlagV, ((a^ah)&^(a^uint16(v)))&0x80 != 0)
+	// Z reflects the binary sum (NMOS quirk).
+	bin := byte(a + uint16(v) + carry)
+	c.setFlag(FlagZ, bin == 0)
+	if ah >= 0xA0 {
+		ah += 0x60
+	}
+	c.setFlag(FlagC, ah >= 0x100)
+	c.A = byte(ah & 0xFF)
+}
+
+// sbcDecimal performs the NMOS packed-BCD SBC. carry is 0 or 1 (1 = no borrow).
+func sbcDecimal(c *CPU, v byte, carry uint16) {
+	a := int(c.A)
+	vi := int(v)
+	cin := int(carry)
+	// Decimal path — A result.
+	al := (a & 0x0F) - (vi & 0x0F) + cin - 1
+	if al < 0 {
+		al = ((al - 0x06) & 0x0F) - 0x10
+	}
+	res := (a & 0xF0) - (vi & 0xF0) + al
+	if res < 0 {
+		res -= 0x60
+	}
+	// Binary path drives all flags.
+	w := v ^ 0xFF
+	sum := uint16(c.A) + uint16(w) + carry
+	c.setFlag(FlagC, sum > 0xFF)
+	c.setFlag(FlagV, (^(uint16(c.A)^uint16(w))&(uint16(c.A)^sum))&0x80 != 0)
+	c.setFlag(FlagN, sum&0x80 != 0)
+	c.setFlag(FlagZ, byte(sum) == 0)
+	c.A = byte(res & 0xFF)
 }
 
 func cmp(c *CPU, reg, v byte) {
