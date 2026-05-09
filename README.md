@@ -1,6 +1,7 @@
 # chippy
 
 [![ci](https://github.com/nkane/chippy/actions/workflows/ci.yml/badge.svg)](https://github.com/nkane/chippy/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/nkane/chippy/branch/main/graph/badge.svg)](https://codecov.io/gh/nkane/chippy)
 [![release](https://img.shields.io/github/v/release/nkane/chippy?sort=semver)](https://github.com/nkane/chippy/releases)
 [![license](https://img.shields.io/github/license/nkane/chippy)](LICENSE)
 
