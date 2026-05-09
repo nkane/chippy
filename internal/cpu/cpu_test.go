@@ -38,20 +38,14 @@ func TestADC_BasicAndOverflow(t *testing.T) {
 }
 
 func TestJSR_RTS(t *testing.T) {
-	// $8000: JSR $8005 ; LDA #$01 ; BRK
-	// $8005: LDA #$AA ; RTS
+	// $8000: JSR $8006 ; LDA #$01 ; BRK
+	// $8006: LDA #$AA ; RTS
 	prog := []byte{
-		0x20, 0x05, 0x80, // JSR $8005
-		0xA9, 0x01,       // LDA #$01
-		0xA9, 0xAA, 0x60, // pad+ LDA #$AA ; RTS at $8005,$8006,$8007 -- adjust
-	}
-	// Actually rebuild precisely:
-	prog = []byte{
 		0x20, 0x06, 0x80, // 8000: JSR $8006
-		0xA9, 0x01,       // 8003: LDA #$01
-		0x00,             // 8005: BRK
-		0xA9, 0xAA,       // 8006: LDA #$AA
-		0x60,             // 8008: RTS
+		0xA9, 0x01, // 8003: LDA #$01
+		0x00,       // 8005: BRK
+		0xA9, 0xAA, // 8006: LDA #$AA
+		0x60, // 8008: RTS
 	}
 	c, _ := newTestCPU(prog)
 	c.Step() // JSR

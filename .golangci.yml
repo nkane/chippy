@@ -1,0 +1,41 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+  settings:
+    errcheck:
+      # Don't require checking errors on Fprintf/Println-style writes to
+      # bytes.Buffer / stdout — they cannot fail in practice and the noise
+      # isn't worth the readability hit.
+      exclude-functions:
+        - (*bytes.Buffer).WriteString
+        - (*bytes.Buffer).WriteByte
+        - (*bytes.Buffer).Write
+        - (*strings.Builder).WriteString
+        - (*strings.Builder).WriteByte
+        - (*strings.Builder).Write
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+        # Fire-and-forget Close on read-only files is idiomatic Go.
+        - (*os.File).Close
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -7,23 +7,25 @@
 //   - https://www.masswerk.at/6502/6502_instruction_set.html
 //
 // Implemented:
-//   LAX  — LDA + LDX (no flag-set surprises beyond setZN)
-//   SAX  — store (A & X), no flag changes
-//   DCP  — DEC then CMP
-//   ISC  — INC then SBC (also called ISB)
-//   SLO  — ASL then ORA
-//   RLA  — ROL then AND
-//   SRE  — LSR then EOR
-//   RRA  — ROR then ADC (decimal-aware via opADC's D-mode branch)
-//   ANC  — AND #imm; C := N (i.e. C := bit7 of result)
-//   ALR  — AND #imm then LSR A
-//   ARR  — AND #imm then ROR A; sets V and C from the result's bits 5/6
-//   SBX  — X := (A & X) - imm  (carry set if no borrow; flags from result)
-//   NOPs — multi-byte / multi-cycle no-ops at undocumented opcode slots
+//
+//	LAX  — LDA + LDX (no flag-set surprises beyond setZN)
+//	SAX  — store (A & X), no flag changes
+//	DCP  — DEC then CMP
+//	ISC  — INC then SBC (also called ISB)
+//	SLO  — ASL then ORA
+//	RLA  — ROL then AND
+//	SRE  — LSR then EOR
+//	RRA  — ROR then ADC (decimal-aware via opADC's D-mode branch)
+//	ANC  — AND #imm; C := N (i.e. C := bit7 of result)
+//	ALR  — AND #imm then LSR A
+//	ARR  — AND #imm then ROR A; sets V and C from the result's bits 5/6
+//	SBX  — X := (A & X) - imm  (carry set if no borrow; flags from result)
+//	NOPs — multi-byte / multi-cycle no-ops at undocumented opcode slots
 //
 // Unstable opcodes (silicon-dependent on bus capacitance / hi-byte+1 ANDs)
 // remain decoded as plain NOPs:
-//   AHX/SHA, SHY, SHX, TAS/SHS, LAS/LAR, XAA/ANE, KIL/JAM
+//
+//	AHX/SHA, SHY, SHX, TAS/SHS, LAS/LAR, XAA/ANE, KIL/JAM
 //
 // These cannot be reliably emulated and no widely-used software depends on
 // them. They occupy 1 byte by default and consume 2 cycles, which matches
@@ -154,8 +156,10 @@ func opALR(c *CPU, addr uint16, _ AddrMode) {
 }
 
 // opARR: A := ROR(A & imm). Then a C/V quirk:
-//   C := bit 6 of result
-//   V := bit 6 XOR bit 5 of result
+//
+//	C := bit 6 of result
+//	V := bit 6 XOR bit 5 of result
+//
 // (Decimal-mode ARR has even weirder behaviour; we implement the binary
 // case here. Real software almost never uses ARR in decimal mode.)
 func opARR(c *CPU, addr uint16, _ AddrMode) {

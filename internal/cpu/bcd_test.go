@@ -15,11 +15,11 @@ func runBCD(op byte, a, imm byte, carryIn bool) (out byte, cOut, vOut, nOut, zOu
 
 func TestBCD_ADC_AcceptanceVectors(t *testing.T) {
 	cases := []struct {
-		name             string
-		a, imm           byte
-		carryIn          bool
-		wantA            byte
-		wantC            bool
+		name    string
+		a, imm  byte
+		carryIn bool
+		wantA   byte
+		wantC   bool
 	}{
 		// From issue acceptance criteria.
 		{"15+27=42 no carry", 0x15, 0x27, false, 0x42, false},
@@ -47,11 +47,11 @@ func TestBCD_ADC_AcceptanceVectors(t *testing.T) {
 func TestBCD_SBC_AcceptanceVectors(t *testing.T) {
 	// Note: SBC carry-in semantics — C=1 means "no borrow", C=0 means borrow.
 	cases := []struct {
-		name             string
-		a, imm           byte
-		carryIn          bool
-		wantA            byte
-		wantC            bool
+		name    string
+		a, imm  byte
+		carryIn bool
+		wantA   byte
+		wantC   bool
 	}{
 		// From issue acceptance criteria.
 		{"50-25=25 no borrow", 0x50, 0x25, true, 0x25, true},

@@ -270,11 +270,6 @@ func (p *condParser) accept(k tokKind) bool {
 	}
 	return false
 }
-func (p *condParser) eat() tok {
-	t := p.toks[p.pos]
-	p.pos++
-	return t
-}
 
 // or := and ('||' and)*
 func (p *condParser) parseOr() (evalFn, error) {

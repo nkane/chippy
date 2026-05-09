@@ -21,7 +21,6 @@ var (
 	flagOn     = lipgloss.NewStyle().Foreground(lipgloss.Color("46")).Bold(true)
 	flagOff    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	curLine    = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("226")).Bold(true)
-	bpLine     = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
 	help       = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true)
 	statusBar  = lipgloss.NewStyle().Background(lipgloss.Color("57")).Foreground(lipgloss.Color("231")).Padding(0, 1)
 	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("207")).Bold(true)
@@ -66,10 +65,10 @@ type Model struct {
 	BPCursor int // selected row in BP manager
 
 	// Source view
-	ShowSource  bool                       // toggle source panel vs disassembly
-	SourceFiles map[string][]string        // filename -> lines (1-indexed via [i-1])
-	PCToSrc     map[uint16]symbols.SrcLoc  // PC -> (file, line)
-	DataRanges  []symbols.Range            // [start,end) regions to render as .byte
+	ShowSource  bool                      // toggle source panel vs disassembly
+	SourceFiles map[string][]string       // filename -> lines (1-indexed via [i-1])
+	PCToSrc     map[uint16]symbols.SrcLoc // PC -> (file, line)
+	DataRanges  []symbols.Range           // [start,end) regions to render as .byte
 
 	// Watch list
 	Watches []Watch
@@ -101,12 +100,10 @@ type disasmCacheEntry struct {
 	addrs        []uint16
 }
 
-type srcLoc = symbols.SrcLoc
-
 func New(c *cpu.CPU, r *cpu.RAM) Model {
 	return Model{
-		CPU:         c,
-		RAM:         r,
+		CPU:          c,
+		RAM:          r,
 		Breakpoints:  map[uint16]*Breakpoint{},
 		MemBPs:       map[uint16]*MemBP{},
 		MemViewAddr:  0x0000,
@@ -916,9 +913,9 @@ func (m Model) watchView(w, h int) string {
 				name = fmt.Sprintf("$%04X", wt.Addr)
 			}
 		}
-		b.WriteString(fmt.Sprintf("%s %s\n",
+		fmt.Fprintf(&b, "%s %s\n",
 			dimAddr.Render(fmt.Sprintf("%-10s", name)),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Bold(true).Render(val)))
+			lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Bold(true).Render(val))
 	}
 	return fitPanel("Watch", strings.TrimRight(b.String(), "\n"), w, h)
 }
@@ -962,7 +959,7 @@ func (m Model) stackView(w, h int) string {
 		if i == 0 {
 			marker = curLine.Render(" >")
 		}
-		b.WriteString(fmt.Sprintf("%s %s  %02X\n", marker, dimAddr.Render(fmt.Sprintf("$%04X", sp)), m.RAM.Read(sp)))
+		fmt.Fprintf(&b, "%s %s  %02X\n", marker, dimAddr.Render(fmt.Sprintf("$%04X", sp)), m.RAM.Read(sp))
 	}
 	return fitPanel("Stack", strings.TrimRight(b.String(), "\n"), w, h)
 }
@@ -1020,8 +1017,8 @@ func (m Model) disasmView(w, h int) string {
 		// Wide emoji (2 cells) consumes the marker slot; we drop the leading
 		// space to keep the address column aligned with non-PC rows.
 		var marker string
-		switch {
-		case a == pc:
+		switch a {
+		case pc:
 			marker = "\U0001F449"
 		default:
 			if bp, ok := m.Breakpoints[a]; ok {
@@ -1083,7 +1080,6 @@ func walkBack(ram cpu.Bus, pc uint16, n int) []uint16 {
 		return nil
 	}
 	const maxLook = 64 // bytes of lookback
-	bestStart := pc
 	bestSeq := []uint16{}
 	for back := 1; back <= maxLook; back++ {
 		if int(pc)-back < 0 {
@@ -1111,8 +1107,6 @@ func walkBack(ram cpu.Bus, pc uint16, n int) []uint16 {
 		// Prefer sequences with more instructions (closer to a stable boundary).
 		if len(seq) > len(bestSeq) {
 			bestSeq = seq
-			bestStart = start
-			_ = bestStart
 			if len(bestSeq) >= n {
 				break
 			}
@@ -1244,8 +1238,8 @@ func (m Model) sourceView(w, h int) string {
 	for i := start; i < end; i++ {
 		lineNum := i + 1
 		var marker string
-		switch {
-		case lineNum == loc.Line:
+		switch lineNum {
+		case loc.Line:
 			marker = "\U0001F449"
 		default:
 			if bp, ok := bpLines[lineNum]; ok {
