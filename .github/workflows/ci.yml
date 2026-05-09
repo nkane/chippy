@@ -32,6 +32,7 @@ jobs:
         run: go build ./...
 
       - name: go test
+        shell: bash
         run: go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage to Codecov
