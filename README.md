@@ -1,5 +1,9 @@
 # chippy
 
+[![ci](https://github.com/nkane/chippy/actions/workflows/ci.yml/badge.svg)](https://github.com/nkane/chippy/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/nkane/chippy?sort=semver)](https://github.com/nkane/chippy/releases)
+[![license](https://img.shields.io/github/license/nkane/chippy)](LICENSE)
+
 A TUI 6502 emulator and debugger, written in Go.
 
 `chippy` emulates the NMOS 6502 CPU and presents a terminal UI built with
