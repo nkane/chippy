@@ -13,8 +13,8 @@ type RAM struct {
 
 func NewRAM() *RAM { return &RAM{} }
 
-func (r *RAM) Read(addr uint16) byte       { return r.Data[addr] }
-func (r *RAM) Write(addr uint16, v byte)   { r.Data[addr] = v }
+func (r *RAM) Read(addr uint16) byte     { return r.Data[addr] }
+func (r *RAM) Write(addr uint16, v byte) { r.Data[addr] = v }
 
 // Load copies bytes into RAM at addr.
 func (r *RAM) Load(addr uint16, data []byte) {

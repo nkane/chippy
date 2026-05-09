@@ -152,7 +152,7 @@ func (m *Model) runCommand(line string) string {
 			}
 			out := m.Watches[:0]
 			for _, w := range m.Watches {
-				if !(w.Kind == "reg" && w.Reg == reg) {
+				if w.Kind != "reg" || w.Reg != reg {
 					out = append(out, w)
 				}
 			}

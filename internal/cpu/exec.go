@@ -177,12 +177,20 @@ func opCMP(c *CPU, addr uint16, m AddrMode) { cmp(c, c.A, c.Bus.Read(addr)) }
 func opCPX(c *CPU, addr uint16, m AddrMode) { cmp(c, c.X, c.Bus.Read(addr)) }
 func opCPY(c *CPU, addr uint16, m AddrMode) { cmp(c, c.Y, c.Bus.Read(addr)) }
 
-func opINC(c *CPU, addr uint16, m AddrMode) { v := c.Bus.Read(addr) + 1; c.Bus.Write(addr, v); c.setZN(v) }
-func opDEC(c *CPU, addr uint16, m AddrMode) { v := c.Bus.Read(addr) - 1; c.Bus.Write(addr, v); c.setZN(v) }
-func opINX(c *CPU, _ uint16, _ AddrMode)    { c.X++; c.setZN(c.X) }
-func opINY(c *CPU, _ uint16, _ AddrMode)    { c.Y++; c.setZN(c.Y) }
-func opDEX(c *CPU, _ uint16, _ AddrMode)    { c.X--; c.setZN(c.X) }
-func opDEY(c *CPU, _ uint16, _ AddrMode)    { c.Y--; c.setZN(c.Y) }
+func opINC(c *CPU, addr uint16, m AddrMode) {
+	v := c.Bus.Read(addr) + 1
+	c.Bus.Write(addr, v)
+	c.setZN(v)
+}
+func opDEC(c *CPU, addr uint16, m AddrMode) {
+	v := c.Bus.Read(addr) - 1
+	c.Bus.Write(addr, v)
+	c.setZN(v)
+}
+func opINX(c *CPU, _ uint16, _ AddrMode) { c.X++; c.setZN(c.X) }
+func opINY(c *CPU, _ uint16, _ AddrMode) { c.Y++; c.setZN(c.Y) }
+func opDEX(c *CPU, _ uint16, _ AddrMode) { c.X--; c.setZN(c.X) }
+func opDEY(c *CPU, _ uint16, _ AddrMode) { c.Y--; c.setZN(c.Y) }
 
 func opASL(c *CPU, addr uint16, m AddrMode) {
 	v := c.load(addr, m)

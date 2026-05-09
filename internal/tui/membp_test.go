@@ -39,9 +39,10 @@ func progStaThenLda(ram *cpu.RAM) {
 }
 
 // progLoopWrites writes #$05 to $0210 four times in a row, then BRK.
-//   LDA #$05
-//   STA $0210 ; x4
-//   BRK
+//
+//	LDA #$05
+//	STA $0210 ; x4
+//	BRK
 func progLoopWrites(ram *cpu.RAM) {
 	p := uint16(0x0200)
 	ram.Write(p, 0xA9)
