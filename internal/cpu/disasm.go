@@ -61,6 +61,14 @@ func DisasmWithSyms(bus Bus, addr uint16, sym SymLookup) (string, int) {
 		operand = fmt.Sprintf("(%s,X)", name(uint16(b1), fmt.Sprintf("$%02X", b1)))
 	case IZY:
 		operand = fmt.Sprintf("(%s),Y", name(uint16(b1), fmt.Sprintf("$%02X", b1)))
+	case IZP:
+		operand = fmt.Sprintf("(%s)", name(uint16(b1), fmt.Sprintf("$%02X", b1)))
+	case IAX:
+		t := uint16(b2)<<8 | uint16(b1)
+		operand = fmt.Sprintf("(%s,X)", name(t, fmt.Sprintf("$%04X", t)))
+	case ZPR:
+		target := uint16(int32(addr+3) + int32(int8(b2)))
+		operand = fmt.Sprintf("$%02X,%s", b1, name(target, fmt.Sprintf("$%04X", target)))
 	}
 
 	if in.Bytes == 1 {

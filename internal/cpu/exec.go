@@ -10,7 +10,7 @@ func (c *CPU) Step() int {
 	startPC := c.PC
 	op := c.Bus.Read(c.PC)
 	c.PC++
-	in := Opcodes[op]
+	in := c.opcodes[op]
 	addr, pageCrossed := c.resolve(in.Mode)
 	c.extraCycles = 0
 	in.Exec(c, addr, in.Mode)
@@ -90,7 +90,11 @@ func opADC(c *CPU, addr uint16, m AddrMode) {
 		carry = 1
 	}
 	if c.hasFlag(FlagD) {
-		adcDecimal(c, v, carry)
+		if c.Variant == VariantCMOS65C02 {
+			adcDecimalCMOS(c, v, carry)
+		} else {
+			adcDecimal(c, v, carry)
+		}
 		return
 	}
 	sum := uint16(c.A) + uint16(v) + carry
@@ -111,7 +115,11 @@ func opSBC(c *CPU, addr uint16, m AddrMode) {
 		carry = 1
 	}
 	if c.hasFlag(FlagD) {
-		sbcDecimal(c, v, carry)
+		if c.Variant == VariantCMOS65C02 {
+			sbcDecimalCMOS(c, v, carry)
+		} else {
+			sbcDecimal(c, v, carry)
+		}
 		return
 	}
 	w := v ^ 0xFF

@@ -99,6 +99,7 @@ Flags:
 | `-cfg`   | —       | ld65 linker config (required for `.o`)                 |
 | `-dbg`   | auto    | cc65 `.dbg` symbol file; `<rom>.dbg` is tried by default |
 | `-reset` | `0`     | Override reset vector. `0` keeps the existing `$FFFC/D` bytes (or falls back to the load address if those are zero) |
+| `--cpu`  | `nmos`  | CPU variant: `nmos` (MOS 6502) or `65c02` (WDC/Rockwell CMOS) |
 
 Examples:
 

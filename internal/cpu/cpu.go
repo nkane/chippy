@@ -19,12 +19,30 @@ const (
 	VecIRQ   uint16 = 0xFFFE
 )
 
-// CPU is an NMOS 6502.
+// Variant selects which opcode table the CPU executes.
+type Variant int
+
+const (
+	VariantNMOS      Variant = iota // MOS 6502 (default)
+	VariantCMOS65C02                // WDC/Rockwell 65C02
+)
+
+func (v Variant) String() string {
+	switch v {
+	case VariantCMOS65C02:
+		return "65c02"
+	default:
+		return "nmos"
+	}
+}
+
+// CPU is a 6502-family processor (NMOS or CMOS 65C02 per Variant).
 type CPU struct {
 	A, X, Y, SP, P byte
 	PC             uint16
 	Cycles         uint64
 	Bus            Bus
+	Variant        Variant
 
 	// Debug helpers
 	Halted bool
@@ -32,15 +50,36 @@ type CPU struct {
 	// extraCycles is set by handlers (e.g. taken branches) to add to the
 	// instruction's base cycle count for the current Step. Reset each Step.
 	extraCycles int
+
+	// opcodes is the active opcode table; chosen from Variant in New/Reset.
+	opcodes *[256]Instr
 }
 
 func New(bus Bus) *CPU {
-	c := &CPU{Bus: bus}
+	return NewVariant(bus, VariantNMOS)
+}
+
+// NewVariant constructs a CPU with the given variant.
+func NewVariant(bus Bus, v Variant) *CPU {
+	c := &CPU{Bus: bus, Variant: v}
+	c.bindTable()
 	c.Reset()
 	return c
 }
 
+func (c *CPU) bindTable() {
+	switch c.Variant {
+	case VariantCMOS65C02:
+		c.opcodes = &OpcodesCMOS
+	default:
+		c.opcodes = &Opcodes
+	}
+}
+
 func (c *CPU) Reset() {
+	if c.opcodes == nil {
+		c.bindTable()
+	}
 	c.A, c.X, c.Y = 0, 0, 0
 	c.SP = 0xFD
 	c.P = FlagU | FlagI
