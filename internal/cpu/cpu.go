@@ -53,6 +53,16 @@ type CPU struct {
 
 	// opcodes is the active opcode table; chosen from Variant in New/Reset.
 	opcodes *[256]Instr
+
+	// Interrupt lines.
+	//   - irqLine: level-triggered. While true and FlagI is clear, IRQ
+	//     fires at every instruction boundary.
+	//   - nmiPending: edge-triggered latch. TriggerNMI sets it; the
+	//     dispatcher clears it after servicing. Holding the line asserted
+	//     does NOT cause repeated NMIs — the caller must call TriggerNMI
+	//     again (matching real silicon's edge sensitivity).
+	irqLine    bool
+	nmiPending bool
 }
 
 func New(bus Bus) *CPU {
@@ -125,7 +135,24 @@ func (c *CPU) pop16() uint16 {
 }
 
 // IRQ / NMI
-func (c *CPU) NMI() {
+
+// AssertIRQ raises the IRQ line. While asserted and FlagI is clear, the
+// interrupt is taken at the end of every instruction. Peripherals call
+// AssertIRQ when their condition is active and ReleaseIRQ when cleared.
+func (c *CPU) AssertIRQ()  { c.irqLine = true }
+func (c *CPU) ReleaseIRQ() { c.irqLine = false }
+
+// IRQAsserted reports whether the IRQ line is currently held.
+func (c *CPU) IRQAsserted() bool { return c.irqLine }
+
+// TriggerNMI latches a non-maskable interrupt. Edge-triggered: the
+// dispatcher takes the interrupt once, then clears the latch. Calling
+// TriggerNMI repeatedly while one is already pending coalesces into a
+// single NMI.
+func (c *CPU) TriggerNMI() { c.nmiPending = true }
+
+// serviceNMI performs the 7-cycle NMI vector dispatch.
+func (c *CPU) serviceNMI() {
 	c.push16(c.PC)
 	c.push((c.P | FlagU) &^ FlagB)
 	c.setFlag(FlagI, true)
@@ -133,12 +160,12 @@ func (c *CPU) NMI() {
 	hi := uint16(c.Bus.Read(VecNMI + 1))
 	c.PC = lo | hi<<8
 	c.Cycles += 7
+	c.nmiPending = false
 }
 
-func (c *CPU) IRQ() {
-	if c.hasFlag(FlagI) {
-		return
-	}
+// serviceIRQ performs the 7-cycle IRQ vector dispatch. Caller must have
+// already verified FlagI is clear.
+func (c *CPU) serviceIRQ() {
 	c.push16(c.PC)
 	c.push((c.P | FlagU) &^ FlagB)
 	c.setFlag(FlagI, true)
