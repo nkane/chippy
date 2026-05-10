@@ -3,7 +3,29 @@ package cpu
 // Step executes one instruction. Returns cycles consumed.
 // If the instruction is an infinite tight loop (PC unchanged afterwards) the
 // CPU is marked Halted so callers can stop free-running.
+//
+// Pending interrupts are serviced at the instruction boundary BEFORE the
+// next opcode is fetched. NMI is checked first (always taken) then IRQ
+// (only if FlagI is clear). Servicing an interrupt clears Halted so a
+// program spinning in a wait-loop can be woken by a peripheral.
 func (c *CPU) Step() int {
+	// Service pending interrupts at the boundary. An interrupt service is
+	// itself a 7-cycle operation; we do NOT also execute an instruction in
+	// the same Step. The next call to Step will fetch the first opcode of
+	// the handler.
+	if c.nmiPending {
+		c.Halted = false
+		before := c.Cycles
+		c.serviceNMI()
+		return int(c.Cycles - before)
+	}
+	if c.irqLine && !c.hasFlag(FlagI) {
+		c.Halted = false
+		before := c.Cycles
+		c.serviceIRQ()
+		return int(c.Cycles - before)
+	}
+
 	if c.Halted {
 		return 0
 	}
