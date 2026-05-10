@@ -28,6 +28,10 @@ type CPU struct {
 
 	// Debug helpers
 	Halted bool
+
+	// extraCycles is set by handlers (e.g. taken branches) to add to the
+	// instruction's base cycle count for the current Step. Reset each Step.
+	extraCycles int
 }
 
 func New(bus Bus) *CPU {

@@ -12,8 +12,9 @@ func (c *CPU) Step() int {
 	c.PC++
 	in := Opcodes[op]
 	addr, pageCrossed := c.resolve(in.Mode)
+	c.extraCycles = 0
 	in.Exec(c, addr, in.Mode)
-	cycles := in.Cycles
+	cycles := in.Cycles + c.extraCycles
 	if in.PageAdd && pageCrossed {
 		cycles++
 	}
@@ -245,9 +246,9 @@ func branch(c *CPU, addr uint16, take bool) {
 		return
 	}
 	// extra cycle, +1 if page crossed
-	c.Cycles++
+	c.extraCycles++
 	if (c.PC & 0xFF00) != (addr & 0xFF00) {
-		c.Cycles++
+		c.extraCycles++
 	}
 	c.PC = addr
 }
