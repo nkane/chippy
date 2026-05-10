@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -20,8 +21,20 @@ func main() {
 		resetVec = flag.Uint("reset", 0, "reset vector override (0 = use file's existing vector or load address)")
 		cfg      = flag.String("cfg", "", "ld65 linker config (.cfg) — required when loading .o files")
 		dbgPath  = flag.String("dbg", "", "cc65 .dbg symbol file (auto-detected as <rom>.dbg if omitted)")
+		cpuFlag  = flag.String("cpu", "nmos", "CPU variant: nmos | 65c02")
 	)
 	flag.Parse()
+
+	variant := cpu.VariantNMOS
+	switch strings.ToLower(*cpuFlag) {
+	case "nmos", "6502":
+		variant = cpu.VariantNMOS
+	case "65c02", "cmos", "cmos65c02":
+		variant = cpu.VariantCMOS65C02
+	default:
+		fmt.Fprintf(os.Stderr, "unknown -cpu value %q (want nmos or 65c02)\n", *cpuFlag)
+		os.Exit(2)
+	}
 
 	ram := cpu.NewRAM()
 	var loaded *loader.Result
@@ -94,7 +107,7 @@ func main() {
 		}
 	}
 
-	c := cpu.New(ram)
+	c := cpu.NewVariant(ram, variant)
 
 	// Wrap the bus with WBus so memory watchpoints can intercept reads/writes.
 	// We construct CPU on raw RAM first (to keep cpu.New's signature simple),

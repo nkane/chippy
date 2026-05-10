@@ -17,6 +17,9 @@ const (
 	IND                 // (indirect)
 	IZX                 // (indirect,X)
 	IZY                 // (indirect),Y
+	IZP                 // (zero page) — 65C02
+	IAX                 // (absolute,X) — 65C02 JMP
+	ZPR                 // zp, rel — 65C02 BBR/BBS (3 bytes)
 )
 
 // resolve fetches operand address (and pageCrossed) for a given mode.
@@ -65,9 +68,16 @@ func (c *CPU) resolve(m AddrMode) (addr uint16, pageCrossed bool) {
 		hi := uint16(c.Bus.Read(c.PC + 1))
 		c.PC += 2
 		ptr := lo | hi<<8
-		// 6502 page-wrap bug
-		loAddr := uint16(c.Bus.Read(ptr))
-		hiAddr := uint16(c.Bus.Read((ptr & 0xFF00) | uint16(byte(ptr)+1)))
+		var loAddr, hiAddr uint16
+		if c.Variant == VariantCMOS65C02 {
+			// CMOS fixed the page-wrap bug.
+			loAddr = uint16(c.Bus.Read(ptr))
+			hiAddr = uint16(c.Bus.Read(ptr + 1))
+		} else {
+			// NMOS 6502 page-wrap bug.
+			loAddr = uint16(c.Bus.Read(ptr))
+			hiAddr = uint16(c.Bus.Read((ptr & 0xFF00) | uint16(byte(ptr)+1)))
+		}
 		addr = loAddr | hiAddr<<8
 	case IZX:
 		zp := c.Bus.Read(c.PC) + c.X
@@ -83,6 +93,38 @@ func (c *CPU) resolve(m AddrMode) (addr uint16, pageCrossed bool) {
 		base := lo | hi<<8
 		addr = base + uint16(c.Y)
 		pageCrossed = (base & 0xFF00) != (addr & 0xFF00)
+	case IZP:
+		// 65C02: (zp) — like IZY/IZX but no register offset.
+		zp := c.Bus.Read(c.PC)
+		c.PC++
+		lo := uint16(c.Bus.Read(uint16(zp)))
+		hi := uint16(c.Bus.Read(uint16(zp + 1)))
+		addr = lo | hi<<8
+	case IAX:
+		// 65C02: (abs,X) — used by JMP. No page-wrap bug.
+		lo := uint16(c.Bus.Read(c.PC))
+		hi := uint16(c.Bus.Read(c.PC + 1))
+		c.PC += 2
+		ptr := (lo | hi<<8) + uint16(c.X)
+		loAddr := uint16(c.Bus.Read(ptr))
+		hiAddr := uint16(c.Bus.Read(ptr + 1))
+		addr = loAddr | hiAddr<<8
+	case ZPR:
+		// 65C02: BBR/BBS — opcode + zp byte + rel byte. We resolve the
+		// branch target here; the bit-test address lives at zp.
+		// The handler itself reads c.Bus at zp; we encode zp in the low
+		// byte of addr and the target PC in... no — we need both. Simpler:
+		// the handler uses two reads off PC directly. Resolve consumes
+		// both bytes and returns target; handler peeks back -2 for zp.
+		// To keep handler-side simple, we use c.PC pre-resolve sentinel:
+		// Actually easiest: don't use ZPR through resolve; let the handler
+		// read directly. Mark addr=0 here and have handler do its own
+		// fetch using c.PC.
+		// We DO need to advance PC by 2 (zp byte + rel byte) so Step
+		// gets the right post-instruction PC for branch math.
+		// But the handler needs the original PC to read zp/rel. So leave
+		// PC alone and let the handler advance it.
+		return 0, false
 	}
 	return
 }
