@@ -374,6 +374,19 @@ Implements all official NMOS 6502 opcodes, including packed-BCD `ADC`/`SBC`
 when the `D` flag is set (NMOS semantics — the binary path drives N/V/Z and
 the decimal path drives C and A).
 
+Verified against [Klaus Dormann's 6502 functional test
+suite](https://github.com/Klaus2m5/6502_65C02_functional_tests) (the
+de-facto correctness gold standard for 6502 emulators) — passes the full
+~30M-instruction sweep. Run locally with:
+
+```sh
+go test -tags=klaus -timeout 5m -run TestKlaus ./internal/cpu/...
+```
+
+The ROM is GPL-3.0 so it is downloaded on demand into the user cache dir
+on first run rather than vendored. Set `CHIPPY_KLAUS_BIN=/path/to/rom` to
+use a local copy.
+
 Stable undocumented ("illegal") opcodes are also implemented:
 `LAX`, `SAX`, `DCP`, `ISC`, `SLO`, `RLA`, `SRE`, `RRA`, `ANC`, `ALR`, `ARR`,
 `SBX`, the `SBC` alias at `$EB`, and the family of multi-byte/multi-cycle
