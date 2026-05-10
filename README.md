@@ -67,10 +67,11 @@ programs.
 # Load and let chippy invoke ld65 for you
 ./chippy -rom program.o -cfg linker.cfg
 
-# Try the bundled example
+# Try the bundled examples (see example/README.md for descriptions)
 cd example
-make                              # produces load_five.bin + load_five.dbg
+make                              # builds every demo .bin + .dbg
 ../chippy -rom load_five.bin
+../chippy -rom fibonacci.bin      # or count_to_ten / stack_demo / bcd_add
 ```
 
 Once it's running, press `?` for an in-app help modal, or `:` to open the
@@ -403,7 +404,7 @@ internal/cpu/       6502 core: CPU, RAM, opcodes, disassembler
 internal/loader/    .bin/.prg/.hex/.o loaders
 internal/symbols/   cc65 .dbg parser, symbol + source-line tables
 internal/tui/       Bubble Tea model, panels, modals, commands
-example/            Bundled load_five demo (ca65 source + Makefile)
+example/            Bundled ca65 demo programs (source + shared linker cfg + Makefile)
 ```
 
 ---
