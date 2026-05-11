@@ -1211,7 +1211,7 @@ func (m Model) disasmView(w, h int) string {
 				}
 			}
 		}
-		text, _ := cpu.DisasmWithSyms(m.RAM, a, lookup)
+		text, _ := cpu.DisasmCPUWithSyms(m.CPU, a, lookup)
 		if m.isDataAddr(a) {
 			text = fmt.Sprintf(".byte $%02X", m.RAM.Read(a))
 		}
@@ -1248,9 +1248,9 @@ func (m Model) disasmView(w, h int) string {
 // alignment that produces the longest contiguous decode that lands exactly on
 // pc. This works well for normal code; it can mis-align in data regions, but
 // the worst case is a few wrong lines at the top of the window.
-func disasmAddrsAround(ram cpu.Bus, pc uint16, above, below int, isData func(uint16) bool) []uint16 {
+func disasmAddrsAround(c *cpu.CPU, pc uint16, above, below int, isData func(uint16) bool) []uint16 {
 	// Walk back collecting instruction starts.
-	back := walkBack(ram, pc, above)
+	back := walkBack(c, pc, above)
 	addrs := append([]uint16{}, back...)
 	addrs = append(addrs, pc)
 	// Walk forward from PC.
@@ -1260,7 +1260,7 @@ func disasmAddrsAround(ram cpu.Bus, pc uint16, above, below int, isData func(uin
 		if isData != nil && isData(cur) {
 			step = 1
 		} else {
-			_, n := cpu.DisasmWithSyms(ram, cur, nil)
+			_, n := cpu.DisasmCPUWithSyms(c, cur, nil)
 			step = uint32(n)
 		}
 		next := uint32(cur) + step
@@ -1277,7 +1277,7 @@ func disasmAddrsAround(ram cpu.Bus, pc uint16, above, below int, isData func(uin
 // `pc`, in ascending order. Strategy: try every starting offset 1..MaxLook
 // behind pc; the alignment that decodes cleanly all the way to pc with the
 // most instructions wins.
-func walkBack(ram cpu.Bus, pc uint16, n int) []uint16 {
+func walkBack(c *cpu.CPU, pc uint16, n int) []uint16 {
 	if n <= 0 || pc == 0 {
 		return nil
 	}
@@ -1295,7 +1295,7 @@ func walkBack(ram cpu.Bus, pc uint16, n int) []uint16 {
 		ok := true
 		for cur < pc {
 			seq = append(seq, cur)
-			_, sz := cpu.DisasmWithSyms(ram, cur, nil)
+			_, sz := cpu.DisasmCPUWithSyms(c, cur, nil)
 			next := uint32(cur) + uint32(sz)
 			if next > uint32(pc) {
 				ok = false
@@ -1332,7 +1332,7 @@ func (m Model) cachedDisasmAddrs(anchor uint16, above, below int) []uint16 {
 		disasmCacheGlobal.below == below {
 		return disasmCacheGlobal.addrs
 	}
-	addrs := disasmAddrsAround(m.RAM, anchor, above, below, m.isDataAddr)
+	addrs := disasmAddrsAround(m.CPU, anchor, above, below, m.isDataAddr)
 	disasmCacheGlobal = disasmCacheEntry{anchor: anchor, above: above, below: below, addrs: addrs}
 	return addrs
 }
@@ -1378,7 +1378,7 @@ func (m *Model) disasmScroll(delta int) {
 		}
 	} else if delta < 0 {
 		// Walk back |delta| instructions using same heuristic as walkBack.
-		back := walkBack(m.RAM, a, -delta)
+		back := walkBack(m.CPU, a, -delta)
 		if len(back) > 0 {
 			a = back[0]
 		} else if a > 0 {
