@@ -378,6 +378,13 @@ auto-scrolls). Press `e` at the cursor to poke a byte: type 1–2 hex digits,
 Enter commits, Esc cancels. Edits are runtime-only — `R` (reset) reloads
 the original program bytes.
 
+The command prompt (`:`) remembers up to 100 entries in `~/.chippy/history`.
+Up / Down walk recent commands; Tab completes the verb (when there's no
+space yet) or the symbol after `:bp` / `:goto` / `:watch` etc.; Ctrl-R
+opens a reverse-incremental search through history — each keystroke
+narrows the match, Ctrl-R again walks to the next older one, Esc restores
+the original line, Enter accepts.
+
 ---
 
 ## Status

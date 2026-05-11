@@ -151,7 +151,8 @@ func main() {
 		WithWBus(wbus).
 		WithTextOutput(textOut).
 		WithKeyboard(keyIn).
-		WithTracer(tracer)
+		WithTracer(tracer).
+		WithHistoryPath(tui.DefaultHistoryPath())
 	if syms != nil {
 		model = model.WithSymbols(syms)
 	}

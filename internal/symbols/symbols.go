@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -51,6 +52,22 @@ func (t *Table) LookupName(name string) (uint16, bool) {
 
 // Has reports whether any symbols are loaded.
 func (t *Table) Has() bool { return t != nil && len(t.byAddr) > 0 }
+
+// NamesWithPrefix returns all symbol names whose string starts with prefix,
+// sorted lexicographically. Used for tab-completion in the TUI prompt.
+func (t *Table) NamesWithPrefix(prefix string) []string {
+	if t == nil {
+		return nil
+	}
+	out := make([]string, 0, 16)
+	for name := range t.byName {
+		if strings.HasPrefix(name, prefix) {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
 
 // LoadDbg parses a cc65 .dbg file and returns a populated Table.
 func LoadDbg(path string) (*Table, error) {
