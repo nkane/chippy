@@ -53,6 +53,16 @@ type Server struct {
 	running        atomic.Bool
 	pauseRequested atomic.Bool
 	runDone        chan struct{}
+
+	// Breakpoint state. bpsBySrc maps source path -> line -> resolved PC;
+	// bpsInst is the address-breakpoint set. bpHit is the flattened
+	// PC-set the run loop checks each iteration (recomputed on every
+	// set request). All three are guarded by bpMu since setBreakpoints
+	// may arrive while the run loop is reading bpHit.
+	bpMu     sync.Mutex
+	bpsBySrc map[string]map[int]uint16
+	bpsInst  map[uint16]bool
+	bpHit    map[uint16]bool
 }
 
 // NewServer wires the transport to a fresh Server. r/w must point at the
@@ -60,8 +70,11 @@ type Server struct {
 // in tcp mode.
 func NewServer(r io.Reader, w io.Writer) *Server {
 	return &Server{
-		in:  bufio.NewReader(r),
-		out: w,
+		in:       bufio.NewReader(r),
+		out:      w,
+		bpsBySrc: map[string]map[int]uint16{},
+		bpsInst:  map[uint16]bool{},
+		bpHit:    map[uint16]bool{},
 	}
 }
 
@@ -127,6 +140,10 @@ func (s *Server) dispatch(req Request) {
 		s.handleVariables(req)
 	case "setVariable":
 		s.handleSetVariable(req)
+	case "setBreakpoints":
+		s.handleSetBreakpoints(req)
+	case "setInstructionBreakpoints":
+		s.handleSetInstructionBreakpoints(req)
 	case "disconnect":
 		s.handleDisconnect(req)
 	case "terminate":

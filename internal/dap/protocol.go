@@ -176,3 +176,46 @@ type SetVariableArguments struct {
 	Name               string `json:"name"`
 	Value              string `json:"value"`
 }
+
+// SourceBreakpoint is one entry in a `setBreakpoints` request body.
+type SourceBreakpoint struct {
+	Line         int    `json:"line"`
+	Column       int    `json:"column,omitempty"`
+	Condition    string `json:"condition,omitempty"`
+	HitCondition string `json:"hitCondition,omitempty"`
+	LogMessage   string `json:"logMessage,omitempty"`
+}
+
+// SetBreakpointsArguments — replace ALL source-line breakpoints for the
+// given source. Each call is destructive against prior bps for the same
+// path; bps in other sources are unaffected.
+type SetBreakpointsArguments struct {
+	Source      Source             `json:"source"`
+	Breakpoints []SourceBreakpoint `json:"breakpoints"`
+}
+
+// InstructionBreakpoint is one entry in a `setInstructionBreakpoints`
+// request body. InstructionReference is typically the hex address string
+// `stackTrace` returned for a frame's IP.
+type InstructionBreakpoint struct {
+	InstructionReference string `json:"instructionReference"`
+	Offset               int    `json:"offset,omitempty"`
+	Condition            string `json:"condition,omitempty"`
+	HitCondition         string `json:"hitCondition,omitempty"`
+}
+
+// SetInstructionBreakpointsArguments — replace ALL address breakpoints.
+type SetInstructionBreakpointsArguments struct {
+	Breakpoints []InstructionBreakpoint `json:"breakpoints"`
+}
+
+// Breakpoint is what `setBreakpoints` / `setInstructionBreakpoints`
+// return: per-entry resolution status plus the resolved location.
+type Breakpoint struct {
+	ID                          int     `json:"id,omitempty"`
+	Verified                    bool    `json:"verified"`
+	Message                     string  `json:"message,omitempty"`
+	Source                      *Source `json:"source,omitempty"`
+	Line                        int     `json:"line,omitempty"`
+	InstructionPointerReference string  `json:"instructionPointerReference,omitempty"`
+}

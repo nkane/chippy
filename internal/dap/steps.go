@@ -53,11 +53,13 @@ func (s *Server) handleContinue(req Request) {
 	go s.runLoop()
 }
 
-// runLoop free-runs the CPU until pauseRequested is set or the CPU halts.
-// Emits the `stopped` event before signaling runDone. Single goroutine —
-// safe to mutate cpu state without locks because no other handler runs
-// while running=true (single-step handlers refuse, and disconnect waits
-// for runDone).
+// runLoop free-runs the CPU until pauseRequested is set, the CPU halts,
+// or PC lands on a breakpoint. Emits the `stopped` event before
+// signaling runDone. Single goroutine — safe to mutate cpu state
+// without locks because no other handler runs while running=true
+// (single-step handlers refuse, and disconnect waits for runDone).
+// Breakpoint reads are guarded by bpMu inside isBreakpoint so concurrent
+// setBreakpoints requests stay safe.
 func (s *Server) runLoop() {
 	defer func() {
 		s.running.Store(false)
@@ -72,6 +74,10 @@ func (s *Server) runLoop() {
 		s.cpu.Step()
 		if s.cpu.Halted {
 			reason = "exception"
+			break
+		}
+		if s.isBreakpoint(s.cpu.PC) {
+			reason = "breakpoint"
 			break
 		}
 	}
