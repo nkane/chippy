@@ -61,12 +61,43 @@ func TestDetectStackFrame_TopOfPage(t *testing.T) {
 }
 
 func TestDetectStackFrame_StoredTooLow(t *testing.T) {
-	// Stored value < 2 means there's no room for a JSR opcode below it.
+	// Stored value < codeMinAddr means RAM the return points into is
+	// zero-page or stack-page — degenerate, reject.
 	ram := cpu.NewRAM()
 	ram.Write(0x01FE, 0x01)
 	ram.Write(0x01FF, 0x00)
 	if _, _, ok := detectStackFrame(ram, 0x01FE); ok {
 		t.Fatalf("stored=$0001 has no opcode-2 byte; should be rejected")
+	}
+}
+
+// TestDetectStackFrame_StoredInZeroPage exercises the codeMinAddr gate. A
+// stored value of $00FE has byte $20 placed at $00FC (so signal 1 passes),
+// but the return falls in zero-page so the heuristic rejects it.
+func TestDetectStackFrame_StoredInZeroPage(t *testing.T) {
+	ram := cpu.NewRAM()
+	ram.Write(0x00FC, 0x20) // looks like a JSR in zero-page
+	ram.Write(0x01FE, 0xFE) // lo
+	ram.Write(0x01FF, 0x00) // hi -> stored = $00FE (< $0200)
+	if _, _, ok := detectStackFrame(ram, 0x01FE); ok {
+		t.Fatalf("stored in zero-page should be rejected by codeMinAddr gate")
+	}
+}
+
+// TestDetectStackFrame_TargetInStackPage covers the third gate: stored
+// looks fine, opcode is $20, but the JSR operand points at $01XX which is
+// the stack page itself. Reject — real code doesn't JSR into the stack.
+func TestDetectStackFrame_TargetInStackPage(t *testing.T) {
+	ram := cpu.NewRAM()
+	// JSR opcode at $7FFE, operand $00 $01 -> target $0100 (stack page).
+	ram.Write(0x7FFE, 0x20)
+	ram.Write(0x7FFF, 0x00)
+	ram.Write(0x8000, 0x01)
+	// stored value $8000 (signals 1+2 pass).
+	ram.Write(0x01FE, 0x00)
+	ram.Write(0x01FF, 0x80)
+	if _, _, ok := detectStackFrame(ram, 0x01FE); ok {
+		t.Fatalf("JSR target in stack-page should be rejected")
 	}
 }
 
