@@ -368,6 +368,11 @@ The disassembly panel is replaced by a source view when you press `v` (if
 a `.dbg` is loaded). A breakpoint manager modal opens with `B`; the help
 modal opens with `?`.
 
+The stack panel detects JSR-pushed return-address pairs and renders them as
+`ret $XXXX  callee  file:NN` rows, collapsing adjacent non-frame bytes into
+single `(N bytes)` lines so the call chain stays readable. Press `T` to
+toggle back to the raw one-byte-per-row layout.
+
 ---
 
 ## Status

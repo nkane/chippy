@@ -99,6 +99,12 @@ type Model struct {
 	// runtime and so quit can flush the buffer.
 	Tracer *cpu.FileTracer
 
+	// StackAnnotate controls the Stack panel's render mode. true (default):
+	// JSR return-address pairs are detected and shown as `ret $XXXX` rows
+	// with callee + source info; consecutive non-frame bytes are collapsed.
+	// false: legacy one-byte-per-row layout. `T` key toggles.
+	StackAnnotate bool
+
 	// Disassembly viewport: when DisasmFollow is true (default), the panel
 	// re-anchors on PC each frame. User scroll keys flip it off and pin
 	// DisasmAnchor as the address shown at the top of the window.
@@ -116,16 +122,17 @@ type disasmCacheEntry struct {
 
 func New(c *cpu.CPU, r *cpu.RAM) Model {
 	return Model{
-		CPU:          c,
-		RAM:          r,
-		Breakpoints:  map[uint16]*Breakpoint{},
-		MemBPs:       map[uint16]*MemBP{},
-		MemViewAddr:  0x0000,
-		Status:       "ready",
-		TargetHz:     0,
-		DisasmFollow: true,
-		W:            120,
-		H:            40,
+		CPU:           c,
+		RAM:           r,
+		Breakpoints:   map[uint16]*Breakpoint{},
+		MemBPs:        map[uint16]*MemBP{},
+		MemViewAddr:   0x0000,
+		Status:        "ready",
+		TargetHz:      0,
+		DisasmFollow:  true,
+		StackAnnotate: true,
+		W:             120,
+		H:             40,
 	}
 }
 
@@ -340,6 +347,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "'":
 			m.DisasmFollow = true
 			m.Status = "disasm: follow PC"
+		case "T":
+			m.StackAnnotate = !m.StackAnnotate
+			if m.StackAnnotate {
+				m.Status = "stack: annotated"
+			} else {
+				m.Status = "stack: raw bytes"
+			}
 		}
 		return m, m.scheduleTick()
 
@@ -824,6 +838,11 @@ func (m Model) helpModal() string {
 			{"{ / }", "scroll eight instructions up / down"},
 			{"'", "follow PC again"},
 		}},
+		{"Stack panel", [][2]string{
+			{"T", "toggle JSR-frame annotation / raw bytes"},
+			{"annotated", "ret $XXXX + callee + source line per JSR pair"},
+			{"raw", "one byte per row from SP up"},
+		}},
 		{"General", [][2]string{
 			{":", "command line (:goto :pc :watch :speed :bp)"},
 			{"v", "toggle source / disassembly view"},
@@ -1044,31 +1063,6 @@ func (m Model) regValue(name string) string {
 		return fmt.Sprintf("$%04X", m.CPU.PC)
 	}
 	return "  ?"
-}
-
-func (m Model) stackView(w, h int) string {
-	innerH := h - 2
-	if innerH < 1 {
-		innerH = 1
-	}
-	rows := innerH - 1
-	if rows < 1 {
-		rows = 1
-	}
-	var b strings.Builder
-	for i := 0; i < rows; i++ {
-		spByte := uint16(m.CPU.SP) + 1 + uint16(i)
-		if spByte > 0xFF {
-			break
-		}
-		sp := 0x100 | spByte
-		marker := "  "
-		if i == 0 {
-			marker = curLine.Render(" >")
-		}
-		fmt.Fprintf(&b, "%s %s  %02X\n", marker, dimAddr.Render(fmt.Sprintf("$%04X", sp)), m.RAM.Read(sp))
-	}
-	return fitPanel("Stack", strings.TrimRight(b.String(), "\n"), w, h)
 }
 
 func (m Model) disasmView(w, h int) string {
