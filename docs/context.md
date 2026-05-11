@@ -145,10 +145,11 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - v0.0.2 — release cut after #41. 7 features since v0.0.1; binaries + brew tap auto-updated.
 - #54 — Reverse step (issue #17): `cpu.Snapshot` / `CPU.Snapshot`/`Restore` capture full regs + RAM + bookkeeping; `rewindRing` (cap 256, FIFO eviction, LIFO pop) records pre-step state on explicit-step paths only (free-run skipped to avoid 64 KiB/step cost); `<` pops one; status bar shows `rwd:N` depth.
 - #55 — CMOS-aware disasm (issue #42): `DisasmCPU` / `DisasmCPUWithSyms` route through the CPU's opcode table so CMOS-only mnemonics (STZ/PHX/BRA/etc.) render correctly in the disasm panel, trace lines, and any future caller. Legacy `Disasm`/`DisasmWithSyms` retained as NMOS-default shims.
+- #56 — `-run-on-start` flag (issue #44): start the CPU running instead of paused; pair with `-trace` for non-interactive capture.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars
-- #43 (trace IRQ entry lines), #44 (--run-on-start), #45 (stack heuristic tighten)
+- #43 (trace IRQ entry lines), #45 (stack heuristic tighten)
 - #46 DAP epic + #47–#53 sub-issues
 
 ---

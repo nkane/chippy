@@ -227,6 +227,17 @@ func (m Model) WithHistoryPath(p string) Model {
 	return m
 }
 
+// WithRunOnStart starts the CPU running immediately instead of paused.
+// Useful with -trace for non-interactive capture sessions where there's no
+// user to press `r`.
+func (m Model) WithRunOnStart(run bool) Model {
+	if run {
+		m.Running = true
+		m.Status = "running"
+	}
+	return m
+}
+
 // WithSourceMap loads PC->(file,line) mapping from cc65 .dbg file lines.
 func (m Model) WithSourceMap(sm *symbols.SourceMap) Model {
 	if sm == nil {

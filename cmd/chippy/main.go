@@ -17,13 +17,14 @@ import (
 
 func main() {
 	var (
-		romPath   = flag.String("rom", "", "program to load (.bin .prg .hex .o)")
-		loadAddr  = flag.Uint("addr", 0x8000, "load address for raw .bin (ignored for .prg/.hex/.o)")
-		resetVec  = flag.Uint("reset", 0, "reset vector override (0 = use file's existing vector or load address)")
-		cfg       = flag.String("cfg", "", "ld65 linker config (.cfg) — required when loading .o files")
-		dbgPath   = flag.String("dbg", "", "cc65 .dbg symbol file (auto-detected as <rom>.dbg if omitted)")
-		cpuFlag   = flag.String("cpu", "nmos", "CPU variant: nmos | 65c02")
-		tracePath = flag.String("trace", "", "write per-instruction execution trace to this file")
+		romPath    = flag.String("rom", "", "program to load (.bin .prg .hex .o)")
+		loadAddr   = flag.Uint("addr", 0x8000, "load address for raw .bin (ignored for .prg/.hex/.o)")
+		resetVec   = flag.Uint("reset", 0, "reset vector override (0 = use file's existing vector or load address)")
+		cfg        = flag.String("cfg", "", "ld65 linker config (.cfg) — required when loading .o files")
+		dbgPath    = flag.String("dbg", "", "cc65 .dbg symbol file (auto-detected as <rom>.dbg if omitted)")
+		cpuFlag    = flag.String("cpu", "nmos", "CPU variant: nmos | 65c02")
+		tracePath  = flag.String("trace", "", "write per-instruction execution trace to this file")
+		runOnStart = flag.Bool("run-on-start", false, "start the CPU running instead of paused (pair with -trace for non-interactive capture)")
 	)
 	flag.Parse()
 
@@ -152,7 +153,8 @@ func main() {
 		WithTextOutput(textOut).
 		WithKeyboard(keyIn).
 		WithTracer(tracer).
-		WithHistoryPath(tui.DefaultHistoryPath())
+		WithHistoryPath(tui.DefaultHistoryPath()).
+		WithRunOnStart(*runOnStart)
 	if syms != nil {
 		model = model.WithSymbols(syms)
 	}
