@@ -116,3 +116,63 @@ type StoppedEventBody struct {
 type TerminatedEventBody struct {
 	Restart bool `json:"restart,omitempty"`
 }
+
+// Source identifies a source file in stack-frame / breakpoint requests.
+type Source struct {
+	Name string `json:"name,omitempty"`
+	Path string `json:"path,omitempty"`
+}
+
+// StackFrame is one entry in a `stackTrace` response. ID must be unique
+// per stopped point so the client can correlate frames with subsequent
+// `scopes` and `variables` requests.
+type StackFrame struct {
+	ID                          int     `json:"id"`
+	Name                        string  `json:"name"`
+	Source                      *Source `json:"source,omitempty"`
+	Line                        int     `json:"line,omitempty"`
+	Column                      int     `json:"column,omitempty"`
+	InstructionPointerReference string  `json:"instructionPointerReference,omitempty"`
+}
+
+// Scope groups variables under a named heading in the editor's Variables
+// pane. VariablesReference is the handle the client passes to a follow-up
+// `variables` request.
+type Scope struct {
+	Name               string `json:"name"`
+	VariablesReference int    `json:"variablesReference"`
+	Expensive          bool   `json:"expensive"`
+}
+
+// Variable is one row in the Variables pane. VariablesReference > 0 means
+// the entry has children; the client expands it via `variables` again.
+type Variable struct {
+	Name               string `json:"name"`
+	Value              string `json:"value"`
+	Type               string `json:"type,omitempty"`
+	VariablesReference int    `json:"variablesReference,omitempty"`
+}
+
+// StackTraceArguments is the request body for `stackTrace`.
+type StackTraceArguments struct {
+	ThreadID   int `json:"threadId"`
+	StartFrame int `json:"startFrame,omitempty"`
+	Levels     int `json:"levels,omitempty"`
+}
+
+// ScopesArguments is the request body for `scopes`.
+type ScopesArguments struct {
+	FrameID int `json:"frameId"`
+}
+
+// VariablesArguments is the request body for `variables`.
+type VariablesArguments struct {
+	VariablesReference int `json:"variablesReference"`
+}
+
+// SetVariableArguments is the request body for `setVariable`.
+type SetVariableArguments struct {
+	VariablesReference int    `json:"variablesReference"`
+	Name               string `json:"name"`
+	Value              string `json:"value"`
+}
