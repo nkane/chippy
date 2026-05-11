@@ -22,15 +22,32 @@ type stackEntry struct {
 	src     string // frame only — "file.s:NN" if a source map covers retAddr
 }
 
+// codeMinAddr is the lowest address we accept as plausibly executable code.
+// $0000-$00FF is the zero page, $0100-$01FF is the stack page. Real programs
+// don't put JSR opcodes or JSR targets in those regions, so requiring the
+// stored return address AND the JSR target to be ≥ $0200 cuts most of the
+// false-positive frames the bare opcode check produces. (Programs that DO
+// abuse zero-page as code will lose frame annotation in the affected range
+// but are degenerate cases — the panel still renders the bytes.)
+const codeMinAddr uint16 = 0x0200
+
 // detectStackFrame reports whether the byte pair at $01XX (spLo, spLo+1)
-// looks like a JSR-pushed return address: the byte two below the stored
-// 16-bit value should be the JSR opcode ($20). retAddr is `stored + 1`
-// (the address RTS will jump to); target is the JSR's call target read
-// from the operand bytes.
+// looks like a JSR-pushed return address. The heuristic checks three
+// signals; all must hold:
 //
-// This is a heuristic. Random byte pairs whose value happens to point one
-// past a $20 in RAM will register as a false-positive frame; the cost is
-// a misleading annotation, never a crash.
+//  1. The byte two below the stored 16-bit value is the JSR opcode ($20).
+//  2. The stored return address points at executable space (≥ codeMinAddr).
+//  3. The JSR's call target (read from the two operand bytes that follow
+//     the opcode) also points at executable space.
+//
+// retAddr is `stored + 1` (what RTS will jump to); target is the JSR's
+// call target. Random byte pairs satisfying signal 1 alone get filtered
+// out by 2 and 3 unless the noise happens to look like a real call into
+// a real code region — exceedingly rare.
+//
+// False positives are still possible (misleading annotation, never a
+// crash); `T` toggles the panel back to raw bytes when the heuristic
+// misfires.
 func detectStackFrame(ram *cpu.RAM, spLo uint16) (retAddr, target uint16, ok bool) {
 	if (spLo & 0xFF) == 0xFF {
 		return 0, 0, false
@@ -38,7 +55,7 @@ func detectStackFrame(ram *cpu.RAM, spLo uint16) (retAddr, target uint16, ok boo
 	lo := ram.Read(spLo)
 	hi := ram.Read(spLo + 1)
 	stored := uint16(hi)<<8 | uint16(lo)
-	if stored < 2 {
+	if stored < codeMinAddr {
 		return 0, 0, false
 	}
 	if ram.Read(stored-2) != 0x20 {
@@ -47,6 +64,9 @@ func detectStackFrame(ram *cpu.RAM, spLo uint16) (retAddr, target uint16, ok boo
 	targetLo := ram.Read(stored - 1)
 	targetHi := ram.Read(stored)
 	target = uint16(targetHi)<<8 | uint16(targetLo)
+	if target < codeMinAddr {
+		return 0, 0, false
+	}
 	return stored + 1, target, true
 }
 
