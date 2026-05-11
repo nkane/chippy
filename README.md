@@ -102,6 +102,7 @@ Flags:
 | `--cpu`  | `nmos`  | CPU variant: `nmos` (MOS 6502) or `65c02` (WDC/Rockwell CMOS) |
 | `-trace` | —       | Write per-instruction execution trace to this file. Also toggleable at runtime via `:trace PATH \| :trace on \| :trace off`. |
 | `-run-on-start` | `false` | Start the CPU running instead of paused. Pair with `-trace` for non-interactive capture (`chippy -rom prog.bin -trace t.log -run-on-start`). |
+| `-dap`  | —       | Run as a [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) server instead of the TUI. Accepts `stdio` (editor pipes stdin/stdout) or `tcp:PORT` (server listens, editor connects out). Supported requests grow incrementally — see issue #46 epic. |
 
 Examples:
 
