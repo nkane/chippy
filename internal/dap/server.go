@@ -119,6 +119,14 @@ func (s *Server) dispatch(req Request) {
 		s.handlePause(req)
 	case "threads":
 		s.handleThreads(req)
+	case "stackTrace":
+		s.handleStackTrace(req)
+	case "scopes":
+		s.handleScopes(req)
+	case "variables":
+		s.handleVariables(req)
+	case "setVariable":
+		s.handleSetVariable(req)
 	case "disconnect":
 		s.handleDisconnect(req)
 	case "terminate":
@@ -146,6 +154,7 @@ func (s *Server) handleInitialize(req Request) {
 		SupportsFunctionBreakpoints:        false,
 		SupportsRestartRequest:             false,
 		SupportsCompletionsRequest:         false,
+		SupportsSetVariable:                true,
 	}
 	s.sendResponse(req, caps)
 	s.sendEvent("initialized", nil)
