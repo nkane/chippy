@@ -10,6 +10,13 @@ import (
 	"github.com/nkane/chippy/internal/peripheral"
 )
 
+// newCMOSCPUForTest returns a CMOS-variant CPU wired to ram. Used by
+// memory_test.go to confirm variant-aware disassembly through DAP.
+func newCMOSCPUForTest(t *testing.T, ram *cpu.RAM) *cpu.CPU {
+	t.Helper()
+	return cpu.NewVariant(ram, cpu.VariantCMOS65C02)
+}
+
 // newStoppedServer constructs a Server with a debuggee pre-wired to
 // match what bootDebuggee builds, then returns it ready for step
 // requests. Skipping the launch round-trip lets tests focus on the
