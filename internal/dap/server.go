@@ -144,6 +144,12 @@ func (s *Server) dispatch(req Request) {
 		s.handleSetBreakpoints(req)
 	case "setInstructionBreakpoints":
 		s.handleSetInstructionBreakpoints(req)
+	case "disassemble":
+		s.handleDisassemble(req)
+	case "readMemory":
+		s.handleReadMemory(req)
+	case "writeMemory":
+		s.handleWriteMemory(req)
 	case "disconnect":
 		s.handleDisconnect(req)
 	case "terminate":

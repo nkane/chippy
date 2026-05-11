@@ -219,3 +219,38 @@ type Breakpoint struct {
 	Line                        int     `json:"line,omitempty"`
 	InstructionPointerReference string  `json:"instructionPointerReference,omitempty"`
 }
+
+// DisassembleArguments is the request body for `disassemble`.
+type DisassembleArguments struct {
+	MemoryReference   string `json:"memoryReference"`
+	Offset            int    `json:"offset,omitempty"`
+	InstructionOffset int    `json:"instructionOffset,omitempty"`
+	InstructionCount  int    `json:"instructionCount"`
+	ResolveSymbols    bool   `json:"resolveSymbols,omitempty"`
+}
+
+// DisassembledInstruction is one row in a `disassemble` response.
+type DisassembledInstruction struct {
+	Address          string  `json:"address"`
+	InstructionBytes string  `json:"instructionBytes,omitempty"`
+	Instruction      string  `json:"instruction"`
+	Symbol           string  `json:"symbol,omitempty"`
+	Location         *Source `json:"location,omitempty"`
+	Line             int     `json:"line,omitempty"`
+}
+
+// ReadMemoryArguments is the request body for `readMemory`.
+type ReadMemoryArguments struct {
+	MemoryReference string `json:"memoryReference"`
+	Offset          int    `json:"offset,omitempty"`
+	Count           int    `json:"count"`
+}
+
+// WriteMemoryArguments is the request body for `writeMemory`. `Data` is
+// base64-encoded raw bytes (DAP spec).
+type WriteMemoryArguments struct {
+	MemoryReference string `json:"memoryReference"`
+	Offset          int    `json:"offset,omitempty"`
+	AllowPartial    bool   `json:"allowPartial,omitempty"`
+	Data            string `json:"data"`
+}
