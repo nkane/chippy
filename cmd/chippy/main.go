@@ -25,8 +25,14 @@ func main() {
 		cpuFlag    = flag.String("cpu", "nmos", "CPU variant: nmos | 65c02")
 		tracePath  = flag.String("trace", "", "write per-instruction execution trace to this file")
 		runOnStart = flag.Bool("run-on-start", false, "start the CPU running instead of paused (pair with -trace for non-interactive capture)")
+		dapMode    = flag.String("dap", "", "run as a Debug Adapter Protocol server instead of the TUI: 'stdio' or 'tcp:PORT'")
 	)
 	flag.Parse()
+
+	if *dapMode != "" {
+		runDAP(*dapMode)
+		return
+	}
 
 	variant := cpu.VariantNMOS
 	switch strings.ToLower(*cpuFlag) {

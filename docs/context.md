@@ -150,10 +150,11 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - #57 — Trace interrupt-entry lines (issue #43): `Tracer.LogInterrupt` hook + `FileTracer` emits `---- NMI -> $FFFA (PC=... P=... SP=... CYC:...)` markers at the service boundary, so trace readers can spot the PC jump in the next instruction.
 - #58 — Stack heuristic tightening (issue #45): `detectStackFrame` now also rejects frames whose stored return-address or JSR target falls below `codeMinAddr = $0200` (zero-page + stack-page). Cuts most false positives without losing real frames.
 - #68 — Help modal paging: 4 pages, space/→ next, p/← prev, any other key closes. Splits the 10-section keybinding reference so the modal fits on small terminals.
+- #69 — DAP transport + initialize/launch/disconnect (issue #47): `internal/dap` package with Content-Length framing, request/response/event types, server dispatch loop; `-dap stdio | tcp:PORT` CLI flag. Launches construct CPU+RAM+MMIO from `LaunchArguments` matching the CLI flag shape; capabilities advertise everything #48–#53 will eventually wire (conditional bp / instruction bp / disassemble / readMemory / writeMemory etc.).
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars
-- #46 DAP epic + #47–#53 sub-issues
+- #46 DAP epic; remaining sub-issues #48–#53
 - Post-DAP follow-ups: #59 Klaus 65C02, #60 BCD test, #61 CMOS e2e in CI, #62 peripheral snapshots, #63 VIA 6522, #64 trace replay, #65 mem-watch conditional expressions, #66 CoW RAM snapshots, #67 WebAssembly playground
 
 ---
