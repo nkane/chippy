@@ -373,6 +373,11 @@ The stack panel detects JSR-pushed return-address pairs and renders them as
 single `(N bytes)` lines so the call chain stays readable. Press `T` to
 toggle back to the raw one-byte-per-row layout.
 
+The memory panel has a byte-level cursor (arrow keys move ±1 / ±$10, view
+auto-scrolls). Press `e` at the cursor to poke a byte: type 1–2 hex digits,
+Enter commits, Esc cancels. Edits are runtime-only — `R` (reset) reloads
+the original program bytes.
+
 ---
 
 ## Status

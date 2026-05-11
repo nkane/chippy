@@ -60,7 +60,8 @@ func (m *Model) runCommand(line string) string {
 			return err.Error()
 		}
 		m.MemViewAddr = addr & 0xFFF0
-		return fmt.Sprintf("mem -> $%04X", m.MemViewAddr)
+		m.MemCursor = addr
+		return fmt.Sprintf("mem -> $%04X", addr)
 	case "pc":
 		if len(args) == 0 {
 			return "usage: :pc $XXXX"
