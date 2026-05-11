@@ -94,6 +94,11 @@ type Model struct {
 	Keyboard  *peripheral.KeyboardInput
 	InputMode bool
 
+	// Optional CPU execution tracer. The CPU does the actual logging; the
+	// Model holds a reference so `:trace on/off [path]` can flip it at
+	// runtime and so quit can flush the buffer.
+	Tracer *cpu.FileTracer
+
 	// Disassembly viewport: when DisasmFollow is true (default), the panel
 	// re-anchors on PC each frame. User scroll keys flip it off and pin
 	// DisasmAnchor as the address shown at the top of the window.
@@ -161,6 +166,12 @@ func (m Model) WithTextOutput(t *peripheral.TextOutput) Model {
 // keystrokes into the program (see InputMode).
 func (m Model) WithKeyboard(k *peripheral.KeyboardInput) Model {
 	m.Keyboard = k
+	return m
+}
+
+// WithTracer attaches a CPU execution tracer for runtime control via :trace.
+func (m Model) WithTracer(t *cpu.FileTracer) Model {
+	m.Tracer = t
 	return m
 }
 
@@ -835,6 +846,13 @@ func (m Model) helpModal() string {
 			{":rmbpr X", "remove (also :rmbpw / :rmbprw)"},
 			{"modifiers", "same: once / hits N / if E / log M"},
 			{"sigils", "👁 read  ✏ write  🔁 read+write"},
+		}},
+		{"Trace", [][2]string{
+			{":trace PATH", "open PATH and enable per-instruction trace"},
+			{":trace on", "re-enable using the last-set path"},
+			{":trace off", "disable + flush buffer to disk"},
+			{":trace", "show current state"},
+			{"--trace", "CLI flag: enable at startup with given path"},
 		}},
 	}
 

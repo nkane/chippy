@@ -29,6 +29,9 @@ func (c *CPU) Step() int {
 	if c.Halted {
 		return 0
 	}
+	if c.Tracer != nil {
+		c.Tracer.LogStep(c, c.Bus)
+	}
 	startPC := c.PC
 	op := c.Bus.Read(c.PC)
 	c.PC++

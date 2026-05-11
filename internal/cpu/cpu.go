@@ -44,6 +44,11 @@ type CPU struct {
 	Bus            Bus
 	Variant        Variant
 
+	// Optional per-instruction execution hook. When non-nil, Step() invokes
+	// Tracer.LogStep at the instruction boundary just before opcode fetch.
+	// Implementations must be cheap on the disabled path.
+	Tracer Tracer
+
 	// Debug helpers
 	Halted bool
 
