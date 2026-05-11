@@ -138,10 +138,11 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - #33 — IRQ/NMI with edge/level semantics
 - #34 — MMIO peripheral abstraction (issue #16); routing bus + Apple-1-style TextOutput ($F001) and KeyboardInput ($F004/$F005)
 - #36 — Per-instruction execution trace (issue #21): `cpu.Tracer` hook on `Step()`, `cpu.FileTracer` (buffered 64K), `-trace PATH` CLI flag, `:trace PATH|on|off` TUI command
+- #38 — CLAUDE.md "docs are part of every PR" rule: README/context/help-modal/exported docs move with code
+- #39 — Stack panel JSR-frame annotation (issue #18): detects pushed return-address pairs via the `$20` opcode at `stored-2`; renders `ret $XXXX  callee  file:NN`; collapses non-frame runs; `T` toggles raw view
 
 ### Open issues
 - #17 (reverse step) — record/replay micro-history
-- #18 (stack panel) — visualise SP and stack contents
 - #19 (memory editor) — interactive hex editor in TUI
 - #20 (prompt history) — up-arrow recall in command prompt
 - #22 (homebrew-core) — blocked on stars
