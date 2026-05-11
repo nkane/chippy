@@ -29,6 +29,8 @@ var (
 	memBPRead  = lipgloss.NewStyle().Foreground(lipgloss.Color("33")).Bold(true)  // 👁 blue
 	memBPWrite = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true) // ✏ red
 	memBPRW    = lipgloss.NewStyle().Foreground(lipgloss.Color("213")).Bold(true) // 🔁 magenta
+	memCursor  = lipgloss.NewStyle().Reverse(true).Bold(true)                     // mem-panel byte cursor
+	memEdit    = lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Background(lipgloss.Color("88")).Bold(true)
 )
 
 const (
@@ -104,6 +106,13 @@ type Model struct {
 	// with callee + source info; consecutive non-frame bytes are collapsed.
 	// false: legacy one-byte-per-row layout. `T` key toggles.
 	StackAnnotate bool
+
+	// Memory-panel byte cursor. MemViewAddr is the row-anchored top-left
+	// of the panel; MemCursor is the byte highlighted within (any address,
+	// not row-aligned). Arrow keys move the cursor; `e` enters edit mode.
+	MemCursor  uint16
+	MemEditing bool
+	MemEditBuf string
 
 	// Disassembly viewport: when DisasmFollow is true (default), the panel
 	// re-anchors on PC each frame. User scroll keys flip it off and pin
@@ -232,6 +241,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.InputMode {
 			return m.updateInputMode(msg)
 		}
+		// Memory editor owns input while open.
+		if m.MemEditing {
+			return m.updateMemEdit(msg)
+		}
 
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -324,9 +337,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastRunNS = 0
 			m.cycleDebt = 0
 			m.Status = "speed: max"
-		case "j", "down":
+		case "j":
 			m.MemViewAddr += 0x10
-		case "k", "up":
+		case "k":
 			m.MemViewAddr -= 0x10
 		case "J", "pgdown":
 			m.MemViewAddr += 0x100
@@ -336,6 +349,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.MemViewAddr = 0
 		case "G":
 			m.MemViewAddr = 0xFF00
+		case "left":
+			m.MemCursor--
+			m.memCursorMoved()
+		case "right":
+			m.MemCursor++
+			m.memCursorMoved()
+		case "up":
+			m.MemCursor -= 0x10
+			m.memCursorMoved()
+		case "down":
+			m.MemCursor += 0x10
+			m.memCursorMoved()
+		case "e":
+			m.MemEditing = true
+			m.MemEditBuf = ""
+			m.Status = fmt.Sprintf("edit $%04X (hex; enter=commit esc=cancel)", m.MemCursor)
 		case "[":
 			m.disasmScroll(-1)
 		case "]":
@@ -827,11 +856,13 @@ func (m Model) helpModal() string {
 			{"0", "unthrottled (max)"},
 		}},
 		{"Memory view", [][2]string{
-			{"j / ↓", "scroll down by $10"},
-			{"k / ↑", "scroll up by $10"},
+			{"j / k", "scroll down / up by $10"},
 			{"J / PgDn", "scroll down by $100"},
 			{"K / PgUp", "scroll up by $100"},
 			{"g / G", "jump to $0000 / $FF00"},
+			{"← →", "move byte cursor ±1"},
+			{"↑ ↓", "move byte cursor ±$10 (auto-scrolls)"},
+			{"e", "edit byte at cursor (hex; enter=commit esc=cancel)"},
 		}},
 		{"Disassembly", [][2]string{
 			{"[ / ]", "scroll one instruction up / down"},
@@ -1421,15 +1452,32 @@ func (m Model) memView(w, h int) string {
 		for col := 0; col < 16; col++ {
 			a := base + uint16(col)
 			v := m.RAM.Read(a)
-			cell := fmt.Sprintf(" %02X", v)
+			byteStr := fmt.Sprintf("%02X", v)
+			cell := " " + byteStr
+
 			if mbp, ok := m.MemBPs[a]; ok && mbp != nil {
 				switch mbp.Kind {
 				case MemBPRead:
-					cell = " " + memBPRead.Render(fmt.Sprintf("%02X", v))
+					cell = " " + memBPRead.Render(byteStr)
 				case MemBPWrite:
-					cell = " " + memBPWrite.Render(fmt.Sprintf("%02X", v))
+					cell = " " + memBPWrite.Render(byteStr)
 				case MemBPReadWrite:
-					cell = " " + memBPRW.Render(fmt.Sprintf("%02X", v))
+					cell = " " + memBPRW.Render(byteStr)
+				}
+			}
+			if a == m.MemCursor {
+				switch {
+				case m.MemEditing:
+					buf := m.MemEditBuf
+					switch len(buf) {
+					case 0:
+						buf = "__"
+					case 1:
+						buf = "_" + buf
+					}
+					cell = " " + memEdit.Render(buf)
+				default:
+					cell = " " + memCursor.Render(byteStr)
 				}
 			}
 			b.WriteString(cell)
@@ -1441,6 +1489,6 @@ func (m Model) memView(w, h int) string {
 		}
 		b.WriteString("  " + ascii.String() + "\n")
 	}
-	hint := help.Render("  (j/k ±$10  J/K ±$100  g/G top/bot)")
+	hint := help.Render(fmt.Sprintf("  (cur $%04X  arrows move  e edit)", m.MemCursor))
 	return fitPanel("Memory"+hint, strings.TrimRight(b.String(), "\n"), w, h)
 }

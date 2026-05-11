@@ -15,6 +15,7 @@ type savedState struct {
 	Breakpoints json.RawMessage `json:"breakpoints,omitempty"`
 	MemBPs      json.RawMessage `json:"mem_bps,omitempty"`
 	MemViewAddr uint16          `json:"mem_view_addr"`
+	MemCursor   uint16          `json:"mem_cursor,omitempty"`
 	Watches     []Watch         `json:"watches"`
 	TargetHz    int             `json:"target_hz"`
 }
@@ -29,6 +30,7 @@ func loadState(m *Model, path string) {
 		return
 	}
 	m.MemViewAddr = s.MemViewAddr
+	m.MemCursor = s.MemCursor
 	m.Watches = s.Watches
 	m.TargetHz = s.TargetHz
 	if m.Breakpoints == nil {
@@ -138,6 +140,7 @@ func (m *Model) saveState() {
 		Breakpoints: raw,
 		MemBPs:      mraw,
 		MemViewAddr: m.MemViewAddr,
+		MemCursor:   m.MemCursor,
 		Watches:     m.Watches,
 		TargetHz:    m.TargetHz,
 	}
