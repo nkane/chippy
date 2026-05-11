@@ -12,6 +12,17 @@ Go-based TUI 6502 emulator + debugger (Bubble Tea, Lipgloss). Targets ca65/cc65 
 - PR body ends with `Closes #N`.
 - Squash-merge with `--delete-branch`. Defer follow-ups by filing new issues.
 
+## Docs are part of every PR (not a follow-up)
+Every PR ships with the documentation changes its diff implies. Update **in the same PR**, never as a separate cleanup:
+
+- **`README.md`** — when CLI flags, install instructions, or user-facing behavior change. Flag tables, examples, and the feature list must stay accurate.
+- **`docs/context.md`** — the architecture / progress / decisions handoff doc. When a PR merges, move the issue from "Open issues" to "Merged PRs of note", drop any "in progress" stubs that referred to it, and add an architecture section if the PR introduced a new subsystem (e.g. MMIO, trace).
+- **TUI help modal** (`internal/tui/model.go` `helpModal()`) — when a new `:command`, keybinding, or panel ships.
+- **Code-level doc comments** — when an exported type/function changes shape or contract.
+- **This file (`CLAUDE.md`)** — when load-bearing invariants change, or when a convention itself changes.
+
+A PR that adds a feature without updating its docs is incomplete. Reviewers will flag it; pre-empt by updating in the same diff.
+
 ## Quality bar (must pass before commit)
 - `go build ./...`
 - `go test -race -count=1 ./...`
