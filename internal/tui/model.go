@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/internal/peripheral"
 	"github.com/nkane/chippy/internal/symbols"
 )
 
@@ -85,6 +86,14 @@ type Model struct {
 	// State persistence
 	StatePath string
 
+	// Memory-mapped peripherals (optional). When set, the View grows an
+	// Output panel and the `i` key toggles InputMode: while active, all
+	// keystrokes are routed to Keyboard.Push instead of debugger bindings,
+	// and Esc exits input mode.
+	TextOut   *peripheral.TextOutput
+	Keyboard  *peripheral.KeyboardInput
+	InputMode bool
+
 	// Disassembly viewport: when DisasmFollow is true (default), the panel
 	// re-anchors on PC each frame. User scroll keys flip it off and pin
 	// DisasmAnchor as the address shown at the top of the window.
@@ -140,6 +149,21 @@ func (m Model) WithStatePath(p string) Model {
 	return m
 }
 
+// WithTextOutput attaches a TextOutput peripheral so the TUI can render its
+// buffered output. The peripheral must already be registered with the MMIO
+// bus the CPU reads/writes through — this method only wires display.
+func (m Model) WithTextOutput(t *peripheral.TextOutput) Model {
+	m.TextOut = t
+	return m
+}
+
+// WithKeyboard attaches a KeyboardInput peripheral so the TUI can route
+// keystrokes into the program (see InputMode).
+func (m Model) WithKeyboard(k *peripheral.KeyboardInput) Model {
+	m.Keyboard = k
+	return m
+}
+
 // WithSourceMap loads PC->(file,line) mapping from cc65 .dbg file lines.
 func (m Model) WithSourceMap(sm *symbols.SourceMap) Model {
 	if sm == nil {
@@ -185,11 +209,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.ShowBPs {
 			return m.updateBPManager(msg)
 		}
+		// Input mode: route most keys to the keyboard peripheral instead
+		// of debugger bindings. Ctrl+C always quits; Esc exits the mode.
+		if m.InputMode {
+			return m.updateInputMode(msg)
+		}
 
 		switch msg.String() {
 		case "q", "ctrl+c":
 			m.saveState()
 			return m, tea.Quit
+		case "i":
+			if m.Keyboard != nil {
+				m.InputMode = true
+				m.Status = "input mode — Esc to exit"
+			} else {
+				m.Status = "no keyboard peripheral registered"
+			}
 		case "?", "h":
 			m.ShowHelp = true
 			m.Status = "help"
@@ -325,6 +361,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.scheduleTick()
 	}
 	return m, nil
+}
+
+// updateInputMode routes keystrokes to the keyboard peripheral. Esc exits;
+// Ctrl+C still quits. Printable ASCII and a small set of control keys are
+// mapped to bytes; everything else is silently dropped so an unmapped
+// special key (e.g. a function key) doesn't poison the program input.
+func (m Model) updateInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	s := msg.String()
+	switch s {
+	case "ctrl+c":
+		m.saveState()
+		return m, tea.Quit
+	case "esc":
+		m.InputMode = false
+		m.Status = "input mode off"
+		return m, m.scheduleTick()
+	}
+	if b, ok := keyMsgToByte(msg); ok {
+		m.Keyboard.Push(b)
+		m.Status = fmt.Sprintf("key -> $%02X", b)
+	}
+	return m, m.scheduleTick()
+}
+
+// keyMsgToByte maps a Bubble Tea key event to the byte the 6502 program
+// will see. Returns ok=false for keys that have no useful mapping (function
+// keys, modifier-only chords, etc.).
+func keyMsgToByte(msg tea.KeyMsg) (byte, bool) {
+	s := msg.String()
+	switch s {
+	case "enter":
+		return 0x0D, true
+	case "tab":
+		return 0x09, true
+	case "space":
+		return 0x20, true
+	case "backspace":
+		return 0x08, true
+	}
+	// Single-rune printable.
+	if len(s) == 1 {
+		r := s[0]
+		if r >= 0x20 && r < 0x7F {
+			return r, true
+		}
+	}
+	return 0, false
 }
 
 // statusAfterStep updates Status reflecting halt or normal stepping outcome.
@@ -598,14 +681,18 @@ func (m Model) View() string {
 		stackH = 6
 	}
 
+	outH := 0
+	if m.TextOut != nil {
+		outH = 8
+	}
 	disH := innerH * 6 / 10
 	if disH < 10 {
 		disH = 10
 	}
-	memH := innerH - disH
+	memH := innerH - disH - outH
 	if memH < 8 {
 		memH = 8
-		disH = innerH - memH
+		disH = innerH - memH - outH
 	}
 
 	leftPanels := []string{
@@ -624,10 +711,11 @@ func (m Model) View() string {
 	} else {
 		topRight = m.disasmView(rightW, disH)
 	}
-	right := lipgloss.JoinVertical(lipgloss.Left,
-		topRight,
-		m.memView(rightW, memH),
-	)
+	rightPanels := []string{topRight, m.memView(rightW, memH)}
+	if m.TextOut != nil {
+		rightPanels = append(rightPanels, m.outputView(rightW, outH))
+	}
+	right := lipgloss.JoinVertical(lipgloss.Left, rightPanels...)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", gap), right)
 
 	title := titleStyle.Render(" chippy — 6502 TUI debugger ")
@@ -728,6 +816,7 @@ func (m Model) helpModal() string {
 		{"General", [][2]string{
 			{":", "command line (:goto :pc :watch :speed :bp)"},
 			{"v", "toggle source / disassembly view"},
+			{"i", "input mode → keystrokes go to keyboard peripheral (Esc exits)"},
 			{"? / h", "toggle this help"},
 			{"q / ^C", "quit"},
 		}},
@@ -1255,6 +1344,50 @@ func (m Model) sourceView(w, h int) string {
 		b.WriteString(text + "\n")
 	}
 	return fitPanel(title, strings.TrimRight(b.String(), "\n"), w, h)
+}
+
+// outputView renders the TextOutput peripheral's buffer. The newest content
+// is shown — older lines scroll off the top when the buffer overflows the
+// panel height.
+func (m Model) outputView(w, h int) string {
+	innerH := h - 2
+	if innerH < 1 {
+		innerH = 1
+	}
+	rows := innerH - 1
+	if rows < 1 {
+		rows = 1
+	}
+	innerW := w - panelWChrome
+	if innerW < 1 {
+		innerW = 1
+	}
+
+	out := m.TextOut.String()
+	lines := strings.Split(out, "\n")
+	// Wrap any line wider than the panel.
+	wrapped := make([]string, 0, len(lines))
+	for _, ln := range lines {
+		if len(ln) <= innerW {
+			wrapped = append(wrapped, ln)
+			continue
+		}
+		for len(ln) > innerW {
+			wrapped = append(wrapped, ln[:innerW])
+			ln = ln[innerW:]
+		}
+		wrapped = append(wrapped, ln)
+	}
+	// Trim to last `rows` lines.
+	if len(wrapped) > rows {
+		wrapped = wrapped[len(wrapped)-rows:]
+	}
+
+	title := "Output"
+	if m.InputMode {
+		title = "Output  " + lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true).Render("[INPUT]")
+	}
+	return fitPanel(title, strings.Join(wrapped, "\n"), w, h)
 }
 
 func (m Model) memView(w, h int) string {

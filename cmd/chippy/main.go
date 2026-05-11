@@ -10,6 +10,7 @@ import (
 
 	"github.com/nkane/chippy/internal/cpu"
 	"github.com/nkane/chippy/internal/loader"
+	"github.com/nkane/chippy/internal/peripheral"
 	"github.com/nkane/chippy/internal/symbols"
 	"github.com/nkane/chippy/internal/tui"
 )
@@ -107,16 +108,37 @@ func main() {
 		}
 	}
 
-	c := cpu.NewVariant(ram, variant)
+	// MMIO bus sits between WBus and RAM. Peripherals registered here
+	// intercept reads/writes to their claimed regions; everything else
+	// falls through to RAM. Note: the loader and the reset-vector helpers
+	// above write directly to `ram`, deliberately bypassing MMIO, so a
+	// program loaded at $F001 would land in RAM and never reach the
+	// peripheral — peripherals live in addresses no ROM should occupy.
+	mmio := cpu.NewMMIO(ram)
+	textOut := peripheral.NewTextOutput(0xF001)
+	keyIn := peripheral.NewKeyboardInput(0xF004, 0xF005)
+	if err := mmio.Register(textOut); err != nil {
+		fmt.Fprintln(os.Stderr, "register text output:", err)
+		os.Exit(1)
+	}
+	if err := mmio.Register(keyIn); err != nil {
+		fmt.Fprintln(os.Stderr, "register keyboard:", err)
+		os.Exit(1)
+	}
+
+	c := cpu.NewVariant(mmio, variant)
 
 	// Wrap the bus with WBus so memory watchpoints can intercept reads/writes.
-	// We construct CPU on raw RAM first (to keep cpu.New's signature simple),
+	// We construct CPU on MMIO first (to keep cpu.New's signature simple),
 	// then swap c.Bus to the wrapper. WithWBus attaches the CPU pointer and
 	// hands the watch map to the wrapper.
-	wbus := tui.NewWBus(ram)
+	wbus := tui.NewWBus(mmio)
 	c.Bus = wbus
 
-	model := tui.New(c, ram).WithWBus(wbus)
+	model := tui.New(c, ram).
+		WithWBus(wbus).
+		WithTextOutput(textOut).
+		WithKeyboard(keyIn)
 	if syms != nil {
 		model = model.WithSymbols(syms)
 	}

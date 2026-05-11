@@ -11,7 +11,7 @@
 
 CFG := load_five.cfg
 
-PROGRAMS := load_five count_to_ten fibonacci stack_demo bcd_add cmos_demo
+PROGRAMS := load_five count_to_ten fibonacci stack_demo bcd_add cmos_demo hello
 
 OBJS := $(PROGRAMS:=.o)
 BINS := $(PROGRAMS:=.bin)
