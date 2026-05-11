@@ -7,12 +7,19 @@ import (
 	"os"
 )
 
-// Tracer is an optional per-instruction execution hook. When set on CPU,
-// Step() calls LogStep at the instruction boundary just before opcode fetch,
-// so the logged PC/regs reflect the instruction about to execute. Halted
-// steps and interrupt-service steps are not traced — only real instructions.
+// Tracer is an optional execution hook. When set on CPU, Step() calls:
+//
+//   - LogStep at the instruction boundary just before opcode fetch, so the
+//     logged PC/regs reflect the instruction about to execute.
+//   - LogInterrupt at the same boundary when an NMI or IRQ is about to be
+//     serviced, *before* the 7-cycle service writes PC/P to the stack.
+//     This lets viewers spot service boundaries that would otherwise look
+//     like an unexplained PC jump in the trace.
+//
+// Halted-only steps remain silent (no instruction, no interrupt).
 type Tracer interface {
 	LogStep(c *CPU, bus Bus)
+	LogInterrupt(c *CPU, kind string, vector uint16)
 }
 
 // FileTracer writes one line per instruction to a file. Cheap when disabled
@@ -83,6 +90,14 @@ func (t *FileTracer) closeFile() error {
 	}
 	t.out = io.Discard
 	return err
+}
+
+func (t *FileTracer) LogInterrupt(c *CPU, kind string, vector uint16) {
+	if !t.enabled {
+		return
+	}
+	fmt.Fprintf(t.out, "---- %s -> $%04X (PC=$%04X P=%02X SP=%02X CYC:%d)\n",
+		kind, vector, c.PC, c.P, c.SP, c.Cycles)
 }
 
 func (t *FileTracer) LogStep(c *CPU, bus Bus) {
