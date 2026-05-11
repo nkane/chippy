@@ -15,12 +15,18 @@ func (c *CPU) Step() int {
 	// the handler.
 	if c.nmiPending {
 		c.Halted = false
+		if c.Tracer != nil {
+			c.Tracer.LogInterrupt(c, "NMI", VecNMI)
+		}
 		before := c.Cycles
 		c.serviceNMI()
 		return int(c.Cycles - before)
 	}
 	if c.irqLine && !c.hasFlag(FlagI) {
 		c.Halted = false
+		if c.Tracer != nil {
+			c.Tracer.LogInterrupt(c, "IRQ", VecIRQ)
+		}
 		before := c.Cycles
 		c.serviceIRQ()
 		return int(c.Cycles - before)

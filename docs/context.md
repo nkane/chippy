@@ -82,11 +82,12 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - `internal/peripheral.KeyboardInput` — Apple-1-style data/status register pair ($F004/$F005); TUI pushes keypresses, CPU reads & status drains
 - Loader and reset-vector helpers write directly to `ram`, bypassing MMIO — peripherals must live at addresses no ROM will occupy
 
-### Execution trace (PR #36, issue #21)
-- `cpu.Tracer` interface — optional per-instruction hook on `CPU.Step()`
+### Execution trace (PR #36, issue #21; #57 issue #43)
+- `cpu.Tracer` interface — optional per-instruction hook on `CPU.Step()`. Methods: `LogStep`, `LogInterrupt`.
 - `cpu.FileTracer` — buffered file sink (64 KiB), Enable/Disable/Close/SetPath
 - CLI: `-trace PATH`; TUI: `:trace PATH | :trace on | :trace off | :trace`
-- Trace skips halted and interrupt-service steps; line format includes PC, opcode bytes, disasm, A/X/Y/P/SP, cumulative CYC
+- Instruction lines: PC, opcode bytes, disasm, A/X/Y/P/SP, cumulative CYC.
+- Interrupt-entry lines: `---- NMI -> $FFFA (PC=$XXXX P=PP SP=SS CYC:N)` emitted at the service boundary, before the 7-cycle push/vector-load, so a reader sees where the PC jump in the next instruction originated.
 
 ---
 
@@ -146,10 +147,11 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - #54 — Reverse step (issue #17): `cpu.Snapshot` / `CPU.Snapshot`/`Restore` capture full regs + RAM + bookkeeping; `rewindRing` (cap 256, FIFO eviction, LIFO pop) records pre-step state on explicit-step paths only (free-run skipped to avoid 64 KiB/step cost); `<` pops one; status bar shows `rwd:N` depth.
 - #55 — CMOS-aware disasm (issue #42): `DisasmCPU` / `DisasmCPUWithSyms` route through the CPU's opcode table so CMOS-only mnemonics (STZ/PHX/BRA/etc.) render correctly in the disasm panel, trace lines, and any future caller. Legacy `Disasm`/`DisasmWithSyms` retained as NMOS-default shims.
 - #56 — `-run-on-start` flag (issue #44): start the CPU running instead of paused; pair with `-trace` for non-interactive capture.
+- #57 — Trace interrupt-entry lines (issue #43): `Tracer.LogInterrupt` hook + `FileTracer` emits `---- NMI -> $FFFA (PC=... P=... SP=... CYC:...)` markers at the service boundary, so trace readers can spot the PC jump in the next instruction.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars
-- #43 (trace IRQ entry lines), #45 (stack heuristic tighten)
+- #45 (stack heuristic tighten)
 - #46 DAP epic + #47–#53 sub-issues
 
 ---
