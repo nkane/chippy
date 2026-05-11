@@ -149,10 +149,12 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - #56 — `-run-on-start` flag (issue #44): start the CPU running instead of paused; pair with `-trace` for non-interactive capture.
 - #57 — Trace interrupt-entry lines (issue #43): `Tracer.LogInterrupt` hook + `FileTracer` emits `---- NMI -> $FFFA (PC=... P=... SP=... CYC:...)` markers at the service boundary, so trace readers can spot the PC jump in the next instruction.
 - #58 — Stack heuristic tightening (issue #45): `detectStackFrame` now also rejects frames whose stored return-address or JSR target falls below `codeMinAddr = $0200` (zero-page + stack-page). Cuts most false positives without losing real frames.
+- #68 — Help modal paging: 4 pages, space/→ next, p/← prev, any other key closes. Splits the 10-section keybinding reference so the modal fits on small terminals.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars
 - #46 DAP epic + #47–#53 sub-issues
+- Post-DAP follow-ups: #59 Klaus 65C02, #60 BCD test, #61 CMOS e2e in CI, #62 peripheral snapshots, #63 VIA 6522, #64 trace replay, #65 mem-watch conditional expressions, #66 CoW RAM snapshots, #67 WebAssembly playground
 
 ---
 
