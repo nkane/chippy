@@ -214,6 +214,8 @@ func (m *Model) runCommand(line string) string {
 		delete(m.MemBPs, addr)
 		m.saveState()
 		return fmt.Sprintf("mem bp -$%04X", addr)
+	case "trace":
+		return m.cmdTrace(args)
 	case "help", "?":
 		m.ShowHelp = true
 		return "help"
@@ -221,6 +223,47 @@ func (m *Model) runCommand(line string) string {
 		return "use q outside prompt to quit"
 	}
 	return fmt.Sprintf("unknown: %s", cmd)
+}
+
+// cmdTrace implements `:trace`. No args: report status. `on [PATH]`,
+// `off`, or a bare `PATH` (shorthand for `on PATH`). Setting a path opens
+// a fresh file (truncating any existing) and the tracer keeps its
+// enabled/disabled state until Enable/Disable is called.
+func (m *Model) cmdTrace(args []string) string {
+	if m.Tracer == nil {
+		return "trace unavailable"
+	}
+	if len(args) == 0 {
+		if m.Tracer.Enabled() {
+			return fmt.Sprintf("trace: on -> %s", m.Tracer.Path())
+		}
+		if p := m.Tracer.Path(); p != "" {
+			return fmt.Sprintf("trace: off (last: %s)", p)
+		}
+		return "trace: off (no path)"
+	}
+	switch strings.ToLower(args[0]) {
+	case "on":
+		if len(args) >= 2 {
+			if err := m.Tracer.SetPath(args[1]); err != nil {
+				return fmt.Sprintf("trace: %v", err)
+			}
+		}
+		if m.Tracer.Path() == "" {
+			return "trace: no path — use :trace on PATH"
+		}
+		m.Tracer.Enable()
+		return fmt.Sprintf("trace: on -> %s", m.Tracer.Path())
+	case "off":
+		m.Tracer.Disable()
+		return "trace: off"
+	default:
+		if err := m.Tracer.SetPath(args[0]); err != nil {
+			return fmt.Sprintf("trace: %v", err)
+		}
+		m.Tracer.Enable()
+		return fmt.Sprintf("trace: on -> %s", m.Tracer.Path())
+	}
 }
 
 // parseAddrSym tries numeric forms then symbol lookup via m.Syms.

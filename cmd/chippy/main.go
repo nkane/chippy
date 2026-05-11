@@ -17,12 +17,13 @@ import (
 
 func main() {
 	var (
-		romPath  = flag.String("rom", "", "program to load (.bin .prg .hex .o)")
-		loadAddr = flag.Uint("addr", 0x8000, "load address for raw .bin (ignored for .prg/.hex/.o)")
-		resetVec = flag.Uint("reset", 0, "reset vector override (0 = use file's existing vector or load address)")
-		cfg      = flag.String("cfg", "", "ld65 linker config (.cfg) — required when loading .o files")
-		dbgPath  = flag.String("dbg", "", "cc65 .dbg symbol file (auto-detected as <rom>.dbg if omitted)")
-		cpuFlag  = flag.String("cpu", "nmos", "CPU variant: nmos | 65c02")
+		romPath   = flag.String("rom", "", "program to load (.bin .prg .hex .o)")
+		loadAddr  = flag.Uint("addr", 0x8000, "load address for raw .bin (ignored for .prg/.hex/.o)")
+		resetVec  = flag.Uint("reset", 0, "reset vector override (0 = use file's existing vector or load address)")
+		cfg       = flag.String("cfg", "", "ld65 linker config (.cfg) — required when loading .o files")
+		dbgPath   = flag.String("dbg", "", "cc65 .dbg symbol file (auto-detected as <rom>.dbg if omitted)")
+		cpuFlag   = flag.String("cpu", "nmos", "CPU variant: nmos | 65c02")
+		tracePath = flag.String("trace", "", "write per-instruction execution trace to this file")
 	)
 	flag.Parse()
 
@@ -128,6 +129,17 @@ func main() {
 
 	c := cpu.NewVariant(mmio, variant)
 
+	tracer := cpu.NewFileTracer()
+	c.Tracer = tracer
+	defer func() { _ = tracer.Close() }()
+	if *tracePath != "" {
+		if err := tracer.SetPath(*tracePath); err != nil {
+			fmt.Fprintln(os.Stderr, "trace:", err)
+			os.Exit(1)
+		}
+		tracer.Enable()
+	}
+
 	// Wrap the bus with WBus so memory watchpoints can intercept reads/writes.
 	// We construct CPU on MMIO first (to keep cpu.New's signature simple),
 	// then swap c.Bus to the wrapper. WithWBus attaches the CPU pointer and
@@ -138,7 +150,8 @@ func main() {
 	model := tui.New(c, ram).
 		WithWBus(wbus).
 		WithTextOutput(textOut).
-		WithKeyboard(keyIn)
+		WithKeyboard(keyIn).
+		WithTracer(tracer)
 	if syms != nil {
 		model = model.WithSymbols(syms)
 	}
