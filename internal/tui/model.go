@@ -64,6 +64,7 @@ type Model struct {
 
 	// Modals
 	ShowHelp bool
+	HelpPage int // current page of the multi-page help modal
 	ShowBPs  bool
 	BPCursor int // selected row in BP manager
 
@@ -270,13 +271,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.PromptActive {
 			return m.updatePrompt(msg)
 		}
-		// Help modal: any key dismisses.
+		// Help modal: paging keys advance, any other key dismisses.
 		if m.ShowHelp {
 			switch msg.String() {
 			case "ctrl+c", "q":
 				return m, tea.Quit
+			case "space", "n", "right", "pgdown", "tab", "j", "down":
+				m.HelpPage = (m.HelpPage + 1) % helpPageCount()
+				return m, m.scheduleTick()
+			case "p", "left", "pgup", "shift+tab", "k", "up":
+				m.HelpPage = (m.HelpPage - 1 + helpPageCount()) % helpPageCount()
+				return m, m.scheduleTick()
 			}
 			m.ShowHelp = false
+			m.HelpPage = 0
 			return m, m.scheduleTick()
 		}
 		// BP manager modal.
@@ -900,6 +908,106 @@ func fitPanel(title, body string, w, h int) string {
 
 // ---------- modals ----------
 
+// helpSection is one labeled group of key->description rows.
+type helpSection struct {
+	title string
+	rows  [][2]string
+}
+
+// helpPages partitions the keybinding reference into pages so the modal
+// fits on small terminals. Grow within the current scheme: each page should
+// be ~3 sections / ~12 rows max so a 24-row terminal still renders cleanly.
+func helpPages() [][]helpSection {
+	return [][]helpSection{
+		// Page 1 — core debugger controls
+		{
+			{"Execution", [][2]string{
+				{"s", "step one instruction"},
+				{"S", "step 16 instructions"},
+				{"n", "step over (run JSR to RTS)"},
+				{"f", "run to next source line"},
+				{"<", "rewind one step (snapshot ring; depth shown as `rwd:N`)"},
+				{"r", "run / pause"},
+				{"R", "reset CPU"},
+				{"b", "toggle breakpoint at PC"},
+				{"B", "breakpoint manager"},
+			}},
+			{"Speed", [][2]string{
+				{"+", "faster"},
+				{"-", "slower"},
+				{"0", "unthrottled (max)"},
+			}},
+			{"General", [][2]string{
+				{":", "command line (:goto :pc :watch :speed :bp)"},
+				{"v", "toggle source / disassembly view"},
+				{"i", "input mode → keystrokes go to keyboard peripheral (Esc exits)"},
+				{"? / h", "toggle this help"},
+				{"q / ^C", "quit"},
+			}},
+		},
+		// Page 2 — panels
+		{
+			{"Memory view", [][2]string{
+				{"j / k", "scroll down / up by $10"},
+				{"J / PgDn", "scroll down by $100"},
+				{"K / PgUp", "scroll up by $100"},
+				{"g / G", "jump to $0000 / $FF00"},
+				{"← →", "move byte cursor ±1"},
+				{"↑ ↓", "move byte cursor ±$10 (auto-scrolls)"},
+				{"e", "edit byte at cursor (hex; enter=commit esc=cancel)"},
+			}},
+			{"Disassembly", [][2]string{
+				{"[ / ]", "scroll one instruction up / down"},
+				{"{ / }", "scroll eight instructions up / down"},
+				{"'", "follow PC again"},
+			}},
+			{"Stack panel", [][2]string{
+				{"T", "toggle JSR-frame annotation / raw bytes"},
+				{"annotated", "ret $XXXX + callee + source line per JSR pair"},
+				{"raw", "one byte per row from SP up"},
+			}},
+		},
+		// Page 3 — prompt + breakpoint commands
+		{
+			{"Prompt", [][2]string{
+				{"↑ / ↓", "walk command history (persisted to ~/.chippy/history)"},
+				{"Tab", "complete verb or symbol (after :bp etc.)"},
+				{"Ctrl-R", "reverse-incremental search history (Ctrl-R again = next)"},
+				{"Esc", "cancel prompt or RI search"},
+			}},
+			{"Breakpoints", [][2]string{
+				{":bp X", "toggle plain bp at addr/symbol/file.s:42"},
+				{":bp X once", "one-shot (auto-delete on hit)"},
+				{":bp X hits N", "break only on Nth hit"},
+				{":bp X if E", "conditional (E uses A,X,Y,P,SP,PC,N,V,Z,C,[$XX])"},
+				{":bp X log M", "log point: prints M, doesn't pause"},
+				{"sigils", "🛑 plain  🔶 cond  📜 log  💩 reject  👉 PC"},
+			}},
+		},
+		// Page 4 — memory watchpoints + trace
+		{
+			{"Memory watchpoints", [][2]string{
+				{":bpr X", "watch reads at X"},
+				{":bpw X", "watch writes at X"},
+				{":bprw X", "watch both reads and writes"},
+				{":rmbpr X", "remove (also :rmbpw / :rmbprw)"},
+				{"modifiers", "same: once / hits N / if E / log M"},
+				{"sigils", "👁 read  ✏ write  🔁 read+write"},
+			}},
+			{"Trace", [][2]string{
+				{":trace PATH", "open PATH and enable per-instruction trace"},
+				{":trace on", "re-enable using the last-set path"},
+				{":trace off", "disable + flush buffer to disk"},
+				{":trace", "show current state"},
+				{"--trace", "CLI flag: enable at startup with given path"},
+				{"--run-on-start", "start running immediately (pair with --trace)"},
+			}},
+		},
+	}
+}
+
+func helpPageCount() int { return len(helpPages()) }
+
 func (m Model) helpModal() string {
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("213")).Bold(true)
 	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
@@ -910,85 +1018,15 @@ func (m Model) helpModal() string {
 		return fmt.Sprintf("  %s   %s", keyStyle.Render(fmt.Sprintf("%-10s", k)), descStyle.Render(d))
 	}
 
-	sections := []struct {
-		title string
-		rows  [][2]string
-	}{
-		{"Execution", [][2]string{
-			{"s", "step one instruction"},
-			{"S", "step 16 instructions"},
-			{"n", "step over (run JSR to RTS)"},
-			{"f", "run to next source line"},
-			{"<", "rewind one step (snapshot ring; depth shown as `rwd:N`)"},
-			{"r", "run / pause"},
-			{"R", "reset CPU"},
-			{"b", "toggle breakpoint at PC"},
-			{"B", "breakpoint manager"},
-		}},
-		{"Speed", [][2]string{
-			{"+", "faster"},
-			{"-", "slower"},
-			{"0", "unthrottled (max)"},
-		}},
-		{"Memory view", [][2]string{
-			{"j / k", "scroll down / up by $10"},
-			{"J / PgDn", "scroll down by $100"},
-			{"K / PgUp", "scroll up by $100"},
-			{"g / G", "jump to $0000 / $FF00"},
-			{"← →", "move byte cursor ±1"},
-			{"↑ ↓", "move byte cursor ±$10 (auto-scrolls)"},
-			{"e", "edit byte at cursor (hex; enter=commit esc=cancel)"},
-		}},
-		{"Disassembly", [][2]string{
-			{"[ / ]", "scroll one instruction up / down"},
-			{"{ / }", "scroll eight instructions up / down"},
-			{"'", "follow PC again"},
-		}},
-		{"Stack panel", [][2]string{
-			{"T", "toggle JSR-frame annotation / raw bytes"},
-			{"annotated", "ret $XXXX + callee + source line per JSR pair"},
-			{"raw", "one byte per row from SP up"},
-		}},
-		{"Prompt", [][2]string{
-			{"↑ / ↓", "walk command history (persisted to ~/.chippy/history)"},
-			{"Tab", "complete verb (no space yet) or symbol (after :bp etc.)"},
-			{"Ctrl-R", "reverse-incremental search through history (Ctrl-R again = next)"},
-			{"Esc", "cancel prompt or RI search"},
-		}},
-		{"General", [][2]string{
-			{":", "command line (:goto :pc :watch :speed :bp)"},
-			{"v", "toggle source / disassembly view"},
-			{"i", "input mode → keystrokes go to keyboard peripheral (Esc exits)"},
-			{"? / h", "toggle this help"},
-			{"q / ^C", "quit"},
-		}},
-		{"Breakpoints", [][2]string{
-			{":bp X", "toggle plain bp at addr/symbol/file.s:42"},
-			{":bp X once", "one-shot (auto-delete on hit)"},
-			{":bp X hits N", "break only on Nth hit"},
-			{":bp X if E", "conditional (E uses A,X,Y,P,SP,PC,N,V,Z,C,[$XX])"},
-			{":bp X log M", "log point: prints M, doesn't pause"},
-			{"sigils", "🛑 plain  🔶 cond  📜 log  💩 reject  👉 PC"},
-		}},
-		{"Memory watchpoints", [][2]string{
-			{":bpr X", "watch reads at X"},
-			{":bpw X", "watch writes at X"},
-			{":bprw X", "watch both reads and writes"},
-			{":rmbpr X", "remove (also :rmbpw / :rmbprw)"},
-			{"modifiers", "same: once / hits N / if E / log M"},
-			{"sigils", "👁 read  ✏ write  🔁 read+write"},
-		}},
-		{"Trace", [][2]string{
-			{":trace PATH", "open PATH and enable per-instruction trace"},
-			{":trace on", "re-enable using the last-set path"},
-			{":trace off", "disable + flush buffer to disk"},
-			{":trace", "show current state"},
-			{"--trace", "CLI flag: enable at startup with given path"},
-		}},
+	pages := helpPages()
+	pageIdx := m.HelpPage
+	if pageIdx < 0 || pageIdx >= len(pages) {
+		pageIdx = 0
 	}
+	sections := pages[pageIdx]
 
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("chippy — keybindings"))
+	b.WriteString(titleStyle.Render(fmt.Sprintf("chippy — keybindings  (page %d/%d)", pageIdx+1, len(pages))))
 	b.WriteString("\n\n")
 	for i, s := range sections {
 		if i > 0 {
@@ -1002,7 +1040,7 @@ func (m Model) helpModal() string {
 		}
 	}
 	b.WriteString("\n")
-	b.WriteString(dim.Render("  press any key to dismiss"))
+	b.WriteString(dim.Render("  space/→: next page   p/←: prev   any other key: close"))
 
 	return lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
