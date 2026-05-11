@@ -109,7 +109,7 @@ func (t *FileTracer) LogStep(c *CPU, bus Bus) {
 	case 3:
 		bytesStr = fmt.Sprintf("%02X %02X %02X", op, b1, b2)
 	}
-	dis, _ := Disasm(bus, pc)
+	dis, _ := DisasmCPU(c, pc)
 	fmt.Fprintf(t.out, "%04X  %s  %-13s  A:%02X X:%02X Y:%02X P:%02X SP:%02X CYC:%d\n",
 		pc, bytesStr, dis, c.A, c.X, c.Y, c.P, c.SP, c.Cycles)
 }

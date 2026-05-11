@@ -144,10 +144,11 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - #41 — Prompt history + tab-complete (issue #20): `~/.chippy/history` (cap 100, dedup, auto-save), Up/Down recall, Tab completes verbs and `:bp <symbol>` against the loaded `.dbg`, Ctrl-R reverse-incremental search (Ctrl-R again walks older). Added `symbols.Table.NamesWithPrefix`.
 - v0.0.2 — release cut after #41. 7 features since v0.0.1; binaries + brew tap auto-updated.
 - #54 — Reverse step (issue #17): `cpu.Snapshot` / `CPU.Snapshot`/`Restore` capture full regs + RAM + bookkeeping; `rewindRing` (cap 256, FIFO eviction, LIFO pop) records pre-step state on explicit-step paths only (free-run skipped to avoid 64 KiB/step cost); `<` pops one; status bar shows `rwd:N` depth.
+- #55 — CMOS-aware disasm (issue #42): `DisasmCPU` / `DisasmCPUWithSyms` route through the CPU's opcode table so CMOS-only mnemonics (STZ/PHX/BRA/etc.) render correctly in the disasm panel, trace lines, and any future caller. Legacy `Disasm`/`DisasmWithSyms` retained as NMOS-default shims.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars
-- #42 (CMOS-aware disasm), #43 (trace IRQ entry lines), #44 (--run-on-start), #45 (stack heuristic tighten)
+- #43 (trace IRQ entry lines), #44 (--run-on-start), #45 (stack heuristic tighten)
 - #46 DAP epic + #47–#53 sub-issues
 
 ---
@@ -158,7 +159,7 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - **Variant-based CPU dispatch via per-CPU table pointer** — chosen over a runtime switch in every opcode so future variants (65816, etc.) only need a new table file. Tables share NMOS as a base and override.
 - **CMOS table init via copy-then-override**, relying on Go's `init()` lex file ordering (`opcodes.go` < `opcodes_cmos.go` < `opcodes_illegal.go`). This is a load-bearing invariant — renaming files could break the init chain.
 - **ZPR addressing handler self-fetches operand bytes** and self-advances PC; `resolve()` returns `(0, false)` for ZPR. Simpler than encoding both zp byte and rel target through `resolve`.
-- **`disasm.go` still NMOS-only** (uses global `Opcodes`). A variant-aware disasm is deferred — not blocking any active work.
+- **Disassembler is variant-aware** (PR #55, issue #42). Legacy `Disasm` / `DisasmWithSyms` still use the NMOS table for back-compat; `DisasmCPU` / `DisasmCPUWithSyms` route through `c.opcodes` so CMOS-only mnemonics (STZ, PHX, BRA, etc.) render correctly. TUI + trace switched to the CPU-aware path.
 
 ### Bug fixes worth remembering
 - **PR #31:** `branch()` was mutating `c.Cycles` directly but `Step()` returned only `in.Cycles`. Result: taken branches undercounted return value by 1–2. Fix: `extraCycles int` field, reset each `Step`, folded into the return.
@@ -240,7 +241,7 @@ chippy -rom <file> [-addr 0x8000] [-reset 0xADDR] [-cfg linker.cfg] [-dbg syms.d
 - `internal/cpu/opcodes.go` — NMOS opcode table (199 LOC)
 - `internal/cpu/opcodes_cmos.go` — CMOS overrides (BRA, PHX/PHY/PLX/PLY, STZ, TRB, TSB, INA/DEA, BIT #imm, RMB/SMB/BBR/BBS, adcDecimalCMOS, sbcDecimalCMOS, cmosNOPs)
 - `internal/cpu/opcodes_illegal.go` — NMOS unofficial opcodes (320 LOC)
-- `internal/cpu/disasm.go` — disassembler; NMOS-only (uses global `Opcodes`)
+- `internal/cpu/disasm.go` — disassembler; variant-aware via `DisasmCPU` / `DisasmCPUWithSyms`. Legacy NMOS-fixed `Disasm` still exported for callers without a CPU handy.
 - `internal/cpu/memory.go` — `Bus` interface + `RAM` impl
 
 ### Tests
@@ -277,7 +278,7 @@ chippy -rom <file> [-addr 0x8000] [-reset 0xADDR] [-cfg linker.cfg] [-dbg syms.d
 ## 8. Next Steps (immediate)
 
 1. Choose next from open issues: #17 (reverse step), #18 (stack panel), #19 (mem editor), #20 (prompt history). #22 (homebrew-core) is gated on ~30 stars.
-2. **Deferred:** CMOS-aware disasm (`disasm.go` still NMOS-only; affects trace output too — CMOS-only mnemonics render as their NMOS slot). CI job for the CMOS e2e test (self-skips because binary is gitignored).
+2. **Deferred:** CI job for the CMOS e2e test (self-skips because binary is gitignored).
 3. **Possible:** integrate Bruce Clark's BCD timing test or 6502_decimal_test as a klaus-style build-tagged suite — would also exercise the CMOS BCD path.
 4. **User-side:** mascot image generation (prompts in `docs/mascot-prompts.md`).
 
