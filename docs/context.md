@@ -141,10 +141,10 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - #38 — CLAUDE.md "docs are part of every PR" rule: README/context/help-modal/exported docs move with code
 - #39 — Stack panel JSR-frame annotation (issue #18): detects pushed return-address pairs via the `$20` opcode at `stored-2`; renders `ret $XXXX  callee  file:NN`; collapses non-frame runs; `T` toggles raw view
 - #40 — Memory editor (issue #19): byte-level `MemCursor` (arrow keys, auto-scroll), `e` enters hex edit mode at cursor; 1–2 hex chars, Enter commits, Esc cancels; cursor persists in state file; `:goto` aligns view AND moves cursor
+- #41 — Prompt history + tab-complete (issue #20): `~/.chippy/history` (cap 100, dedup, auto-save), Up/Down recall, Tab completes verbs and `:bp <symbol>` against the loaded `.dbg`, Ctrl-R reverse-incremental search (Ctrl-R again walks older). Added `symbols.Table.NamesWithPrefix`.
 
 ### Open issues
 - #17 (reverse step) — record/replay micro-history
-- #20 (prompt history) — up-arrow recall in command prompt
 - #22 (homebrew-core) — blocked on stars
 
 ---

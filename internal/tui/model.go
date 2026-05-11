@@ -85,6 +85,24 @@ type Model struct {
 	PromptActive bool
 	PromptBuf    string
 
+	// Prompt command history. Persisted to HistPath when set, capped at
+	// histCap entries. HistIdx walks back from the newest entry; -1 means
+	// "not navigating, PromptBuf is live". HistTemp saves the in-progress
+	// buffer when the user starts walking with Up so Down restores it.
+	History  []string
+	HistPath string
+	HistIdx  int
+	HistTemp string
+
+	// Reverse-incremental search (Ctrl+R) sub-state. When RISearchActive,
+	// keystrokes feed RISearchBuf, PromptBuf shows the matched entry, and
+	// RIOrigBuf is restored on Esc. RIMatchIdx is the History index of
+	// the current match or -1 if none.
+	RISearchActive bool
+	RISearchBuf    string
+	RIOrigBuf      string
+	RIMatchIdx     int
+
 	// State persistence
 	StatePath string
 
@@ -140,6 +158,8 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 		TargetHz:      0,
 		DisasmFollow:  true,
 		StackAnnotate: true,
+		HistIdx:       -1,
+		RIMatchIdx:    -1,
 		W:             120,
 		H:             40,
 	}
@@ -188,6 +208,15 @@ func (m Model) WithKeyboard(k *peripheral.KeyboardInput) Model {
 // WithTracer attaches a CPU execution tracer for runtime control via :trace.
 func (m Model) WithTracer(t *cpu.FileTracer) Model {
 	m.Tracer = t
+	return m
+}
+
+// WithHistoryPath enables persistent prompt history at path (typically
+// tui.DefaultHistoryPath()). Loads existing history on attach; the prompt
+// auto-saves on every committed command.
+func (m Model) WithHistoryPath(p string) Model {
+	m.HistPath = p
+	m.History = loadHistory(p)
 	return m
 }
 
@@ -873,6 +902,12 @@ func (m Model) helpModal() string {
 			{"T", "toggle JSR-frame annotation / raw bytes"},
 			{"annotated", "ret $XXXX + callee + source line per JSR pair"},
 			{"raw", "one byte per row from SP up"},
+		}},
+		{"Prompt", [][2]string{
+			{"↑ / ↓", "walk command history (persisted to ~/.chippy/history)"},
+			{"Tab", "complete verb (no space yet) or symbol (after :bp etc.)"},
+			{"Ctrl-R", "reverse-incremental search through history (Ctrl-R again = next)"},
+			{"Esc", "cancel prompt or RI search"},
 		}},
 		{"General", [][2]string{
 			{":", "command line (:goto :pc :watch :speed :bp)"},

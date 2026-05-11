@@ -16,17 +16,27 @@ var promptStyle = lipgloss.NewStyle().
 	Padding(0, 1)
 
 // updatePrompt handles keystrokes while the `:` command line is active.
+// Reverse-i-search sub-mode takes precedence when active.
 func (m Model) updatePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.RISearchActive {
+		return m.updateRISearch(msg)
+	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.PromptActive = false
 		m.PromptBuf = ""
+		m.HistIdx = -1
+		m.HistTemp = ""
 		m.Status = "cancelled"
 		return m, m.scheduleTick()
 	case "enter":
-		out := m.runCommand(strings.TrimSpace(m.PromptBuf))
+		line := strings.TrimSpace(m.PromptBuf)
+		m.appendHistory(line)
+		out := m.runCommand(line)
 		m.PromptActive = false
 		m.PromptBuf = ""
+		m.HistIdx = -1
+		m.HistTemp = ""
 		m.Status = out
 		return m, m.scheduleTick()
 	case "backspace":
@@ -34,12 +44,157 @@ func (m Model) updatePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.PromptBuf = m.PromptBuf[:len(m.PromptBuf)-1]
 		}
 		return m, m.scheduleTick()
+	case "up":
+		m.historyBack()
+		return m, m.scheduleTick()
+	case "down":
+		m.historyForward()
+		return m, m.scheduleTick()
+	case "tab":
+		if completed, ok := completePrompt(m.PromptBuf, m.Syms); ok {
+			m.PromptBuf = completed
+		}
+		return m, m.scheduleTick()
+	case "ctrl+r":
+		if len(m.History) > 0 {
+			m.RISearchActive = true
+			m.RISearchBuf = ""
+			m.RIOrigBuf = m.PromptBuf
+			m.RIMatchIdx = -1
+		}
+		return m, m.scheduleTick()
 	}
-	// Accept printable runes (single chars only — Bubble Tea reports them as KeyRunes).
 	if len(msg.Runes) > 0 {
 		m.PromptBuf += string(msg.Runes)
 	}
 	return m, m.scheduleTick()
+}
+
+// updateRISearch owns input while Ctrl-R reverse-incremental search is open.
+// Ctrl-R again walks to the next older match; Esc restores the original
+// buffer; Enter accepts the current match and runs it.
+func (m Model) updateRISearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	s := msg.String()
+	switch s {
+	case "esc", "ctrl+c":
+		m.PromptBuf = m.RIOrigBuf
+		m.resetRISearch()
+		return m, m.scheduleTick()
+	case "enter":
+		m.resetRISearch()
+		line := strings.TrimSpace(m.PromptBuf)
+		m.appendHistory(line)
+		out := m.runCommand(line)
+		m.PromptActive = false
+		m.PromptBuf = ""
+		m.HistIdx = -1
+		m.HistTemp = ""
+		m.Status = out
+		return m, m.scheduleTick()
+	case "backspace":
+		if len(m.RISearchBuf) > 0 {
+			m.RISearchBuf = m.RISearchBuf[:len(m.RISearchBuf)-1]
+			m.refreshRIMatch()
+		}
+		return m, m.scheduleTick()
+	case "ctrl+r":
+		m.advanceRIMatch()
+		return m, m.scheduleTick()
+	}
+	if len(msg.Runes) > 0 {
+		m.RISearchBuf += string(msg.Runes)
+		m.refreshRIMatch()
+	}
+	return m, m.scheduleTick()
+}
+
+func (m *Model) resetRISearch() {
+	m.RISearchActive = false
+	m.RISearchBuf = ""
+	m.RIOrigBuf = ""
+	m.RIMatchIdx = -1
+}
+
+// appendHistory records a committed prompt line. No-ops on empty input or
+// when the line duplicates the most-recent entry. Persists immediately so
+// a crash doesn't lose recent work.
+func (m *Model) appendHistory(line string) {
+	if line == "" {
+		return
+	}
+	if n := len(m.History); n > 0 && m.History[n-1] == line {
+		return
+	}
+	m.History = append(m.History, line)
+	if len(m.History) > histCap {
+		m.History = m.History[len(m.History)-histCap:]
+	}
+	_ = saveHistory(m.HistPath, m.History)
+}
+
+func (m *Model) historyBack() {
+	if len(m.History) == 0 {
+		return
+	}
+	switch {
+	case m.HistIdx == -1:
+		m.HistTemp = m.PromptBuf
+		m.HistIdx = 0
+	case m.HistIdx < len(m.History)-1:
+		m.HistIdx++
+	default:
+		return
+	}
+	m.PromptBuf = m.History[len(m.History)-1-m.HistIdx]
+}
+
+func (m *Model) historyForward() {
+	if m.HistIdx == -1 {
+		return
+	}
+	if m.HistIdx == 0 {
+		m.HistIdx = -1
+		m.PromptBuf = m.HistTemp
+		m.HistTemp = ""
+		return
+	}
+	m.HistIdx--
+	m.PromptBuf = m.History[len(m.History)-1-m.HistIdx]
+}
+
+// refreshRIMatch scans History newest -> oldest for a substring match of
+// RISearchBuf and snaps PromptBuf to the first hit. Empty pattern clears
+// the match without changing PromptBuf (so the user sees nothing yet).
+func (m *Model) refreshRIMatch() {
+	if m.RISearchBuf == "" {
+		m.RIMatchIdx = -1
+		m.PromptBuf = ""
+		return
+	}
+	for i := len(m.History) - 1; i >= 0; i-- {
+		if strings.Contains(m.History[i], m.RISearchBuf) {
+			m.RIMatchIdx = i
+			m.PromptBuf = m.History[i]
+			return
+		}
+	}
+	m.RIMatchIdx = -1
+	m.PromptBuf = ""
+}
+
+// advanceRIMatch walks to the next older match for the current pattern.
+// No-op when already at the oldest match or pattern is empty.
+func (m *Model) advanceRIMatch() {
+	if m.RIMatchIdx <= 0 || m.RISearchBuf == "" {
+		return
+	}
+	for i := m.RIMatchIdx - 1; i >= 0; i-- {
+		if strings.Contains(m.History[i], m.RISearchBuf) {
+			m.RIMatchIdx = i
+			m.PromptBuf = m.History[i]
+			return
+		}
+	}
 }
 
 // runCommand parses a `:command args` line and applies it. Returns status text.
@@ -309,8 +464,13 @@ func parseAddr(s string) (uint16, error) {
 }
 
 // promptLine renders the `:` line that replaces the status bar when active.
+// Reverse-i-search shows `(reverse-i-search)\`pattern': match` instead.
 func (m Model) promptLine(width int) string {
 	cursor := lipgloss.NewStyle().Reverse(true).Render(" ")
+	if m.RISearchActive {
+		text := fmt.Sprintf("(reverse-i-search)`%s': %s%s", m.RISearchBuf, m.PromptBuf, cursor)
+		return promptStyle.Width(width).Render(text)
+	}
 	text := ":" + m.PromptBuf + cursor
 	return promptStyle.Width(width).Render(text)
 }
