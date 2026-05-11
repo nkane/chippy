@@ -142,10 +142,13 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - #39 — Stack panel JSR-frame annotation (issue #18): detects pushed return-address pairs via the `$20` opcode at `stored-2`; renders `ret $XXXX  callee  file:NN`; collapses non-frame runs; `T` toggles raw view
 - #40 — Memory editor (issue #19): byte-level `MemCursor` (arrow keys, auto-scroll), `e` enters hex edit mode at cursor; 1–2 hex chars, Enter commits, Esc cancels; cursor persists in state file; `:goto` aligns view AND moves cursor
 - #41 — Prompt history + tab-complete (issue #20): `~/.chippy/history` (cap 100, dedup, auto-save), Up/Down recall, Tab completes verbs and `:bp <symbol>` against the loaded `.dbg`, Ctrl-R reverse-incremental search (Ctrl-R again walks older). Added `symbols.Table.NamesWithPrefix`.
+- v0.0.2 — release cut after #41. 7 features since v0.0.1; binaries + brew tap auto-updated.
+- #54 — Reverse step (issue #17): `cpu.Snapshot` / `CPU.Snapshot`/`Restore` capture full regs + RAM + bookkeeping; `rewindRing` (cap 256, FIFO eviction, LIFO pop) records pre-step state on explicit-step paths only (free-run skipped to avoid 64 KiB/step cost); `<` pops one; status bar shows `rwd:N` depth.
 
 ### Open issues
-- #17 (reverse step) — record/replay micro-history
 - #22 (homebrew-core) — blocked on stars
+- #42 (CMOS-aware disasm), #43 (trace IRQ entry lines), #44 (--run-on-start), #45 (stack heuristic tighten)
+- #46 DAP epic + #47–#53 sub-issues
 
 ---
 
