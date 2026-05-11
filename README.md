@@ -385,6 +385,13 @@ opens a reverse-incremental search through history — each keystroke
 narrows the match, Ctrl-R again walks to the next older one, Esc restores
 the original line, Enter accepts.
 
+Press `<` to rewind one instruction. Each explicit step (`s`, `S`, `n`,
+`f`) records a full CPU + RAM snapshot beforehand, kept in a 256-entry
+FIFO ring; the status bar shows `rwd:N` while non-empty. Free-run via
+`r` does NOT snapshot — the 64 KiB-per-step cost would dominate at multi-MHz
+throughput — so reverse-step covers single-stepping sessions, not whole
+program executions.
+
 ---
 
 ## Status

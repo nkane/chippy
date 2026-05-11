@@ -132,6 +132,12 @@ type Model struct {
 	MemEditing bool
 	MemEditBuf string
 
+	// Reverse-step ring. Each explicit step (s/n/f and their loops) pushes
+	// a pre-step snapshot here so `<` can rewind. Free-run via tickMsg does
+	// NOT push — 64 KiB per snapshot at multi-MHz throughput would dominate
+	// the runtime cost. Nil disables the feature; default cap is set in New.
+	Rewind *rewindRing
+
 	// Disassembly viewport: when DisasmFollow is true (default), the panel
 	// re-anchors on PC each frame. User scroll keys flip it off and pin
 	// DisasmAnchor as the address shown at the top of the window.
@@ -160,6 +166,7 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 		StackAnnotate: true,
 		HistIdx:       -1,
 		RIMatchIdx:    -1,
+		Rewind:        newRewindRing(defaultRewindCap),
 		W:             120,
 		H:             40,
 	}
@@ -308,7 +315,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.CPU.Halted {
 				m.Status = "halted (press R to reset)"
 			} else {
-				m.CPU.Step()
+				m.step()
 				m.statusAfterStep("stepped")
 			}
 		case "S":
@@ -317,7 +324,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			for i := 0; i < 16 && !m.CPU.Halted; i++ {
-				m.CPU.Step()
+				m.step()
 				if mpause, mmsg := m.processMemHits(); mpause {
 					m.Status = mmsg
 					break
@@ -348,7 +355,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "R":
 			m.CPU.Reset()
+			if m.Rewind != nil {
+				m.Rewind.Reset()
+			}
 			m.Status = "reset"
+		case "<":
+			if m.Rewind == nil || m.Rewind.Len() == 0 {
+				m.Status = "rewind: empty"
+				break
+			}
+			s, _ := m.Rewind.Pop()
+			m.CPU.Restore(s, m.RAM)
+			m.Status = fmt.Sprintf("rewind -> $%04X (depth %d)", m.CPU.PC, m.Rewind.Len())
 		case "b":
 			if _, ok := m.Breakpoints[m.CPU.PC]; ok {
 				delete(m.Breakpoints, m.CPU.PC)
@@ -493,6 +511,18 @@ func keyMsgToByte(msg tea.KeyMsg) (byte, bool) {
 	return 0, false
 }
 
+// step takes one CPU instruction *and* records a rewind snapshot first so
+// `<` can undo it. Use this in all explicit-step keypaths (`s` / `S` / `n` /
+// `f` and the inner loops of stepOver / runToNextLine). The tickMsg
+// free-run loop calls m.CPU.Step() directly to avoid the 64 KiB snapshot
+// cost per cycle at multi-MHz throughput.
+func (m *Model) step() int {
+	if m.Rewind != nil {
+		m.Rewind.Push(m.CPU.Snapshot(m.RAM))
+	}
+	return m.CPU.Step()
+}
+
 // statusAfterStep updates Status reflecting halt or normal stepping outcome.
 func (m *Model) statusAfterStep(normal string) {
 	if m.CPU.Halted {
@@ -521,14 +551,14 @@ func (m *Model) stepOver() {
 	}
 	op := m.RAM.Read(m.CPU.PC)
 	if op != 0x20 {
-		m.CPU.Step()
+		m.step()
 		m.statusAfterStep("stepped")
 		return
 	}
 	retPC := m.CPU.PC + 3
 	const guard = 2_000_000
 	for i := 0; i < guard; i++ {
-		m.CPU.Step()
+		m.step()
 		if m.CPU.Halted {
 			m.Status = fmt.Sprintf("halted at $%04X", m.CPU.PC)
 			return
@@ -561,13 +591,13 @@ func (m *Model) runToNextLine() {
 	}
 	startLoc, hasMap := m.PCToSrc[m.CPU.PC]
 	if !hasMap || m.PCToSrc == nil {
-		m.CPU.Step()
+		m.step()
 		m.statusAfterStep("stepped (no src map)")
 		return
 	}
 	const guard = 1_000_000
 	for i := 0; i < guard; i++ {
-		m.CPU.Step()
+		m.step()
 		if m.CPU.Halted {
 			m.Status = fmt.Sprintf("halted at $%04X", m.CPU.PC)
 			return
@@ -804,9 +834,13 @@ func (m Model) View() string {
 	title := titleStyle.Render(" chippy — 6502 TUI debugger ")
 	titleRow := lipgloss.PlaceHorizontal(m.W, lipgloss.Center, title)
 
+	rewindSeg := ""
+	if d := m.Rewind.Len(); d > 0 {
+		rewindSeg = fmt.Sprintf(" │ rwd:%d", d)
+	}
 	statusText := fmt.Sprintf(
-		" %s │ cyc=%d │ PC=$%04X │ %s │ [?] help  [:] cmd  [s/n] step  [r] run  [v] src  [q] quit",
-		m.Status, m.CPU.Cycles, m.CPU.PC, speedLabel(m.TargetHz),
+		" %s │ cyc=%d │ PC=$%04X │ %s%s │ [?] help  [:] cmd  [s/n] step  [r] run  [<] back  [v] src  [q] quit",
+		m.Status, m.CPU.Cycles, m.CPU.PC, speedLabel(m.TargetHz), rewindSeg,
 	)
 	bar := statusBar.Width(m.W).Render(statusText)
 	if m.PromptActive {
@@ -874,6 +908,7 @@ func (m Model) helpModal() string {
 			{"S", "step 16 instructions"},
 			{"n", "step over (run JSR to RTS)"},
 			{"f", "run to next source line"},
+			{"<", "rewind one step (snapshot ring; depth shown as `rwd:N`)"},
 			{"r", "run / pause"},
 			{"R", "reset CPU"},
 			{"b", "toggle breakpoint at PC"},
