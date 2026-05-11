@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"sync"
+	"sync/atomic"
 
 	"github.com/nkane/chippy/internal/cpu"
 	"github.com/nkane/chippy/internal/loader"
@@ -43,6 +44,15 @@ type Server struct {
 	// terminated flips true on disconnect / terminate. Serve returns when
 	// either the wire closes or this flag goes true.
 	terminated bool
+
+	// Step-control state. `running` is set by `continue`; the run loop
+	// goroutine spins Step() in the background until it observes
+	// `pauseRequested` (set by `pause` or by another step request) or
+	// the CPU halts. `runDone` is closed by the run loop on exit so
+	// other handlers can wait for it before mutating CPU state.
+	running        atomic.Bool
+	pauseRequested atomic.Bool
+	runDone        chan struct{}
 }
 
 // NewServer wires the transport to a fresh Server. r/w must point at the
@@ -97,6 +107,18 @@ func (s *Server) dispatch(req Request) {
 		s.sendErrorResponse(req, "attach is not supported in this build; use launch")
 	case "configurationDone":
 		s.sendResponse(req, nil)
+	case "continue":
+		s.handleContinue(req)
+	case "next":
+		s.handleNext(req)
+	case "stepIn":
+		s.handleStepIn(req)
+	case "stepOut":
+		s.handleStepOut(req)
+	case "pause":
+		s.handlePause(req)
+	case "threads":
+		s.handleThreads(req)
 	case "disconnect":
 		s.handleDisconnect(req)
 	case "terminate":
@@ -239,6 +261,7 @@ func (s *Server) bootDebuggee(args LaunchArguments) error {
 }
 
 func (s *Server) handleDisconnect(req Request) {
+	s.stopRunLoop()
 	s.sendResponse(req, nil)
 	if s.tracer != nil {
 		_ = s.tracer.Close()
@@ -247,12 +270,24 @@ func (s *Server) handleDisconnect(req Request) {
 }
 
 func (s *Server) handleTerminate(req Request) {
+	s.stopRunLoop()
 	s.sendResponse(req, nil)
 	s.sendEvent("terminated", TerminatedEventBody{})
 	if s.tracer != nil {
 		_ = s.tracer.Close()
 	}
 	s.terminated = true
+}
+
+// stopRunLoop signals the run-loop goroutine (if any) to exit and waits
+// for it to finish so callers can safely tear down CPU state. No-op when
+// the CPU is already stopped.
+func (s *Server) stopRunLoop() {
+	if !s.running.Load() {
+		return
+	}
+	s.pauseRequested.Store(true)
+	<-s.runDone
 }
 
 // sendResponse marshals a successful response for req. body may be nil.

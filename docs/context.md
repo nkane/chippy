@@ -151,10 +151,12 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - #58 — Stack heuristic tightening (issue #45): `detectStackFrame` now also rejects frames whose stored return-address or JSR target falls below `codeMinAddr = $0200` (zero-page + stack-page). Cuts most false positives without losing real frames.
 - #68 — Help modal paging: 4 pages, space/→ next, p/← prev, any other key closes. Splits the 10-section keybinding reference so the modal fits on small terminals.
 - #69 — DAP transport + initialize/launch/disconnect (issue #47): `internal/dap` package with Content-Length framing, request/response/event types, server dispatch loop; `-dap stdio | tcp:PORT` CLI flag. Launches construct CPU+RAM+MMIO from `LaunchArguments` matching the CLI flag shape; capabilities advertise everything #48–#53 will eventually wire (conditional bp / instruction bp / disassemble / readMemory / writeMemory etc.).
+- v0.1.0 — release cut after #69. Minor bump signals new DAP subsystem.
+- DAP step controls (issue #50): `continue` / `next` / `stepIn` / `stepOut` / `pause` / `threads`. `continue` spins a background goroutine that calls `cpu.Step` until pauseRequested flips true or the CPU halts; emits `stopped` event on exit. Single-step variants refuse while running and emit `stopped` after the synchronous step.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars
-- #46 DAP epic; remaining sub-issues #48–#53
+- #46 DAP epic; remaining sub-issues #48 (variables), #49 (breakpoints), #51 (disasm/memory), #52 (evaluate), #53 (example configs + docs)
 - Post-DAP follow-ups: #59 Klaus 65C02, #60 BCD test, #61 CMOS e2e in CI, #62 peripheral snapshots, #63 VIA 6522, #64 trace replay, #65 mem-watch conditional expressions, #66 CoW RAM snapshots, #67 WebAssembly playground
 
 ---
