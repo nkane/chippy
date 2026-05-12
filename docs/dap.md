@@ -80,15 +80,13 @@ require("dap").adapters.chippy = {
 | `setFunctionBreakpoints`         | #82   | Symbol-name bps via `syms.LookupName`. Unknown names report `verified: false`. |
 | `loadedSources`                  | #84   | Lists every file the loaded `.dbg` references. |
 | `source`                         | #84   | Returns file contents for a previously-listed Source. Basename-matches if the client passes an absolute path. |
-| `disassemble`                    | #51   | Variant-aware via `cpu.DisasmCPU`. |
+| `disassemble`                    | #51, #80 | Variant-aware via `cpu.DisasmCPU`. Negative `instructionOffset` resolves via `cpu.WalkBack` for pre-context. |
 | `readMemory` / `writeMemory`     | #51   | Bypasses MMIO — peripherals don't see debugger pokes. |
 | `evaluate`                       | #52   | Watch / hover / debug-console expressions via `internal/expr`. |
 
 ## Known gaps
 
 - `attach` is unsupported — only `launch` boots a fresh debuggee.
-- `disassemble` clamps negative `instructionOffset` to 0; backward
-  walks would need the TUI's `walkBack` heuristic.
 - Peripherals aren't snapshotted by reverse-step (see #62).
 - The DAP server is a single session per process. To debug two ROMs
   at once, run two `chippy -dap` instances on different ports.

@@ -1326,48 +1326,12 @@ func disasmAddrsAround(c *cpu.CPU, pc uint16, above, below int, isData func(uint
 // `pc`, in ascending order. Strategy: try every starting offset 1..MaxLook
 // behind pc; the alignment that decodes cleanly all the way to pc with the
 // most instructions wins.
+// walkBack is a thin wrapper around cpu.WalkBack — kept so existing call
+// sites (in this file and disasmAddrsAround) don't need a per-call
+// package prefix. The actual heuristic lives in internal/cpu so the DAP
+// server's disassemble handler can share it.
 func walkBack(c *cpu.CPU, pc uint16, n int) []uint16 {
-	if n <= 0 || pc == 0 {
-		return nil
-	}
-	const maxLook = 64 // bytes of lookback
-	bestSeq := []uint16{}
-	for back := 1; back <= maxLook; back++ {
-		if int(pc)-back < 0 {
-			break
-		}
-		start := pc - uint16(back)
-		// Decode forward from `start`, recording instruction addresses, until
-		// we either hit pc exactly (good) or pass it (bad alignment).
-		var seq []uint16
-		cur := start
-		ok := true
-		for cur < pc {
-			seq = append(seq, cur)
-			_, sz := cpu.DisasmCPUWithSyms(c, cur, nil)
-			next := uint32(cur) + uint32(sz)
-			if next > uint32(pc) {
-				ok = false
-				break
-			}
-			cur = uint16(next)
-		}
-		if !ok || cur != pc {
-			continue
-		}
-		// Prefer sequences with more instructions (closer to a stable boundary).
-		if len(seq) > len(bestSeq) {
-			bestSeq = seq
-			if len(bestSeq) >= n {
-				break
-			}
-		}
-	}
-	// Trim to last n.
-	if len(bestSeq) > n {
-		bestSeq = bestSeq[len(bestSeq)-n:]
-	}
-	return bestSeq
+	return cpu.WalkBack(c, pc, n)
 }
 
 // cachedDisasmAddrs wraps disasmAddrsAround with a one-entry cache. While the

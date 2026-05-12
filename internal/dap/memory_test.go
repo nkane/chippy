@@ -124,6 +124,37 @@ func TestMem_WriteMemoryThenRead(t *testing.T) {
 	}
 }
 
+func TestMem_DisassembleBackwardContext(t *testing.T) {
+	// Layout: $8000 A9 42 (LDA #$42, 2B) ; $8002 EA (NOP, 1B) ; $8003 EA (NOP, 1B) ; $8004 4C 00 80 (JMP $8000, 3B)
+	// Asking from $8004 with instructionOffset=-3 should produce $8000, $8002, $8003 as pre-context, then $8004 as the reference.
+	s, _, out := newStoppedServer(t, []byte{0xA9, 0x42, 0xEA, 0xEA, 0x4C, 0x00, 0x80})
+
+	req := Request{
+		ProtocolMessage: ProtocolMessage{Seq: 1, Type: "request"},
+		Command:         "disassemble",
+		Arguments:       json.RawMessage(`{"memoryReference":"$8004","instructionOffset":-3,"instructionCount":4}`),
+	}
+	s.handleDisassemble(req)
+
+	body := out.String()
+	for _, want := range []string{
+		`"address":"$8000"`,
+		`"address":"$8002"`,
+		`"address":"$8003"`,
+		`"address":"$8004"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected %s in body:\n%s", want, body)
+		}
+	}
+	// Confirm address ordering: $8000 must appear before $8004 in the output.
+	idx8000 := strings.Index(body, `"address":"$8000"`)
+	idx8004 := strings.Index(body, `"address":"$8004"`)
+	if idx8000 >= idx8004 {
+		t.Fatalf("pre-context $8000 should appear before $8004 in body:\n%s", body)
+	}
+}
+
 func TestMem_DisassembleUsesVariantTable(t *testing.T) {
 	// CMOS BRA = $80 rel. NMOS legacy disasm would render it as "NOP #$02"
 	// (or whatever the NMOS slot is). The disassemble handler must route
