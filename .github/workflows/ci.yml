@@ -105,6 +105,21 @@ jobs:
       - name: Run exhaustive decimal-mode test (Bruce Clark Appendix B)
         run: go test -tags=decimal -timeout 2m -run TestDecimal -v ./internal/cpu/...
 
+  perfgate:
+    name: perf baseline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          cache: true
+
+      - name: Run perf gate
+        run: go test -tags=perfgate -timeout 5m -run TestPerfGate -v ./internal/cpu/...
+
   govulncheck:
     name: govulncheck
     runs-on: ubuntu-latest

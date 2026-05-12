@@ -33,7 +33,8 @@ CI must pass:
 - `golangci-lint run`
 - `govulncheck ./...`
 - The platform-specific harnesses on push: Klaus 6502 + 65C02, exhaustive
-  BCD, DAP integration, cmos demo end-to-end, WASM build.
+  BCD, DAP integration, cmos demo end-to-end, WASM build, and the perf
+  gate (see [`docs/perf-baseline.md`](docs/perf-baseline.md)).
 
 ## Commit style
 
