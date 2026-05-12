@@ -36,9 +36,22 @@ func (s *Server) handleDisassemble(req Request) {
 		s.sendErrorResponse(req, fmt.Sprintf("bad memoryReference %q: %v", args.MemoryReference, err))
 		return
 	}
-	refPC := uint16(int(base) + args.Offset)
+	// Offset is signed; large negatives would wrap the uint16 conversion
+	// to an unpredictable PC. Clamp to the 16-bit address space.
+	pc := int(base) + args.Offset
+	if pc < 0 {
+		pc = 0
+	}
+	if pc > 0xFFFF {
+		pc = 0xFFFF
+	}
+	refPC := uint16(pc)
 	count := args.InstructionCount
-	if count <= 0 {
+	if count < 0 {
+		s.sendErrorResponse(req, fmt.Sprintf("instructionCount must be >= 0; got %d", count))
+		return
+	}
+	if count == 0 {
 		count = 16
 	}
 
@@ -124,6 +137,10 @@ func (s *Server) handleReadMemory(req Request) {
 	start := int(base) + args.Offset
 	if start < 0 || start > 0xFFFF {
 		s.sendErrorResponse(req, fmt.Sprintf("address out of range: %d", start))
+		return
+	}
+	if args.Count < 0 {
+		s.sendErrorResponse(req, fmt.Sprintf("count must be >= 0; got %d", args.Count))
 		return
 	}
 	n := args.Count

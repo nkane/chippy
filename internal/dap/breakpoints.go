@@ -29,8 +29,18 @@ func (s *Server) handleSetBreakpoints(req Request) {
 	srcKey := canonicalSourcePath(args.Source)
 	resolved := make(map[int]uint16)
 	metaForLine := make(map[int]*bpMeta)
+	seenLine := make(map[int]bool)
 	results := make([]Breakpoint, 0, len(args.Breakpoints))
 	for _, bp := range args.Breakpoints {
+		if seenLine[bp.Line] {
+			results = append(results, Breakpoint{
+				Verified: false,
+				Line:     bp.Line,
+				Message:  fmt.Sprintf("duplicate breakpoint at %s:%d — first entry kept", srcKey, bp.Line),
+			})
+			continue
+		}
+		seenLine[bp.Line] = true
 		pc, ok := s.lookupSourceLine(args.Source, bp.Line)
 		if !ok {
 			results = append(results, Breakpoint{
@@ -109,6 +119,13 @@ func (s *Server) handleSetInstructionBreakpoints(req Request) {
 			continue
 		}
 		pc := uint16(int(n) + bp.Offset)
+		if newInst[pc] {
+			results = append(results, Breakpoint{
+				Verified: false,
+				Message:  fmt.Sprintf("duplicate instruction breakpoint at $%04X — first entry kept", pc),
+			})
+			continue
+		}
 		meta, mErr := s.buildBPMeta(bp.Condition, bp.HitCondition, "")
 		if mErr != nil {
 			results = append(results, Breakpoint{

@@ -237,6 +237,10 @@ func (s *Server) handleNext(req Request) {
 
 // handleStepOut runs until SP rises above the current frame's SP — i.e.
 // the current routine has popped its return address and RTS'd back.
+// SP is 8-bit and wraps from $FF to $00 on push, $00 to $FF on pop. A
+// naive `SP > startSP` comparison breaks when an RTS lifts SP through
+// the boundary ($FE → $00, say). Treating the modular delta as a signed
+// 8-bit value gives a "did we rise?" test that handles the wrap.
 func (s *Server) handleStepOut(req Request) {
 	if !s.requireStopped(req) {
 		return
@@ -248,7 +252,7 @@ func (s *Server) handleStepOut(req Request) {
 			if s.cpu.Halted {
 				break
 			}
-			if s.cpu.SP > startSP {
+			if int8(s.cpu.SP-startSP) > 0 {
 				break
 			}
 		}
