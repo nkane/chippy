@@ -1,0 +1,6 @@
+{
+  "_comment": "Per-benchmark maximum allowed ns/op. The perfgate test fails if a benchmark exceeds the threshold by more than 15%. Refresh on a known-good ubuntu-latest commit via: go test -bench=. -benchtime=3s -count=5 -run=^$ ./internal/cpu/ — take the median across runs, multiply by ~3x for cross-runner headroom, commit. See docs/perf-baseline.md.",
+  "BenchmarkStep_NMOS": {"ns_op_max": 25},
+  "BenchmarkStep_CMOS": {"ns_op_max": 25},
+  "BenchmarkStep_WithSnapshot": {"ns_op_max": 200}
+}
