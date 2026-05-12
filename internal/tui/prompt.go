@@ -377,6 +377,8 @@ func (m *Model) runCommand(line string) string {
 		return m.cmdTextSave(args)
 	case "theme":
 		return m.cmdTheme(args)
+	case "dap":
+		return m.cmdDAP(args)
 	case "help", "?":
 		m.ShowHelp = true
 		return "help"

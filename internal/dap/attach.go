@@ -3,6 +3,7 @@ package dap
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/nkane/chippy/internal/cpu"
 	"github.com/nkane/chippy/internal/peripheral"
@@ -26,6 +27,13 @@ type AttachConfig struct {
 	SrcMap  *symbols.SourceMap
 	TextOut *peripheral.TextOutput
 	KeyIn   *peripheral.KeyboardInput
+
+	// CPUMu (optional) — shared mutex the hosting process also takes
+	// before mutating the CPU / RAM / peripherals. The DAP server
+	// acquires it around dispatch + every run-loop Step to serialize
+	// concurrent access from the host (e.g. the TUI's `:dap` command).
+	// nil = no concurrent access; server runs unlocked.
+	CPUMu *sync.Mutex
 }
 
 // AttachExisting wires an already-constructed debuggee into the server
@@ -48,6 +56,7 @@ func (s *Server) AttachExisting(cfg AttachConfig) error {
 	s.srcMap = cfg.SrcMap
 	s.textOut = cfg.TextOut
 	s.keyIn = cfg.KeyIn
+	s.cpuMu = cfg.CPUMu
 	return nil
 }
 

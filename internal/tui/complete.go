@@ -23,6 +23,7 @@ var defaultVerbs = func() []string {
 		"trace",
 		"textsave",
 		"theme",
+		"dap",
 		"help", "?",
 		"q", "quit",
 	}

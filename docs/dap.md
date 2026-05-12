@@ -48,6 +48,27 @@ and adjust paths. The launch config maps 1:1 to the CLI flags:
 Same field on `attach` skips/emits the entry stopped event without
 spawning a new run goroutine — the host process drives execution.
 
+## TUI attach (`:dap`)
+
+The TUI can spawn its own DAP listener so an editor can attach to the
+same running session:
+
+```
+:dap 14785       — start TCP listener on :14785
+:dap 0           — auto-assign a free port
+:dap             — report current listener
+:dap stop        — close it
+```
+
+Once the listener is up, point your editor at `localhost:<port>` with
+an `attach` launch config (chippy's `attach` request returns
+`stopped(entry)` and exposes the running CPU). Both the TUI and the
+editor drive the same CPU — chippy serializes access via a shared
+mutex so steps from either side never race.
+
+Only one listener is live at a time. A second `:dap PORT` reports
+"already listening".
+
 ## nvim-dap
 
 Copy `examples/dap/nvim-dap.lua` into your config. It registers the

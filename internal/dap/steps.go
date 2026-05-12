@@ -84,40 +84,13 @@ func (s *Server) runLoop() {
 			reason = "pause"
 			break
 		}
-		// Exception filter: pause BEFORE executing a BRK so the user
-		// can inspect state at the trap point rather than landing in
-		// the IRQ handler. lastExceptionPC drives exceptionInfo's
-		// description.
-		if s.brkOnException.Load() && s.ram.Read(s.cpu.PC) == 0x00 {
-			s.lastExceptionPC.Store(uint32(s.cpu.PC))
-			reason = "exception"
+		// Per-iteration lock so a concurrent TUI surface gets a window
+		// to act between our steps. Holding the lock for the whole
+		// loop would freeze the TUI for the duration of a continue.
+		next, reasonAtBreak := s.runLoopIter()
+		if next == "stop" {
+			reason = reasonAtBreak
 			break
-		}
-		s.stepWithSnapshot(func() { s.cpu.Step() })
-		if s.cpu.Halted {
-			reason = "exception"
-			break
-		}
-		if s.isBreakpoint(s.cpu.PC) {
-			meta := s.lookupBPMeta(s.cpu.PC)
-			fire, logLine := s.shouldFireBP(meta)
-			if logLine != "" {
-				s.sendEvent("output", outputEventBody{
-					Category: "console",
-					Output:   logLine + "\n",
-				})
-			}
-			if fire {
-				reason = "breakpoint"
-				break
-			}
-			// Continue past a non-firing bp: step once so we don't
-			// re-trigger on the same PC immediately.
-			s.stepWithSnapshot(func() { s.cpu.Step() })
-			if s.cpu.Halted {
-				reason = "exception"
-				break
-			}
 		}
 	}
 	s.sendEvent("stopped", StoppedEventBody{
@@ -125,6 +98,45 @@ func (s *Server) runLoop() {
 		ThreadID:          1,
 		AllThreadsStopped: true,
 	})
+}
+
+// runLoopIter runs one iteration of the continue loop under cpuMu.
+// Returns "stop" + a reason when the loop should exit, "continue" + "" otherwise.
+func (s *Server) runLoopIter() (string, string) {
+	s.lockCPU()
+	defer s.unlockCPU()
+	// Exception filter: pause BEFORE executing a BRK so the user
+	// can inspect state at the trap point rather than landing in
+	// the IRQ handler. lastExceptionPC drives exceptionInfo's
+	// description.
+	if s.brkOnException.Load() && s.ram.Read(s.cpu.PC) == 0x00 {
+		s.lastExceptionPC.Store(uint32(s.cpu.PC))
+		return "stop", "exception"
+	}
+	s.stepWithSnapshot(func() { s.cpu.Step() })
+	if s.cpu.Halted {
+		return "stop", "exception"
+	}
+	if s.isBreakpoint(s.cpu.PC) {
+		meta := s.lookupBPMeta(s.cpu.PC)
+		fire, logLine := s.shouldFireBP(meta)
+		if logLine != "" {
+			s.sendEvent("output", outputEventBody{
+				Category: "console",
+				Output:   logLine + "\n",
+			})
+		}
+		if fire {
+			return "stop", "breakpoint"
+		}
+		// Continue past a non-firing bp: step once so we don't
+		// re-trigger on the same PC immediately.
+		s.stepWithSnapshot(func() { s.cpu.Step() })
+		if s.cpu.Halted {
+			return "stop", "exception"
+		}
+	}
+	return "continue", ""
 }
 
 func (s *Server) handlePause(req Request) {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -162,6 +163,23 @@ type Model struct {
 	// alongside the rest of the savedState fields.
 	Theme string
 
+	// CPUMu (optional) — shared with a co-running DAP server when the
+	// user has typed `:dap PORT`. nil otherwise. The TUI takes the
+	// mutex around every CPU / RAM / peripheral mutation so the editor
+	// driving the DAP session doesn't race.
+	CPUMu *sync.Mutex
+
+	// SrcMap is the raw .dbg source-map pointer. Held separately from
+	// the flattened PCToSrc / SourceFiles / DataRanges so the DAP
+	// attach path can hand the live object to the embedded server.
+	SrcMap *symbols.SourceMap
+
+	// DAPListenAddr is the TCP address the embedded DAP server is
+	// listening on after `:dap PORT`. Empty otherwise. Surfaced in the
+	// status bar so users can paste it into their editor's attach
+	// config.
+	DAPListenAddr string
+
 	W, H int
 }
 
@@ -279,6 +297,7 @@ func (m Model) WithSourceMap(sm *symbols.SourceMap) Model {
 	if sm == nil {
 		return m
 	}
+	m.SrcMap = sm
 	m.PCToSrc = sm.PCToSrc
 	m.SourceFiles = sm.Files
 	m.DataRanges = sm.DataRanges
@@ -579,7 +598,15 @@ func keyMsgToByte(msg tea.KeyMsg) (byte, bool) {
 // `f` and the inner loops of stepOver / runToNextLine). Snapshots are
 // page-level CoW deltas (issue #66) — typical cost is hundreds of bytes,
 // so the tickMsg free-run loop snapshots per step too.
+//
+// CPUMu (if set by `:dap`) serializes this step with a concurrent DAP
+// server. The mutex is held for the snapshot + step + delta-claim
+// triple so a DAP handler can't see a partially-rewound state.
 func (m *Model) step() int {
+	if m.CPUMu != nil {
+		m.CPUMu.Lock()
+		defer m.CPUMu.Unlock()
+	}
 	if m.Rewind == nil {
 		return m.CPU.Step()
 	}
@@ -1113,6 +1140,12 @@ func helpPages() [][]helpSection {
 				{":theme NAME", "switch palette: default | mono | protan | tritan"},
 				{"--theme NAME", "CLI flag — pick the palette at startup"},
 				{"NO_COLOR=1", "env var: force mono regardless of theme"},
+			}},
+			{"DAP attach", [][2]string{
+				{":dap", "show current listener (or `no listener`)"},
+				{":dap PORT", "start a TCP DAP listener so editors can attach"},
+				{":dap 0", "auto-assign a free port"},
+				{":dap stop", "close the listener"},
 			}},
 		},
 	}

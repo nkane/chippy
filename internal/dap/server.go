@@ -80,6 +80,26 @@ type Server struct {
 	// opcode. `lastExceptionPC` is the PC reported by exceptionInfo.
 	brkOnException  atomic.Bool
 	lastExceptionPC atomic.Uint32
+
+	// cpuMu (optional, set via AttachConfig.CPUMu) serializes CPU /
+	// RAM / peripheral access with a concurrently-running TUI. nil
+	// means single-surface mode; the locking helpers below are no-ops.
+	cpuMu *sync.Mutex
+}
+
+// lockCPU acquires s.cpuMu if present. Paired with unlockCPU. Used by
+// the request dispatcher and the run-loop iteration body so TUI keys
+// and DAP requests don't race on CPU state.
+func (s *Server) lockCPU() {
+	if s.cpuMu != nil {
+		s.cpuMu.Lock()
+	}
+}
+
+func (s *Server) unlockCPU() {
+	if s.cpuMu != nil {
+		s.cpuMu.Unlock()
+	}
 }
 
 // NewServer wires the transport to a fresh Server. r/w must point at the
@@ -134,6 +154,13 @@ func (s *Server) Serve() error {
 }
 
 func (s *Server) dispatch(req Request) {
+	// Lock around CPU-touching dispatch so a concurrently-running TUI
+	// (via the `:dap` command) doesn't race. handleContinue and
+	// handlePause manage their own ownership window — see notes there.
+	if req.Command != "continue" && req.Command != "pause" {
+		s.lockCPU()
+		defer s.unlockCPU()
+	}
 	switch req.Command {
 	case "initialize":
 		s.handleInitialize(req)
