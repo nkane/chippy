@@ -106,6 +106,53 @@ changelog:
     - title: 'Other changes'
       order: 999
 
+# Linux package distribution (issue #118). nfpms produces .deb / .rpm
+# / .apk per archived build; attached to the GitHub release alongside
+# the tarballs and the cosign + SBOM artifacts. AUR PKGBUILD is filed
+# from the produced tarballs (the `aurs:` block below).
+nfpms:
+  - id: linux-packages
+    package_name: chippy
+    file_name_template: "{{ .ConventionalFileName }}"
+    homepage: "https://github.com/nkane/chippy"
+    description: "TUI 6502 emulator + ca65/cc65 source-level debugger"
+    maintainer: "Nick Kane <nkanedev@gmail.com>"
+    license: MIT
+    vendor: nkane
+    section: devel
+    priority: optional
+    formats:
+      - deb
+      - rpm
+      - apk
+    contents:
+      - src: ./README.md
+        dst: /usr/share/doc/chippy/README.md
+      - src: ./LICENSE
+        dst: /usr/share/doc/chippy/LICENSE
+
+# AUR (Arch User Repository) bin package. Pulls the tarball goreleaser
+# already uploads to the GitHub release. The PR body in SECURITY.md
+# documents the cosign verify path that downstream packagers use.
+aurs:
+  - name: chippy-bin
+    homepage: "https://github.com/nkane/chippy"
+    description: "TUI 6502 emulator + ca65/cc65 source-level debugger"
+    maintainers:
+      - "Nick Kane <nkanedev at gmail dot com>"
+    license: MIT
+    private_key: "{{ .Env.AUR_SSH_PRIVATE_KEY }}"
+    git_url: "ssh://aur@aur.archlinux.org/chippy-bin.git"
+    package: |-
+      install -Dm755 chippy "${pkgdir}/usr/bin/chippy"
+      install -Dm644 README.md "${pkgdir}/usr/share/doc/chippy/README.md"
+      install -Dm644 LICENSE "${pkgdir}/usr/share/doc/chippy/LICENSE"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "aur: bump chippy-bin to {{ .Tag }}"
+    skip_upload: auto
+
 brews:
   - name: chippy
     repository:
