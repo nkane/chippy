@@ -157,10 +157,10 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - DAP breakpoints (issue #49): `setBreakpoints` (source-line, resolved via `srcMap.PCToSrc` reverse-lookup) and `setInstructionBreakpoints` (address). Both are destructive against their respective namespace per DAP spec. Run loop checks `bpHit` (flattened union) at each Step and emits `stopped` with reason=breakpoint.
 - DAP disassemble / readMemory / writeMemory (issue #51): `disassemble` routes through `cpu.DisasmCPU` (variant-aware), reports `address`, `instructionBytes`, `instruction`, `symbol`, `location`/`line`; `readMemory`/`writeMemory` bypass MMIO so peripheral side-effects don't fire on debugger pokes. Base64 envelope per spec.
 - DAP evaluate (issue #52): `evaluate` request compiles + runs the same expression grammar used by `:bp X if E`. Expression compiler moved from `internal/tui/cond.go` to a new `internal/expr` package so DAP and TUI share semantics (`expr.Compile`, `expr.EvalFn`); `tui.compileCondition` is now a thin wrapper.
+- DAP example configs + onboarding docs (issue #53): `docs/dap.md` walkthrough, `examples/dap/launch.json` (VS Code) and `examples/dap/nvim-dap.lua` (nvim-dap). DAP epic complete.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars
-- #46 DAP epic; remaining sub-issue #53 (example configs + docs)
 - Post-DAP follow-ups: #59 Klaus 65C02, #60 BCD test, #61 CMOS e2e in CI, #62 peripheral snapshots, #63 VIA 6522, #64 trace replay, #65 mem-watch conditional expressions, #66 CoW RAM snapshots, #67 WebAssembly playground
 
 ---

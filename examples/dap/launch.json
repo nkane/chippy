@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "chippy",
+      "request": "launch",
+      "name": "Run chippy (NMOS)",
+      "rom": "${workspaceFolder}/build/program.bin",
+      "cpuVariant": "nmos",
+      "dbgPath": "${workspaceFolder}/build/program.dbg",
+      "stopOnEntry": true
+    },
+    {
+      "type": "chippy",
+      "request": "launch",
+      "name": "Run chippy (CMOS 65C02)",
+      "rom": "${workspaceFolder}/build/program.bin",
+      "cpuVariant": "65c02",
+      "dbgPath": "${workspaceFolder}/build/program.dbg",
+      "stopOnEntry": true
+    },
+    {
+      "type": "chippy",
+      "request": "launch",
+      "name": "Run chippy + trace capture",
+      "rom": "${workspaceFolder}/build/program.bin",
+      "tracePath": "${workspaceFolder}/build/trace.log",
+      "stopOnEntry": false
+    }
+  ]
+}
