@@ -35,6 +35,56 @@ func DisasmCPUWithSyms(c *CPU, addr uint16, sym SymLookup) (string, int) {
 	return disasmWithTable(c.Bus, addr, c.opcodes, sym)
 }
 
+// WalkBack returns up to n instruction-start addresses immediately
+// preceding pc, in ascending order. 6502 has variable-width opcodes so
+// there's no exact backward decode; we try every starting offset
+// 1..maxLook back and pick the alignment that decodes cleanly all the
+// way to pc with the most instructions.
+//
+// Shared between the TUI's disassembly panel scroller and the DAP
+// server's `disassemble` handler when the editor requests pre-context
+// (negative instructionOffset).
+func WalkBack(c *CPU, pc uint16, n int) []uint16 {
+	if n <= 0 || pc == 0 {
+		return nil
+	}
+	const maxLook = 64 // bytes of lookback
+	bestSeq := []uint16{}
+	for back := 1; back <= maxLook; back++ {
+		if int(pc)-back < 0 {
+			break
+		}
+		start := pc - uint16(back)
+		var seq []uint16
+		cur := start
+		ok := true
+		for cur < pc {
+			seq = append(seq, cur)
+			_, sz := DisasmCPUWithSyms(c, cur, nil)
+			next := uint32(cur) + uint32(sz)
+			if next > uint32(pc) {
+				ok = false
+				break
+			}
+			cur = uint16(next)
+		}
+		if !ok || cur != pc {
+			continue
+		}
+		// Prefer sequences with more instructions; at equal length prefer
+		// the earlier start (larger back distance), which biases toward
+		// real code boundaries when illegal-opcode slots happen to
+		// decode in the middle of a real instruction.
+		if len(seq) > len(bestSeq) || (len(seq) == len(bestSeq) && len(seq) > 0 && (len(bestSeq) == 0 || seq[0] < bestSeq[0])) {
+			bestSeq = seq
+		}
+	}
+	if len(bestSeq) > n {
+		bestSeq = bestSeq[len(bestSeq)-n:]
+	}
+	return bestSeq
+}
+
 // disasmWithTable is the shared core. Both the legacy NMOS-fixed API and
 // the CPU-variant-aware API funnel through here so there's exactly one
 // formatter to maintain.

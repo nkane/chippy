@@ -162,6 +162,7 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - DAP stepBack (issue #79, first of #78 DAP-v2 epic): wires the rewind ring into DAP. Snapshot ring promoted from `internal/tui` to `internal/cpu` as `cpu.SnapshotRing` so both the TUI's `<` key and DAP's stepBack share storage. `supportsStepBack: true`.
 - DAP setFunctionBreakpoints (issue #82, DAP-v2): symbol-name bps via `syms.LookupName`. New `bpsByName` map joins `bpsBySrc` and `bpsInst` in `rebuildBPHit`'s union. `supportsFunctionBreakpoints: true`.
 - DAP loadedSources + source (issue #84, DAP-v2): editor's Loaded Scripts pane lists every file in `srcMap.Files`; the `source` request returns joined-line content with basename fallback for clients passing absolute paths. `supportsLoadedSourcesRequest: true`.
+- DAP backward disassemble (issue #80, DAP-v2): `walkBack` promoted from `internal/tui` to `internal/cpu` as `cpu.WalkBack`; DAP's `disassemble` handler uses it for negative `instructionOffset`. Heuristic tightened to prefer earliest-start at equal sequence length, biasing toward real code boundaries.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars

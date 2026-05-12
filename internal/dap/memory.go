@@ -10,16 +10,17 @@ import (
 	"github.com/nkane/chippy/internal/cpu"
 )
 
-// handleDisassemble renders InstructionCount instructions starting at
-// MemoryReference (+ Offset bytes). Variant-aware via cpu.DisasmCPU so
-// CMOS-only mnemonics decode correctly.
+// handleDisassemble renders InstructionCount instructions starting
+// `InstructionOffset` *instructions* before/after MemoryReference (+
+// Offset bytes). Variant-aware via cpu.DisasmCPU so CMOS-only mnemonics
+// decode correctly.
 //
-// NB: a negative InstructionOffset means "show N instructions before the
-// reference address." That's a hard problem on the 6502 because of
-// variable-width opcodes — proper support would require the same
-// walk-back heuristic the TUI uses. Clamped to 0 in this v1; the
-// editor sees fewer pre-context instructions than requested but the
-// disasm view at PC works.
+// Negative InstructionOffset (pre-context) is resolved via cpu.WalkBack —
+// 6502 has variable-width opcodes so there's no exact backward decode;
+// the heuristic walks back up to 64 bytes trying alignments that decode
+// cleanly all the way to the reference. Pre-context list is emitted
+// first, then forward instructions, until InstructionCount entries are
+// produced.
 func (s *Server) handleDisassemble(req Request) {
 	if s.cpu == nil {
 		s.sendErrorResponse(req, "no debuggee — send launch first")
@@ -35,35 +36,34 @@ func (s *Server) handleDisassemble(req Request) {
 		s.sendErrorResponse(req, fmt.Sprintf("bad memoryReference %q: %v", args.MemoryReference, err))
 		return
 	}
-	start := uint16(int(base) + args.Offset)
+	refPC := uint16(int(base) + args.Offset)
 	count := args.InstructionCount
 	if count <= 0 {
 		count = 16
 	}
 
 	instructions := make([]DisassembledInstruction, 0, count)
-	addr := start
-	for i := 0; i < count; i++ {
-		text, n := cpu.DisasmCPU(s.cpu, addr)
-		bytesHex := make([]string, n)
-		for j := 0; j < n; j++ {
-			bytesHex[j] = fmt.Sprintf("%02X", s.ram.Read(addr+uint16(j)))
-		}
-		ins := DisassembledInstruction{
-			Address:          fmt.Sprintf("$%04X", addr),
-			InstructionBytes: strings.Join(bytesHex, " "),
-			Instruction:      text,
-		}
-		if s.syms != nil {
-			ins.Symbol = s.syms.Lookup(addr)
-		}
-		if s.srcMap != nil {
-			if loc, ok := s.srcMap.PCToSrc[addr]; ok {
-				ins.Location = &Source{Name: filepath.Base(loc.File), Path: loc.File}
-				ins.Line = loc.Line
+
+	// Pre-context: if instructionOffset is negative, walk back |offset|
+	// instructions from refPC and emit them first.
+	if args.InstructionOffset < 0 {
+		back := cpu.WalkBack(s.cpu, refPC, -args.InstructionOffset)
+		for _, a := range back {
+			if len(instructions) >= count {
+				break
 			}
+			instructions = append(instructions, s.disasmOne(a))
 		}
+	}
+
+	// Forward decode from refPC (skip if a positive instructionOffset
+	// asks for forward-only context — currently treated as alignment
+	// at refPC).
+	addr := refPC
+	for len(instructions) < count {
+		ins := s.disasmOne(addr)
 		instructions = append(instructions, ins)
+		_, n := cpu.DisasmCPU(s.cpu, addr)
 		next := uint32(addr) + uint32(n)
 		if next > 0xFFFF {
 			break
@@ -75,6 +75,31 @@ func (s *Server) handleDisassemble(req Request) {
 		Instructions []DisassembledInstruction `json:"instructions"`
 	}
 	s.sendResponse(req, body{Instructions: instructions})
+}
+
+// disasmOne formats one DisassembledInstruction at addr with bytes,
+// symbol, and source location filled in when available.
+func (s *Server) disasmOne(addr uint16) DisassembledInstruction {
+	text, n := cpu.DisasmCPU(s.cpu, addr)
+	bytesHex := make([]string, n)
+	for j := 0; j < n; j++ {
+		bytesHex[j] = fmt.Sprintf("%02X", s.ram.Read(addr+uint16(j)))
+	}
+	ins := DisassembledInstruction{
+		Address:          fmt.Sprintf("$%04X", addr),
+		InstructionBytes: strings.Join(bytesHex, " "),
+		Instruction:      text,
+	}
+	if s.syms != nil {
+		ins.Symbol = s.syms.Lookup(addr)
+	}
+	if s.srcMap != nil {
+		if loc, ok := s.srcMap.PCToSrc[addr]; ok {
+			ins.Location = &Source{Name: filepath.Base(loc.File), Path: loc.File}
+			ins.Line = loc.Line
+		}
+	}
+	return ins
 }
 
 // handleReadMemory returns a byte window starting at MemoryReference (+
