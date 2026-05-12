@@ -73,3 +73,42 @@ func TestTextOutputBytesIsCopy(t *testing.T) {
 		t.Fatalf("Bytes() must return a copy; internal buffer mutated")
 	}
 }
+
+// Cap=0 keeps the unbounded legacy behavior for tests that want it.
+func TestTextOutputUnboundedWhenCapZero(t *testing.T) {
+	out := NewTextOutputWithCap(0xF001, 0)
+	for i := 0; i < 1<<17; i++ { // 128 KiB — exceeds default cap
+		out.Write(0xF001, byte('A'+i%26))
+	}
+	if out.Len() != 1<<17 {
+		t.Fatalf("Cap=0 should not bound; len=%d", out.Len())
+	}
+}
+
+// Cap bounds the buffer; writes past Cap evict oldest bytes. Confirms
+// total length stays under Cap and the most-recent writes are retained.
+func TestTextOutputCapBoundsLength(t *testing.T) {
+	const cap = 16
+	out := NewTextOutputWithCap(0xF001, cap)
+	for i := 0; i < 1000; i++ {
+		out.Write(0xF001, byte('A'+i%26))
+	}
+	if out.Len() > cap {
+		t.Fatalf("len exceeded cap: %d > %d", out.Len(), cap)
+	}
+	if out.Len() < cap/2 {
+		t.Fatalf("len below half-cap after many writes: %d", out.Len())
+	}
+	// Final byte must be the last one we wrote (i=999, 999%26 = 11, 'A'+11 = 'L').
+	if last := out.Bytes()[out.Len()-1]; last != 'L' {
+		t.Fatalf("tail byte want 'L'; got %q", last)
+	}
+}
+
+// Default constructor picks the 64 KiB cap.
+func TestTextOutputDefaultCap(t *testing.T) {
+	out := NewTextOutput(0xF001)
+	if out.Cap != DefaultTextOutputCap {
+		t.Fatalf("default Cap want %d; got %d", DefaultTextOutputCap, out.Cap)
+	}
+}

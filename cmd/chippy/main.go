@@ -26,6 +26,7 @@ func main() {
 		tracePath  = flag.String("trace", "", "write per-instruction execution trace to this file")
 		runOnStart = flag.Bool("run-on-start", false, "start the CPU running instead of paused (pair with -trace for non-interactive capture)")
 		dapMode    = flag.String("dap", "", "run as a Debug Adapter Protocol server instead of the TUI: 'stdio' or 'tcp:PORT'")
+		textBufCap = flag.Int("text-buf-cap", peripheral.DefaultTextOutputCap, "TextOutput ($F001) buffer cap in bytes; 0 = unbounded")
 	)
 	flag.Parse()
 
@@ -123,7 +124,7 @@ func main() {
 	// program loaded at $F001 would land in RAM and never reach the
 	// peripheral — peripherals live in addresses no ROM should occupy.
 	mmio := cpu.NewMMIO(ram)
-	textOut := peripheral.NewTextOutput(0xF001)
+	textOut := peripheral.NewTextOutputWithCap(0xF001, *textBufCap)
 	keyIn := peripheral.NewKeyboardInput(0xF004, 0xF005)
 	if err := mmio.Register(textOut); err != nil {
 		fmt.Fprintln(os.Stderr, "register text output:", err)

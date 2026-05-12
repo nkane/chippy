@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -372,6 +373,8 @@ func (m *Model) runCommand(line string) string {
 		return fmt.Sprintf("mem bp -$%04X", addr)
 	case "trace":
 		return m.cmdTrace(args)
+	case "textsave":
+		return m.cmdTextSave(args)
 	case "help", "?":
 		m.ShowHelp = true
 		return "help"
@@ -473,4 +476,22 @@ func (m Model) promptLine(width int) string {
 	}
 	text := ":" + m.PromptBuf + cursor
 	return promptStyle.Width(width).Render(text)
+}
+
+// cmdTextSave dumps the TextOutput buffer to a file. Use case: a
+// long-running demo whose output keeps wrapping past the buffer cap.
+//
+//	:textsave PATH
+func (m *Model) cmdTextSave(args []string) string {
+	if m.TextOut == nil {
+		return "textsave: no TextOutput peripheral"
+	}
+	if len(args) == 0 {
+		return "usage: :textsave PATH"
+	}
+	path := args[0]
+	if err := os.WriteFile(path, m.TextOut.Bytes(), 0o644); err != nil {
+		return fmt.Sprintf("textsave: %v", err)
+	}
+	return fmt.Sprintf("textsave -> %s (%d bytes)", path, m.TextOut.Len())
 }

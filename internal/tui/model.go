@@ -1069,6 +1069,10 @@ func helpPages() [][]helpSection {
 				{"--trace", "CLI flag: enable at startup with given path"},
 				{"--run-on-start", "start running immediately (pair with --trace)"},
 			}},
+			{"Text output ($F001)", [][2]string{
+				{":textsave PATH", "dump TextOutput buffer to a file"},
+				{"--text-buf-cap N", "TextOutput buffer cap in bytes (default 64 KiB; 0 = unbounded)"},
+			}},
 		},
 	}
 }

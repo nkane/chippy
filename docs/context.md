@@ -182,6 +182,8 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - WebAssembly playground (issue #67): `cmd/chippy-wasm/` builds a `js/wasm` binary that installs a `window.chippy` global (load / step / run / state / disasm / readMem / textOutput / pushKey / setVariant). `web/` ships the HTML/JS shell — `make -C web serve` builds + serves on :8080. Demos copy from `example/`. ld65/.o pipeline is explicitly out of scope (no shell-out in the browser); .bin / .prg / .hex parsing is inlined in the WASM main. New `wasm` CI job keeps the build target green. GitHub Pages auto-deploy via `pages.yml`.
 - v0.4.0 — release cut after #62 / #66 / #88 / #67 ship.
 - CPU correctness micro-audit (issue #122): WAI ($CB) and STP ($DB) were placeholder NOPs; now WAI halts until any IRQ/NMI (waking even on masked IRQ — falls through to next instruction without dispatching the handler) and STP halts permanently (new `stoppedBySTP` latch; only `Reset()` clears). Regression tests cover the halt/wake matrix plus IZP $FF zero-page wrap, PHP B/U push, IRQ B-clear push, and CMOS RTI D-restore.
+- expr unary minus width-aware (issue #129): `-1` now evaluates to `$FF` instead of `$FFFFFFFF`; pick-smallest-power-of-two-width rule keeps `A == -1` matching a register holding `$FF`. Binary subtraction stays 32-bit modular by design. First-ever tests for `internal/expr/`.
+- TextOutput bounded buffer (issue #128): `peripheral.TextOutput` now drops the oldest quarter when its buffer hits cap (default 64 KiB; `--text-buf-cap` overrides; `0` = unbounded). New `:textsave PATH` TUI command dumps the live buffer to disk. Prevents OOM on long-running programs and keeps reverse-step snapshots bounded.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars
