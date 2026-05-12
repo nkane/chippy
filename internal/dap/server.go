@@ -59,10 +59,11 @@ type Server struct {
 	// PC-set the run loop checks each iteration (recomputed on every
 	// set request). All three are guarded by bpMu since setBreakpoints
 	// may arrive while the run loop is reading bpHit.
-	bpMu     sync.Mutex
-	bpsBySrc map[string]map[int]uint16
-	bpsInst  map[uint16]bool
-	bpHit    map[uint16]bool
+	bpMu      sync.Mutex
+	bpsBySrc  map[string]map[int]uint16
+	bpsInst   map[uint16]bool
+	bpsByName map[string]uint16
+	bpHit     map[uint16]bool
 
 	// Reverse-step ring. Populated on every explicit-step request
 	// (stepIn/next/stepOut) and on continue→bp stops. stepBack pops one
@@ -75,12 +76,13 @@ type Server struct {
 // in tcp mode.
 func NewServer(r io.Reader, w io.Writer) *Server {
 	return &Server{
-		in:       bufio.NewReader(r),
-		out:      w,
-		bpsBySrc: map[string]map[int]uint16{},
-		bpsInst:  map[uint16]bool{},
-		bpHit:    map[uint16]bool{},
-		rewind:   cpu.NewSnapshotRing(cpu.DefaultSnapshotRingCap),
+		in:        bufio.NewReader(r),
+		out:       w,
+		bpsBySrc:  map[string]map[int]uint16{},
+		bpsInst:   map[uint16]bool{},
+		bpsByName: map[string]uint16{},
+		bpHit:     map[uint16]bool{},
+		rewind:    cpu.NewSnapshotRing(cpu.DefaultSnapshotRingCap),
 	}
 }
 
@@ -152,6 +154,8 @@ func (s *Server) dispatch(req Request) {
 		s.handleSetBreakpoints(req)
 	case "setInstructionBreakpoints":
 		s.handleSetInstructionBreakpoints(req)
+	case "setFunctionBreakpoints":
+		s.handleSetFunctionBreakpoints(req)
 	case "disassemble":
 		s.handleDisassemble(req)
 	case "readMemory":
@@ -184,7 +188,7 @@ func (s *Server) handleInitialize(req Request) {
 		SupportsBreakpointLocationsRequest: true,
 		SupportsLoadedSourcesRequest:       false,
 		SupportsStepBack:                   true,
-		SupportsFunctionBreakpoints:        false,
+		SupportsFunctionBreakpoints:        true,
 		SupportsRestartRequest:             false,
 		SupportsCompletionsRequest:         false,
 		SupportsSetVariable:                true,

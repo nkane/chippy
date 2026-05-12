@@ -77,6 +77,7 @@ require("dap").adapters.chippy = {
 | `setVariable`                    | #48   | Writes hex / decimal to a register or flag bit. |
 | `setBreakpoints`                 | #49   | Source-line bps resolved through the `.dbg` source map. |
 | `setInstructionBreakpoints`      | #49   | Address bps (`$XX`, `0xXX`, decimal). |
+| `setFunctionBreakpoints`         | #82   | Symbol-name bps via `syms.LookupName`. Unknown names report `verified: false`. |
 | `disassemble`                    | #51   | Variant-aware via `cpu.DisasmCPU`. |
 | `readMemory` / `writeMemory`     | #51   | Bypasses MMIO — peripherals don't see debugger pokes. |
 | `evaluate`                       | #52   | Watch / hover / debug-console expressions via `internal/expr`. |
