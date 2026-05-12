@@ -1,0 +1,59 @@
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'cmd/chippy-wasm/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Serialize so a fast follow-up push doesn't cancel an in-flight deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          cache: true
+
+      - name: Build chippy.wasm
+        env:
+          GOOS: js
+          GOARCH: wasm
+        run: go build -o web/chippy.wasm ./cmd/chippy-wasm
+
+      - name: Refresh wasm_exec.js from the build toolchain
+        run: cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" web/wasm_exec.js
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
