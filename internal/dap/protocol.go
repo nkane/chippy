@@ -278,3 +278,10 @@ type EvaluateArguments struct {
 		Hex bool `json:"hex,omitempty"`
 	} `json:"format,omitempty"`
 }
+
+// SourceArguments is the request body for `source` — return file contents
+// for a previously-listed Source.
+type SourceArguments struct {
+	Source          Source `json:"source"`
+	SourceReference int    `json:"sourceReference,omitempty"`
+}
