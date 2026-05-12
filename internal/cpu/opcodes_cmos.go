@@ -28,7 +28,9 @@ func init() {
 	// --- New CMOS instructions ---
 
 	// BRA — Branch Always (rel)
-	set(0x80, "BRA", REL, 2, 3, false, opBRA)
+	// BRA base = 2; branch() adds +1 for always-taken + maybe +1 for
+	// page-cross, matching the 3/4 cycle spec for taken-no-cross / taken-cross.
+	set(0x80, "BRA", REL, 2, 2, false, opBRA)
 
 	// Stack ops for X/Y
 	set(0xDA, "PHX", IMP, 1, 3, false, opPHX)
@@ -147,10 +149,16 @@ func cmosNOPs(set func(op byte, name string, mode AddrMode, bytes, cycles int, p
 			// $x3 and $xB are all 1-byte/1-cycle NOPs per WDC datasheet.
 			set(byte(op), "NOP", IMP, 1, 1, false, opNOP)
 		case 0x04:
-			// $44 is the only undefined $x4 slot — 2-byte/3-cycle ZP
-			// NOP per WDC silicon. Klaus's `db $44` test at $0DCC
-			// requires exactly this width.
-			set(byte(op), "NOP", ZP, 2, 3, false, opNOP2)
+			// $x4 splits two ways: $44 is the documented 2-byte/3-cycle
+			// ZP NOP (per WDC + Klaus's `db $44` at $0DCC); $54 / $D4 /
+			// $F4 are 2-byte/4-cycle ZPX NOPs (the ZPX-prefix family).
+			// $14, $34, $74 are TRB / BIT / BIT and override "???" so
+			// they don't reach this branch.
+			if op == 0x44 {
+				set(byte(op), "NOP", ZP, 2, 3, false, opNOP2)
+			} else {
+				set(byte(op), "NOP", ZPX, 2, 4, false, opNOP2)
+			}
 		case 0x0C:
 			// $5C is the WDC-quirky 3-byte/8-cycle slot. $DC + $FC are
 			// the only other "???" $xC slots; both are 3-byte/4-cycle
