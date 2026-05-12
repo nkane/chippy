@@ -1403,6 +1403,34 @@ func (m *Model) disasmScroll(delta int) {
 }
 
 // sourceView shows the .s file with the current PC's line highlighted.
+// nearestSrcLocBelow finds the highest mapped PC that is ≤ target and
+// returns its SrcLoc. Used by sourceView to fall back to "the last C
+// line we knew about" while stepping through unmapped generated code
+// (cc65 runtime stubs, etc.) so the panel doesn't go blank mid-step.
+func (m Model) nearestSrcLocBelow(target uint16) (symbols.SrcLoc, bool) {
+	if m.PCToSrc == nil {
+		return symbols.SrcLoc{}, false
+	}
+	const window = 0x400 // 1 KiB lookback; covers a typical cc65 runtime helper chain
+	best := uint16(0)
+	have := false
+	for offset := uint16(0); offset < window; offset++ {
+		if uint16(target) < offset {
+			break
+		}
+		pc := target - offset
+		if _, ok := m.PCToSrc[pc]; ok {
+			best = pc
+			have = true
+			break
+		}
+	}
+	if !have {
+		return symbols.SrcLoc{}, false
+	}
+	return m.PCToSrc[best], true
+}
+
 func (m Model) sourceView(w, h int) string {
 	innerH := h - 2
 	if innerH < 1 {
@@ -1414,6 +1442,18 @@ func (m Model) sourceView(w, h int) string {
 	}
 
 	loc, ok := m.PCToSrc[m.CPU.PC]
+	// Fallback: cc65 runtime stubs (pusha, copydata, etc.) have no
+	// source mapping in the .dbg. Rather than blanking the panel mid-
+	// step, find the nearest mapped PC at or below the current one and
+	// show its source — with a hint that we're inside generated code.
+	inGenerated := false
+	if !ok {
+		if near, nok := m.nearestSrcLocBelow(m.CPU.PC); nok {
+			loc = near
+			ok = true
+			inGenerated = true
+		}
+	}
 	if !ok {
 		return fitPanel("Source", help.Render("  (no source mapping for current PC)"), w, h)
 	}
@@ -1450,6 +1490,9 @@ func (m Model) sourceView(w, h int) string {
 
 	var b strings.Builder
 	title := fmt.Sprintf("Source — %s:%d", loc.File, loc.Line)
+	if inGenerated {
+		title = fmt.Sprintf("Source — %s:%d  (PC $%04X in generated code)", loc.File, loc.Line, m.CPU.PC)
+	}
 	for i := start; i < end; i++ {
 		lineNum := i + 1
 		var marker string
