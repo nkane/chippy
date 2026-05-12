@@ -287,6 +287,47 @@ func canonicalSourcePath(src Source) string {
 	return src.Name
 }
 
+// handleBreakpointLocations answers the editor's "where on this source
+// range can I put a breakpoint?" query. We return one entry per
+// distinct line number in `[Line, EndLine]` that has a PC mapping in
+// the loaded .dbg. EndLine defaults to Line when absent (single-line
+// query). Column info is ignored — chippy resolves at line granularity.
+func (s *Server) handleBreakpointLocations(req Request) {
+	var args BreakpointLocationsArguments
+	if err := json.Unmarshal(req.Arguments, &args); err != nil {
+		s.sendErrorResponse(req, fmt.Sprintf("bad breakpointLocations args: %v", err))
+		return
+	}
+	endLine := args.EndLine
+	if endLine < args.Line {
+		endLine = args.Line
+	}
+	type body struct {
+		Breakpoints []BreakpointLocation `json:"breakpoints"`
+	}
+	resp := body{Breakpoints: []BreakpointLocation{}}
+	if s.srcMap == nil {
+		s.sendResponse(req, resp)
+		return
+	}
+	want := canonicalSourcePath(args.Source)
+	seen := map[int]bool{}
+	for _, loc := range s.srcMap.PCToSrc {
+		if loc.Line < args.Line || loc.Line > endLine {
+			continue
+		}
+		if !matchesSource(loc.File, args.Source.Path, want) {
+			continue
+		}
+		if seen[loc.Line] {
+			continue
+		}
+		seen[loc.Line] = true
+		resp.Breakpoints = append(resp.Breakpoints, BreakpointLocation{Line: loc.Line})
+	}
+	s.sendResponse(req, resp)
+}
+
 // matchesSource decides whether a .dbg-recorded file equals the source
 // the client is asking about. We're permissive: equal path, equal
 // basename, or basename of the .dbg entry matches the canonical key.

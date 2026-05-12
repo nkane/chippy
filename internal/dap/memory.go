@@ -173,6 +173,16 @@ func (s *Server) handleWriteMemory(req Request) {
 		s.sendErrorResponse(req, fmt.Sprintf("address out of range: %d", start))
 		return
 	}
+	end := start + len(data)
+	// AllowPartial = false (the spec default): the entire payload must
+	// fit within the 64 KiB address space, otherwise reject before
+	// writing anything. With AllowPartial = true, write what fits.
+	if !args.AllowPartial && end > 0x10000 {
+		s.sendErrorResponse(req, fmt.Sprintf(
+			"write of %d bytes at $%04X would overflow 64KB; set allowPartial=true to accept truncation",
+			len(data), start))
+		return
+	}
 	written := 0
 	for i, b := range data {
 		a := start + i

@@ -39,8 +39,14 @@ and adjust paths. The launch config maps 1:1 to the CLI flags:
 }
 ```
 
-`stopOnEntry` defaults to true so the debugger pauses at the reset
-vector. Press F5 again (or **Continue**) to start running.
+`stopOnEntry` is honored:
+
+- absent (default): pause at the reset vector and emit a stopped(entry) event
+- `true`: same as absent
+- `false`: skip the entry pause and auto-start the run loop after launch
+
+Same field on `attach` skips/emits the entry stopped event without
+spawning a new run goroutine — the host process drives execution.
 
 ## nvim-dap
 

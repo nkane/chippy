@@ -171,6 +171,8 @@ func (s *Server) dispatch(req Request) {
 		s.handleSetInstructionBreakpoints(req)
 	case "setFunctionBreakpoints":
 		s.handleSetFunctionBreakpoints(req)
+	case "breakpointLocations":
+		s.handleBreakpointLocations(req)
 	case "disassemble":
 		s.handleDisassemble(req)
 	case "readMemory":
@@ -251,16 +253,35 @@ func (s *Server) handleLaunch(req Request) {
 		return
 	}
 	s.sendResponse(req, nil)
-	// CPU is paused at the reset vector; report it stopped on entry so
-	// the client immediately renders state. stopOnEntry defaults true —
-	// noDebug + stopOnEntry=false will eventually allow auto-run.
-	if !args.NoDebug {
-		s.sendEvent("stopped", StoppedEventBody{
-			Reason:            "entry",
-			ThreadID:          1,
-			AllThreadsStopped: true,
-		})
+	if args.NoDebug {
+		return
 	}
+	// Default behavior: pause at the reset vector and report it so the
+	// client immediately renders state. An explicit `stopOnEntry: false`
+	// in the launch arguments overrides — auto-start the run loop in
+	// place of the stopped event.
+	if args.StopOnEntry != nil && !*args.StopOnEntry {
+		s.autoStartRun()
+		return
+	}
+	s.sendEvent("stopped", StoppedEventBody{
+		Reason:            "entry",
+		ThreadID:          1,
+		AllThreadsStopped: true,
+	})
+}
+
+// autoStartRun kicks off the run-loop goroutine after a launch/attach
+// when the client opted out of the entry pause. Mirrors handleContinue
+// but doesn't send a response (there's no `continue` request in flight).
+func (s *Server) autoStartRun() {
+	if s.running.Load() {
+		return
+	}
+	s.pauseRequested.Store(false)
+	s.runDone = make(chan struct{})
+	s.running.Store(true)
+	go s.runLoop()
 }
 
 // bootDebuggee constructs the CPU+RAM+MMIO chain the same way
