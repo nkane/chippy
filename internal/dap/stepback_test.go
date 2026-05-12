@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStepBack_RestoresPriorState(t *testing.T) {
@@ -174,6 +175,45 @@ func TestStepBack_RestoresKeyboardLatch(t *testing.T) {
 	s.handleStepBack(back)
 	if !s.keyIn.Ready() {
 		t.Fatalf("stepBack should re-arm keyboard latch")
+	}
+}
+
+// TestStepBack_FreeRunRecordsDeltas confirms that runLoop now pushes
+// snapshots during free-run (issue #66). After a continue/pause sweep
+// the ring should be non-empty and stepBack must walk us back through
+// each instruction the run loop executed.
+func TestStepBack_FreeRunRecordsDeltas(t *testing.T) {
+	// LDA #$00 ; LDA #$11 ; LDA #$22 ; JMP $8000 — non-degenerate loop.
+	// Each LDA leaves a distinct register trace so we can verify rewind.
+	prog := []byte{0xA9, 0x00, 0xA9, 0x11, 0xA9, 0x22, 0x4C, 0x00, 0x80}
+	s, _, _ := newStoppedServer(t, prog)
+
+	s.handleContinue(Request{
+		ProtocolMessage: ProtocolMessage{Seq: 1, Type: "request"},
+		Command:         "continue",
+	})
+
+	// Let the run loop execute a handful of iterations before pausing.
+	// Reading s.rewind.Len() here would race with runLoop's pushes; the
+	// run loop synchronizes only via runDone after pauseRequested.
+	time.Sleep(40 * time.Millisecond)
+	s.pauseRequested.Store(true)
+	<-s.runDone
+
+	if s.rewind.Len() == 0 {
+		t.Fatalf("free-run should have pushed snapshots; ring is empty")
+	}
+
+	// stepBack twice. PC should walk backwards across the executed instructions.
+	preBackPC := s.cpu.PC
+	back := Request{
+		ProtocolMessage: ProtocolMessage{Seq: 2, Type: "request"},
+		Command:         "stepBack",
+	}
+	s.handleStepBack(back)
+	s.handleStepBack(back)
+	if s.cpu.PC == preBackPC {
+		t.Fatalf("stepBack after free-run should rewind PC; stuck at $%04X", preBackPC)
 	}
 }
 

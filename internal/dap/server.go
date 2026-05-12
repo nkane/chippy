@@ -342,6 +342,7 @@ func (s *Server) bootDebuggee(args LaunchArguments) error {
 
 	s.cpu = c
 	s.ram = ram
+	s.ram.EnableShadow() // CoW page tracking powers stepBack (issue #66).
 	s.mmio = mmio
 	s.tracer = tracer
 	s.textOut = textOut
