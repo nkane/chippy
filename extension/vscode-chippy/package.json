@@ -153,7 +153,7 @@
   },
   "devDependencies": {
     "@types/mocha": "^10.0.6",
-    "@types/node": "^20.0.0",
+    "@types/node": "^25.7.0",
     "@types/vscode": "^1.75.0",
     "@vscode/test-electron": "^2.4.0",
     "@vscode/vsce": "^2.24.0",
