@@ -1,5 +1,11 @@
 package dap
 
+import (
+	"fmt"
+
+	"github.com/nkane/chippy/internal/cpu"
+)
+
 // Step controls — continue / next / stepIn / stepOut / pause — plus the
 // thin `threads` handler that 6502 needs (always one virtual thread).
 //
@@ -143,12 +149,44 @@ func (s *Server) handleStepIn(req Request) {
 // snapshotForRewind pushes a pre-step CPU+RAM snapshot onto the ring so
 // stepBack can undo. Matches the TUI's behavior: only explicit-step
 // paths snapshot — continue runs don't, to avoid the 64 KiB/step cost
-// at full throughput.
+// at full throughput. Also captures TextOutput + KeyboardInput state so
+// rewinding across an MMIO read/write doesn't desync peripherals.
 func (s *Server) snapshotForRewind() {
 	if s.rewind == nil || s.cpu == nil || s.ram == nil {
 		return
 	}
-	s.rewind.Push(s.cpu.Snapshot(s.ram))
+	snap := s.cpu.Snapshot(s.ram)
+	s.capturePeripherals(&snap)
+	s.rewind.Push(snap)
+}
+
+func (s *Server) capturePeripherals(snap *cpu.Snapshot) {
+	if s.textOut == nil && s.keyIn == nil {
+		return
+	}
+	snap.Peripherals = map[string][]byte{}
+	if s.textOut != nil {
+		snap.Peripherals[fmt.Sprintf("$%04X", s.textOut.Addr)] = s.textOut.Snapshot()
+	}
+	if s.keyIn != nil {
+		snap.Peripherals[fmt.Sprintf("$%04X", s.keyIn.DataAddr)] = s.keyIn.Snapshot()
+	}
+}
+
+func (s *Server) restorePeripherals(snap cpu.Snapshot) {
+	if snap.Peripherals == nil {
+		return
+	}
+	if s.textOut != nil {
+		if state, ok := snap.Peripherals[fmt.Sprintf("$%04X", s.textOut.Addr)]; ok {
+			s.textOut.Restore(state)
+		}
+	}
+	if s.keyIn != nil {
+		if state, ok := snap.Peripherals[fmt.Sprintf("$%04X", s.keyIn.DataAddr)]; ok {
+			s.keyIn.Restore(state)
+		}
+	}
 }
 
 // handleStepBack pops one snapshot and restores. Same protocol shape as
@@ -165,6 +203,7 @@ func (s *Server) handleStepBack(req Request) {
 	}
 	snap, _ := s.rewind.Pop()
 	s.cpu.Restore(snap, s.ram)
+	s.restorePeripherals(snap)
 	s.sendResponse(req, nil)
 	s.sendEvent("stopped", StoppedEventBody{Reason: "step", ThreadID: 1, AllThreadsStopped: true})
 }

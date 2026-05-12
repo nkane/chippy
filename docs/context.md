@@ -176,10 +176,11 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - v0.3.1 — patch release after the CMOS correctness pass.
 - `example/c/` — cc65-based C example programs (hello, sum, fizzbuzz) with shared `chippy.cfg` linker config + minimal `crt0.s` runtime. Builds via `make -C example/c`; runs via `chippy -rom example/c/<prog>.bin`. Source-map loader updated to prefer `.c` files over `.s` intermediates when both are recorded for the same PC, so the TUI source view (`v`) shows C source while stepping.
 - Immediate window (issue #70): `I` opens a modal REPL backed by `internal/expr`. Each Enter evaluates the buffer against current CPU state, appends `expr → result` to scrollback. `↑` recalls the last expression. Result formatting matches DAP's evaluate response so both surfaces report identical values.
+- Peripheral snapshots (issue #62): `cpu.Snapshot` grew a `Peripherals map[string][]byte` field; TUI and DAP both capture TextOutput buffer + Keyboard latch state into it on every push and restore on every pop. New `peripheral.Snapshotable` interface (Snapshot/Restore); both TextOutput and KeyboardInput implement it. Reverse-step across an MMIO write/read no longer desyncs the visible peripheral state.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars
-- Post-DAP follow-ups: #59 Klaus 65C02, #60 BCD test, #61 CMOS e2e in CI, #62 peripheral snapshots, #63 VIA 6522, #64 trace replay, #65 mem-watch conditional expressions, #66 CoW RAM snapshots, #67 WebAssembly playground
+- Post-DAP follow-ups: #63 VIA 6522, #64 trace replay, #65 mem-watch conditional expressions, #66 CoW RAM snapshots, #67 WebAssembly playground
 
 ---
 
