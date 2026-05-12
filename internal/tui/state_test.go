@@ -61,6 +61,22 @@ func TestLoadState_GoldenV1(t *testing.T) {
 	if _, ok := m.MemBPs[0x0400]; !ok {
 		t.Errorf("missing membp at $0400")
 	}
+	// v1.x additions (issue #125).
+	if m.DisasmFollow {
+		t.Errorf("DisasmFollow want false; got true")
+	}
+	if !m.StackAnnotate {
+		t.Errorf("StackAnnotate want true; got false")
+	}
+	if !m.InputMode {
+		t.Errorf("InputMode want true; got false")
+	}
+	if m.DisasmAnchor != 0x8100 {
+		t.Errorf("DisasmAnchor want $8100; got $%04X", m.DisasmAnchor)
+	}
+	if len(m.ImmediateHistory) != 2 || m.ImmediateHistory[0].Expr != "A + 1" {
+		t.Errorf("ImmediateHistory not preserved: %+v", m.ImmediateHistory)
+	}
 }
 
 // Save then load — every field we promised to persist round-trips. The
@@ -133,6 +149,58 @@ func TestLoadState_FutureSchemaVersionIgnored(t *testing.T) {
 	if m.TargetHz != defaultHz {
 		t.Errorf("future schema bumped TargetHz; got %d want default %d",
 			m.TargetHz, defaultHz)
+	}
+}
+
+// v1.x additions (issue #125): a legacy v0 file (no schemaVersion) must
+// NOT clobber the New(c, r) defaults for fields that didn't exist in
+// v0. The Model factory sets DisasmFollow and StackAnnotate to true; a
+// pre-1.0 file would JSON-decode them as false, which is the wrong
+// behavior.
+func TestLoadState_LegacyFilePreservesNewFieldDefaults(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "legacy.json")
+	legacy := `{"mem_view_addr": 4096, "target_hz": 30}`
+	if err := os.WriteFile(tmp, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("write tmp: %v", err)
+	}
+	m, _ := stateTestModel(t)
+	wantFollow := m.DisasmFollow
+	wantAnnotate := m.StackAnnotate
+	loadState(m, tmp)
+	if m.DisasmFollow != wantFollow {
+		t.Errorf("v0 legacy load overrode DisasmFollow default: now %v want %v", m.DisasmFollow, wantFollow)
+	}
+	if m.StackAnnotate != wantAnnotate {
+		t.Errorf("v0 legacy load overrode StackAnnotate default: now %v want %v", m.StackAnnotate, wantAnnotate)
+	}
+}
+
+// Save then load preserves the v1.x additions too.
+func TestSaveState_RoundTripV1Additions(t *testing.T) {
+	m, path := stateTestModel(t)
+	m.DisasmFollow = false
+	m.StackAnnotate = false
+	m.InputMode = true
+	m.DisasmAnchor = 0x9000
+	m.ImmediateHistory = []ImmediateEntry{
+		{Expr: "X", Result: "$00  (0)"},
+		{Expr: "bad", Result: "compile: bad", Err: true},
+	}
+	m.saveState()
+
+	m2, _ := stateTestModel(t)
+	loadState(m2, path)
+	if m2.DisasmFollow != false || m2.StackAnnotate != false {
+		t.Errorf("bool fields wrong after round-trip: follow=%v annotate=%v", m2.DisasmFollow, m2.StackAnnotate)
+	}
+	if !m2.InputMode {
+		t.Errorf("InputMode lost on round-trip")
+	}
+	if m2.DisasmAnchor != 0x9000 {
+		t.Errorf("DisasmAnchor lost: $%04X", m2.DisasmAnchor)
+	}
+	if len(m2.ImmediateHistory) != 2 || !m2.ImmediateHistory[1].Err {
+		t.Errorf("ImmediateHistory lost: %+v", m2.ImmediateHistory)
 	}
 }
 
