@@ -5,8 +5,12 @@ on:
     tags:
       - 'v*'
 
+# id-token: write lets cosign mint a keyless OIDC certificate bound to
+# this workflow. contents: write is required for the release-asset
+# uploads goreleaser performs.
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   goreleaser:
@@ -21,6 +25,12 @@ jobs:
         with:
           go-version: 'stable'
           cache: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
