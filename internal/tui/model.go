@@ -163,6 +163,7 @@ type disasmCacheEntry struct {
 }
 
 func New(c *cpu.CPU, r *cpu.RAM) Model {
+	r.EnableShadow() // CoW page tracking powers the rewind ring (issue #66).
 	return Model{
 		CPU:           c,
 		RAM:           r,
@@ -473,7 +474,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.Running {
 			budget := m.runBudget()
 			for i := 0; i < budget; i++ {
-				m.CPU.Step()
+				m.step()
 				if m.CPU.Halted {
 					m.Running = false
 					m.Status = fmt.Sprintf("halted at $%04X", m.CPU.PC)
@@ -547,18 +548,22 @@ func keyMsgToByte(msg tea.KeyMsg) (byte, bool) {
 	return 0, false
 }
 
-// step takes one CPU instruction *and* records a rewind snapshot first so
-// `<` can undo it. Use this in all explicit-step keypaths (`s` / `S` / `n` /
-// `f` and the inner loops of stepOver / runToNextLine). The tickMsg
-// free-run loop calls m.CPU.Step() directly to avoid the 64 KiB snapshot
-// cost per cycle at multi-MHz throughput.
+// step takes one CPU instruction *and* records a rewind snapshot so `<`
+// can undo it. Use this in all explicit-step keypaths (`s` / `S` / `n` /
+// `f` and the inner loops of stepOver / runToNextLine). Snapshots are
+// page-level CoW deltas (issue #66) — typical cost is hundreds of bytes,
+// so the tickMsg free-run loop snapshots per step too.
 func (m *Model) step() int {
-	if m.Rewind != nil {
-		s := m.CPU.Snapshot(m.RAM)
-		m.captureperipherals(&s)
-		m.Rewind.Push(s)
+	if m.Rewind == nil {
+		return m.CPU.Step()
 	}
-	return m.CPU.Step()
+	snap := m.CPU.Snapshot(m.RAM)
+	m.captureperipherals(&snap)
+	m.RAM.ResetShadow()
+	n := m.CPU.Step()
+	snap.Pages = m.RAM.TakeShadow()
+	m.Rewind.Push(snap)
+	return n
 }
 
 // captureperipherals fills the snapshot's Peripherals map with the

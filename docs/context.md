@@ -177,10 +177,11 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - `example/c/` — cc65-based C example programs (hello, sum, fizzbuzz) with shared `chippy.cfg` linker config + minimal `crt0.s` runtime. Builds via `make -C example/c`; runs via `chippy -rom example/c/<prog>.bin`. Source-map loader updated to prefer `.c` files over `.s` intermediates when both are recorded for the same PC, so the TUI source view (`v`) shows C source while stepping.
 - Immediate window (issue #70): `I` opens a modal REPL backed by `internal/expr`. Each Enter evaluates the buffer against current CPU state, appends `expr → result` to scrollback. `↑` recalls the last expression. Result formatting matches DAP's evaluate response so both surfaces report identical values.
 - Peripheral snapshots (issue #62): `cpu.Snapshot` grew a `Peripherals map[string][]byte` field; TUI and DAP both capture TextOutput buffer + Keyboard latch state into it on every push and restore on every pop. New `peripheral.Snapshotable` interface (Snapshot/Restore); both TextOutput and KeyboardInput implement it. Reverse-step across an MMIO write/read no longer desyncs the visible peripheral state.
+- CoW RAM snapshots (issue #66): `cpu.Snapshot.RAM [0x10000]byte` is now `Pages map[byte][256]byte`. RAM gained an opt-in (`EnableShadow`) page-level write barrier that captures pre-write images. Two-phase capture protocol — caller takes the snapshot before the step, resets the shadow, runs the step (or multi-step sweep), then claims `snap.Pages = ram.TakeShadow()` and pushes. Typical 1-instr snap is ~hundreds of bytes vs 64 KiB before, so free-run now pushes on every step in both TUI tickMsg loop and DAP runLoop — reverse-step works across an unattended continue. 1000-iteration tight loop costs <1 MiB of total ring storage (validated by test).
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars
-- Post-DAP follow-ups: #63 VIA 6522, #64 trace replay, #65 mem-watch conditional expressions, #66 CoW RAM snapshots, #67 WebAssembly playground
+- Post-DAP follow-ups: #63 VIA 6522, #64 trace replay, #65 mem-watch conditional expressions, #67 WebAssembly playground
 
 ---
 

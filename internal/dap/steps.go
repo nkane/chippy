@@ -93,7 +93,7 @@ func (s *Server) runLoop() {
 			reason = "exception"
 			break
 		}
-		s.cpu.Step()
+		s.stepWithSnapshot(func() { s.cpu.Step() })
 		if s.cpu.Halted {
 			reason = "exception"
 			break
@@ -113,7 +113,7 @@ func (s *Server) runLoop() {
 			}
 			// Continue past a non-firing bp: step once so we don't
 			// re-trigger on the same PC immediately.
-			s.cpu.Step()
+			s.stepWithSnapshot(func() { s.cpu.Step() })
 			if s.cpu.Halted {
 				reason = "exception"
 				break
@@ -140,23 +140,26 @@ func (s *Server) handleStepIn(req Request) {
 	if !s.requireStopped(req) {
 		return
 	}
-	s.snapshotForRewind()
-	s.cpu.Step()
+	s.stepWithSnapshot(func() { s.cpu.Step() })
 	s.sendResponse(req, nil)
 	s.sendEvent("stopped", StoppedEventBody{Reason: "step", ThreadID: 1, AllThreadsStopped: true})
 }
 
-// snapshotForRewind pushes a pre-step CPU+RAM snapshot onto the ring so
-// stepBack can undo. Matches the TUI's behavior: only explicit-step
-// paths snapshot — continue runs don't, to avoid the 64 KiB/step cost
-// at full throughput. Also captures TextOutput + KeyboardInput state so
-// rewinding across an MMIO read/write doesn't desync peripherals.
-func (s *Server) snapshotForRewind() {
+// stepWithSnapshot wraps one or more cpu.Step calls in a single rewind
+// snapshot. Captures regs + peripherals BEFORE the step, resets the
+// RAM shadow epoch, runs the step body, and folds the page deltas into
+// the pushed snapshot. Issue #66: CoW deltas keep a wide sweep
+// (next-over-JSR, stepOut) at the same memory cost as a single Step.
+func (s *Server) stepWithSnapshot(body func()) {
 	if s.rewind == nil || s.cpu == nil || s.ram == nil {
+		body()
 		return
 	}
 	snap := s.cpu.Snapshot(s.ram)
 	s.capturePeripherals(&snap)
+	s.ram.ResetShadow()
+	body()
+	snap.Pages = s.ram.TakeShadow()
 	s.rewind.Push(snap)
 }
 
@@ -214,11 +217,12 @@ func (s *Server) handleNext(req Request) {
 	if !s.requireStopped(req) {
 		return
 	}
-	s.snapshotForRewind()
 	op := s.ram.Read(s.cpu.PC)
-	if op != 0x20 {
-		s.cpu.Step()
-	} else {
+	s.stepWithSnapshot(func() {
+		if op != 0x20 {
+			s.cpu.Step()
+			return
+		}
 		retPC := s.cpu.PC + 3
 		for i := 0; i < guardSteps; i++ {
 			s.cpu.Step()
@@ -226,7 +230,7 @@ func (s *Server) handleNext(req Request) {
 				break
 			}
 		}
-	}
+	})
 	s.sendResponse(req, nil)
 	s.sendEvent("stopped", StoppedEventBody{Reason: "step", ThreadID: 1, AllThreadsStopped: true})
 }
@@ -237,17 +241,18 @@ func (s *Server) handleStepOut(req Request) {
 	if !s.requireStopped(req) {
 		return
 	}
-	s.snapshotForRewind()
 	startSP := s.cpu.SP
-	for i := 0; i < guardSteps; i++ {
-		s.cpu.Step()
-		if s.cpu.Halted {
-			break
+	s.stepWithSnapshot(func() {
+		for i := 0; i < guardSteps; i++ {
+			s.cpu.Step()
+			if s.cpu.Halted {
+				break
+			}
+			if s.cpu.SP > startSP {
+				break
+			}
 		}
-		if s.cpu.SP > startSP {
-			break
-		}
-	}
+	})
 	s.sendResponse(req, nil)
 	s.sendEvent("stopped", StoppedEventBody{Reason: "step", ThreadID: 1, AllThreadsStopped: true})
 }

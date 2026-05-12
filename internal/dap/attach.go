@@ -41,6 +41,7 @@ func (s *Server) AttachExisting(cfg AttachConfig) error {
 	}
 	s.cpu = cfg.CPU
 	s.ram = cfg.RAM
+	s.ram.EnableShadow() // CoW page tracking powers stepBack (issue #66).
 	s.mmio = cfg.MMIO
 	s.tracer = cfg.Tracer
 	s.syms = cfg.Syms
