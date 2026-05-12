@@ -184,37 +184,46 @@ func opBITimm(c *CPU, addr uint16, _ AddrMode) {
 	c.setFlag(FlagZ, c.A&v == 0)
 }
 
-// adcDecimalCMOS performs the 65C02 packed-BCD ADC. Unlike NMOS, the CMOS
-// variant computes N, V, and Z from the *decimal* result and adds 1 cycle.
+// adcDecimalCMOS performs the 65C02 packed-BCD ADC. Algorithm matches
+// Bruce Clark's reference (https://6502.org/tutorials/decimal_mode.html
+// Appendix B): low-nibble carry both bumps the nibble AND masks the
+// result, so invalid BCD inputs ($0A..$0F low nibble) produce the same
+// answer as real WDC silicon. CMOS-specific tweaks vs. NMOS: N and Z
+// reflect the decimal result; +1 cycle penalty.
 func adcDecimalCMOS(c *CPU, v byte, carry uint16) {
 	a := uint16(c.A)
 	al := (a & 0x0F) + (uint16(v) & 0x0F) + carry
-	if al > 9 {
-		al += 6
+	if al >= 0x0A {
+		al = ((al + 0x06) & 0x0F) + 0x10
 	}
 	res := (a & 0xF0) + (uint16(v) & 0xF0) + al
-	if res > 0x9F {
+	if res >= 0xA0 {
 		res += 0x60
 	}
-	c.setFlag(FlagC, res > 0xFF)
+	c.setFlag(FlagC, res >= 0x100)
 	c.setFlag(FlagV, ((a^res)&^(a^uint16(v)))&0x80 != 0)
 	c.A = byte(res & 0xFF)
 	c.setZN(c.A)
 	c.extraCycles++ // CMOS BCD takes one extra cycle
 }
 
-// sbcDecimalCMOS performs the 65C02 packed-BCD SBC.
+// sbcDecimalCMOS performs the 65C02 packed-BCD SBC. Mirrors the
+// Appendix B reference: low-nibble underflow both shifts the nibble
+// AND masks the result, so invalid-BCD inputs match real silicon.
+// CMOS: N and Z come from the decimal result; V is documented
+// undefined but we report the binary-path V (matches NMOS and our
+// NMOS tests).
 func sbcDecimalCMOS(c *CPU, v byte, carry uint16) {
 	a := int(c.A)
 	vi := int(v)
 	cin := int(carry)
 	al := (a & 0x0F) - (vi & 0x0F) + cin - 1
-	res := a - vi + cin - 1
+	if al < 0 {
+		al = ((al - 0x06) & 0x0F) - 0x10
+	}
+	res := (a & 0xF0) - (vi & 0xF0) + al
 	if res < 0 {
 		res -= 0x60
-	}
-	if al < 0 {
-		res -= 0x06
 	}
 	// Flags from binary subtract.
 	w := v ^ 0xFF
