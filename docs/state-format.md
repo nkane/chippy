@@ -36,6 +36,15 @@ Field names match the JSON tags on `savedState` in
 | `mem_cursor` | uint16 | cursor position in the memory pane |
 | `watches` | array of Watch | watch-panel rows (mem + reg) |
 | `target_hz` | int | speed throttle (`0` = unthrottled) |
+| `disasm_follow` | *bool | auto-follow-PC toggle in the disassembly pane |
+| `stack_annotate` | *bool | JSR-frame annotation in the stack pane |
+| `input_mode` | bool | keyboard-input-routing-to-CPU mode |
+| `disasm_anchor` | uint16 | manual scroll position in the disassembly pane |
+| `immediate_history` | array of ImmediateEntry | immediate-window scrollback |
+
+The pointer-typed `disasm_follow` and `stack_annotate` exist so a v0
+legacy file's absence of those fields doesn't decode to `false` and
+clobber the `New(c, r)` defaults (both default to `true`).
 
 The exact JSON shape of `Breakpoint`, `MemBP`, and `Watch` is captured
 by `internal/tui/testdata/state-v1.json`. The

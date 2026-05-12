@@ -14,9 +14,9 @@ import (
 // pre-formatted (with the `$XX` width-by-magnitude shape `evaluate` uses)
 // or an error string if the expression didn't compile / eval.
 type ImmediateEntry struct {
-	Expr   string
-	Result string
-	Err    bool
+	Expr   string `json:"expr"`
+	Result string `json:"result"`
+	Err    bool   `json:"err,omitempty"`
 }
 
 // immediateCap is the max number of scrollback rows kept in memory and

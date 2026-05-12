@@ -34,5 +34,19 @@
       "reg": "A"
     }
   ],
-  "target_hz": 60
+  "target_hz": 60,
+  "disasm_follow": false,
+  "stack_annotate": true,
+  "input_mode": true,
+  "disasm_anchor": 33024,
+  "immediate_history": [
+    {
+      "expr": "A + 1",
+      "result": "$01  (1)"
+    },
+    {
+      "expr": "[$0200]",
+      "result": "$42  (66)"
+    }
+  ]
 }

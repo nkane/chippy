@@ -32,6 +32,15 @@ type savedState struct {
 	MemCursor     uint16          `json:"mem_cursor,omitempty"`
 	Watches       []Watch         `json:"watches"`
 	TargetHz      int             `json:"target_hz"`
+
+	// v1.x additions (issue #125). These fields didn't exist on v0
+	// files; the loader gates them on SchemaVersion so legacy files
+	// keep the New(c, r) defaults instead of decoding to false/zero.
+	DisasmFollow     *bool            `json:"disasm_follow,omitempty"`
+	StackAnnotate    *bool            `json:"stack_annotate,omitempty"`
+	InputMode        bool             `json:"input_mode,omitempty"`
+	DisasmAnchor     uint16           `json:"disasm_anchor,omitempty"`
+	ImmediateHistory []ImmediateEntry `json:"immediate_history,omitempty"`
 }
 
 func loadState(m *Model, path string) {
@@ -56,6 +65,19 @@ func loadState(m *Model, path string) {
 	m.MemCursor = s.MemCursor
 	m.Watches = s.Watches
 	m.TargetHz = s.TargetHz
+	// v1.x additions (issue #125). Gated on SchemaVersion so a legacy
+	// v0 file doesn't clobber the New(c, r) defaults with zero values.
+	if s.SchemaVersion >= 1 {
+		if s.DisasmFollow != nil {
+			m.DisasmFollow = *s.DisasmFollow
+		}
+		if s.StackAnnotate != nil {
+			m.StackAnnotate = *s.StackAnnotate
+		}
+		m.InputMode = s.InputMode
+		m.DisasmAnchor = s.DisasmAnchor
+		m.ImmediateHistory = s.ImmediateHistory
+	}
 	if m.Breakpoints == nil {
 		m.Breakpoints = make(map[uint16]*Breakpoint)
 	}
@@ -158,14 +180,20 @@ func (m *Model) saveState() {
 	if err != nil {
 		return
 	}
+	df, sa := m.DisasmFollow, m.StackAnnotate
 	s := savedState{
-		SchemaVersion: StateSchemaVersion,
-		Breakpoints:   raw,
-		MemBPs:        mraw,
-		MemViewAddr:   m.MemViewAddr,
-		MemCursor:     m.MemCursor,
-		Watches:       m.Watches,
-		TargetHz:      m.TargetHz,
+		SchemaVersion:    StateSchemaVersion,
+		Breakpoints:      raw,
+		MemBPs:           mraw,
+		MemViewAddr:      m.MemViewAddr,
+		MemCursor:        m.MemCursor,
+		Watches:          m.Watches,
+		TargetHz:         m.TargetHz,
+		DisasmFollow:     &df,
+		StackAnnotate:    &sa,
+		InputMode:        m.InputMode,
+		DisasmAnchor:     m.DisasmAnchor,
+		ImmediateHistory: m.ImmediateHistory,
 	}
 	data, err := json.MarshalIndent(&s, "", "  ")
 	if err != nil {
