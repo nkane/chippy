@@ -2,14 +2,14 @@ package cpu
 
 // Snapshot captures the full architectural and bookkeeping state of a CPU
 // plus a copy of the RAM contents. Used by the TUI's reverse-step ring
-// buffer.
+// buffer and the DAP server's stepBack handler.
 //
-// Caveat: peripherals connected via MMIO are NOT snapshotted — only RAM is.
-// Reverse-stepping across a peripheral side-effect (e.g. a keyboard register
-// drain) won't unwind the peripheral. Acceptable in v1 because real
-// reverse-debugging sessions rarely span peripheral interactions; programs
-// that do should pause the CPU first or use a longer ring with periodic
-// peripheral snapshots in a follow-up.
+// Peripherals connected via MMIO snapshot themselves into the
+// Peripherals map — the cpu package defers the actual serialisation to
+// each peripheral (which implements peripheral.Snapshotable). The map
+// is keyed by a caller-chosen string (typically the peripheral's base
+// MMIO address like "$F001"). cpu.CPU.Snapshot leaves the map nil; the
+// caller (TUI or DAP server) fills it before pushing to the ring.
 type Snapshot struct {
 	A, X, Y, SP, P byte
 	PC             uint16
@@ -21,6 +21,11 @@ type Snapshot struct {
 	nmiPending  bool
 
 	RAM [0x10000]byte
+
+	// Peripherals: optional per-MMIO-device state. Populated by the
+	// caller (TUI / DAP) at snapshot time, consumed at restore time.
+	// Keys are caller-defined; values are peripheral-defined bytes.
+	Peripherals map[string][]byte
 }
 
 // Snapshot returns a full state capture of the CPU + the supplied RAM. ram

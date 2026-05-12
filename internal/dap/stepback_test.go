@@ -103,6 +103,80 @@ func TestStepBack_NextAndStepOutPushSnapshots(t *testing.T) {
 	}
 }
 
+// TestStepBack_RestoresTextOutputBuffer drives the CPU to write two
+// bytes through the $F001 MMIO write port, then rewinds one step at a
+// time and confirms the TextOutput buffer rewinds along with the CPU.
+// Without peripheral snapshots the buffer would keep growing as steps
+// rewound.
+func TestStepBack_RestoresTextOutputBuffer(t *testing.T) {
+	// $8000: A9 41        LDA #'A'
+	// $8002: 8D 01 F0     STA $F001
+	// $8005: A9 42        LDA #'B'
+	// $8007: 8D 01 F0     STA $F001
+	prog := []byte{0xA9, 0x41, 0x8D, 0x01, 0xF0, 0xA9, 0x42, 0x8D, 0x01, 0xF0}
+	s, _, _ := newStoppedServer(t, prog)
+
+	step := Request{
+		ProtocolMessage: ProtocolMessage{Seq: 1, Type: "request"},
+		Command:         "stepIn",
+	}
+	for i := 0; i < 4; i++ {
+		s.handleStepIn(step)
+	}
+	if got := s.textOut.String(); got != "AB" {
+		t.Fatalf("after 4 steps textOut want %q; got %q", "AB", got)
+	}
+
+	back := Request{
+		ProtocolMessage: ProtocolMessage{Seq: 2, Type: "request"},
+		Command:         "stepBack",
+	}
+	s.handleStepBack(back) // undo STA #2 -> "A"
+	if got := s.textOut.String(); got != "A" {
+		t.Fatalf("after 1 stepBack textOut want %q; got %q", "A", got)
+	}
+	s.handleStepBack(back) // undo LDA #'B' -> "A"
+	s.handleStepBack(back) // undo STA #1 -> ""
+	if got := s.textOut.String(); got != "" {
+		t.Fatalf("after 3 stepBacks textOut want empty; got %q", got)
+	}
+}
+
+// TestStepBack_RestoresKeyboardLatch confirms that when the CPU reads
+// $F004 mid-program, stepBack re-arms the keyboard latch so a re-step
+// observes the same byte.
+func TestStepBack_RestoresKeyboardLatch(t *testing.T) {
+	// $8000: AD 04 F0     LDA $F004   ; drains keyboard latch
+	prog := []byte{0xAD, 0x04, 0xF0}
+	s, _, _ := newStoppedServer(t, prog)
+
+	s.keyIn.Push('K')
+	if !s.keyIn.Ready() {
+		t.Fatalf("precondition: keyboard should be armed")
+	}
+
+	step := Request{
+		ProtocolMessage: ProtocolMessage{Seq: 1, Type: "request"},
+		Command:         "stepIn",
+	}
+	s.handleStepIn(step)
+	if s.keyIn.Ready() {
+		t.Fatalf("post-LDA $F004 latch should be drained")
+	}
+	if s.cpu.A != ('K' | 0x80) {
+		t.Fatalf("A should hold latched key; got $%02X", s.cpu.A)
+	}
+
+	back := Request{
+		ProtocolMessage: ProtocolMessage{Seq: 2, Type: "request"},
+		Command:         "stepBack",
+	}
+	s.handleStepBack(back)
+	if !s.keyIn.Ready() {
+		t.Fatalf("stepBack should re-arm keyboard latch")
+	}
+}
+
 func TestStepBack_CapabilityAdvertised(t *testing.T) {
 	// initialize handshake should now report supportsStepBack:true.
 	var in, out interface {

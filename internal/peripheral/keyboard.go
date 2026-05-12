@@ -63,3 +63,25 @@ func (k *KeyboardInput) Write(addr uint16, v byte) {
 // Ready reports whether a keystroke is pending. Exposed for tests and the
 // TUI status line.
 func (k *KeyboardInput) Ready() bool { return k.ready }
+
+// Snapshot packs the keyboard's latched state into two bytes: data byte
+// and a ready flag (0 or 1). Implements peripheral.Snapshotable.
+func (k *KeyboardInput) Snapshot() []byte {
+	r := byte(0)
+	if k.ready {
+		r = 1
+	}
+	return []byte{k.data, r}
+}
+
+// Restore unpacks the two-byte form back into the keyboard. Out-of-shape
+// inputs are tolerated (clears state).
+func (k *KeyboardInput) Restore(state []byte) {
+	if len(state) < 2 {
+		k.data = 0
+		k.ready = false
+		return
+	}
+	k.data = state[0]
+	k.ready = state[1] != 0
+}

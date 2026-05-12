@@ -54,3 +54,18 @@ func (t *TextOutput) Len() int { return len(t.buf) }
 
 // Reset clears the buffer.
 func (t *TextOutput) Reset() { t.buf = t.buf[:0] }
+
+// Snapshot returns a deep copy of the buffer for reverse-step restoration.
+// Implements peripheral.Snapshotable so the CPU snapshot ring can round-trip
+// peripheral state alongside CPU + RAM.
+func (t *TextOutput) Snapshot() []byte {
+	out := make([]byte, len(t.buf))
+	copy(out, t.buf)
+	return out
+}
+
+// Restore replaces the buffer with the supplied bytes. The slice is copied
+// so the caller can reuse its backing array.
+func (t *TextOutput) Restore(state []byte) {
+	t.buf = append(t.buf[:0], state...)
+}

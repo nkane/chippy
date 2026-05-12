@@ -397,6 +397,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			s, _ := m.Rewind.Pop()
 			m.CPU.Restore(s, m.RAM)
+			m.restoreperipherals(s)
 			m.Status = fmt.Sprintf("rewind -> $%04X (depth %d)", m.CPU.PC, m.Rewind.Len())
 		case "I":
 			m.ImmediateActive = true
@@ -553,9 +554,46 @@ func keyMsgToByte(msg tea.KeyMsg) (byte, bool) {
 // cost per cycle at multi-MHz throughput.
 func (m *Model) step() int {
 	if m.Rewind != nil {
-		m.Rewind.Push(m.CPU.Snapshot(m.RAM))
+		s := m.CPU.Snapshot(m.RAM)
+		m.captureperipherals(&s)
+		m.Rewind.Push(s)
 	}
 	return m.CPU.Step()
+}
+
+// captureperipherals fills the snapshot's Peripherals map with the
+// current state of every wired MMIO device. Keys are the peripheral's
+// base MMIO address as `"$XXXX"` so restore can route bytes back to
+// the right device.
+func (m *Model) captureperipherals(s *cpu.Snapshot) {
+	if m.TextOut == nil && m.Keyboard == nil {
+		return
+	}
+	s.Peripherals = map[string][]byte{}
+	if m.TextOut != nil {
+		s.Peripherals[fmt.Sprintf("$%04X", m.TextOut.Addr)] = m.TextOut.Snapshot()
+	}
+	if m.Keyboard != nil {
+		s.Peripherals[fmt.Sprintf("$%04X", m.Keyboard.DataAddr)] = m.Keyboard.Snapshot()
+	}
+}
+
+// restoreperipherals applies a snapshot's Peripherals map back to the
+// wired devices. Missing keys leave the corresponding device untouched.
+func (m *Model) restoreperipherals(s cpu.Snapshot) {
+	if s.Peripherals == nil {
+		return
+	}
+	if m.TextOut != nil {
+		if state, ok := s.Peripherals[fmt.Sprintf("$%04X", m.TextOut.Addr)]; ok {
+			m.TextOut.Restore(state)
+		}
+	}
+	if m.Keyboard != nil {
+		if state, ok := s.Peripherals[fmt.Sprintf("$%04X", m.Keyboard.DataAddr)]; ok {
+			m.Keyboard.Restore(state)
+		}
+	}
 }
 
 // statusAfterStep updates Status reflecting halt or normal stepping outcome.
