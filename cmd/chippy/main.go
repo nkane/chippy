@@ -27,6 +27,7 @@ func main() {
 		runOnStart = flag.Bool("run-on-start", false, "start the CPU running instead of paused (pair with -trace for non-interactive capture)")
 		dapMode    = flag.String("dap", "", "run as a Debug Adapter Protocol server instead of the TUI: 'stdio' or 'tcp:PORT'")
 		textBufCap = flag.Int("text-buf-cap", peripheral.DefaultTextOutputCap, "TextOutput ($F001) buffer cap in bytes; 0 = unbounded")
+		theme      = flag.String("theme", "", "color palette: default | mono | protan | tritan. NO_COLOR=1 forces mono regardless.")
 	)
 	flag.Parse()
 
@@ -161,7 +162,8 @@ func main() {
 		WithKeyboard(keyIn).
 		WithTracer(tracer).
 		WithHistoryPath(tui.DefaultHistoryPath()).
-		WithRunOnStart(*runOnStart)
+		WithRunOnStart(*runOnStart).
+		WithTheme(*theme)
 	if syms != nil {
 		model = model.WithSymbols(syms)
 	}

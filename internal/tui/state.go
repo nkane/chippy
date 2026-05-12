@@ -41,6 +41,7 @@ type savedState struct {
 	InputMode        bool             `json:"input_mode,omitempty"`
 	DisasmAnchor     uint16           `json:"disasm_anchor,omitempty"`
 	ImmediateHistory []ImmediateEntry `json:"immediate_history,omitempty"`
+	Theme            string           `json:"theme,omitempty"`
 }
 
 func loadState(m *Model, path string) {
@@ -77,6 +78,11 @@ func loadState(m *Model, path string) {
 		m.InputMode = s.InputMode
 		m.DisasmAnchor = s.DisasmAnchor
 		m.ImmediateHistory = s.ImmediateHistory
+		if s.Theme != "" {
+			t := resolveTheme(s.Theme)
+			applyTheme(t)
+			m.Theme = string(t)
+		}
 	}
 	if m.Breakpoints == nil {
 		m.Breakpoints = make(map[uint16]*Breakpoint)
@@ -194,6 +200,7 @@ func (m *Model) saveState() {
 		InputMode:        m.InputMode,
 		DisasmAnchor:     m.DisasmAnchor,
 		ImmediateHistory: m.ImmediateHistory,
+		Theme:            m.Theme,
 	}
 	data, err := json.MarshalIndent(&s, "", "  ")
 	if err != nil {

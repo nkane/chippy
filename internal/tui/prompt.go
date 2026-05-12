@@ -375,6 +375,8 @@ func (m *Model) runCommand(line string) string {
 		return m.cmdTrace(args)
 	case "textsave":
 		return m.cmdTextSave(args)
+	case "theme":
+		return m.cmdTheme(args)
 	case "help", "?":
 		m.ShowHelp = true
 		return "help"
@@ -476,6 +478,27 @@ func (m Model) promptLine(width int) string {
 	}
 	text := ":" + m.PromptBuf + cursor
 	return promptStyle.Width(width).Render(text)
+}
+
+// cmdTheme switches the active color palette. No arg reports the
+// current theme; `default | mono | protan | tritan` sets it; saved
+// state persists the choice across launches.
+//
+//	:theme
+//	:theme mono
+func (m *Model) cmdTheme(args []string) string {
+	if len(args) == 0 {
+		current := m.Theme
+		if current == "" {
+			current = string(ThemeDefault)
+		}
+		return fmt.Sprintf("theme: %s (available: %s)", current, strings.Join(AvailableThemes(), ", "))
+	}
+	resolved := resolveTheme(args[0])
+	applyTheme(resolved)
+	m.Theme = string(resolved)
+	m.saveState()
+	return fmt.Sprintf("theme -> %s", m.Theme)
 }
 
 // cmdTextSave dumps the TextOutput buffer to a file. Use case: a
