@@ -27,7 +27,7 @@ A PR that adds a feature without updating its docs is incomplete. Reviewers will
 - `go build ./...`
 - `go test -race -count=1 ./...`
 - `golangci-lint run ./...`
-- Persistence files (`~/.chippy/state-<rom>.json`) must keep loading — `savedState` schema is append-only.
+- Persistence files (`~/.chippy/state-<rom>.json`) follow the v1 freeze contract in [`docs/state-format.md`](docs/state-format.md). v1 writers include `schemaVersion: 1`. New fields stay optional inside v1.x; semantic changes or removals require bumping `StateSchemaVersion` + a migration. The `TestLoadState_GoldenV1` test pins `internal/tui/testdata/state-v1.json` — update both whenever the format changes.
 
 ## Code style
 - No comments explaining WHAT well-named code already says. Only non-obvious WHY.
