@@ -209,6 +209,19 @@ type SetInstructionBreakpointsArguments struct {
 	Breakpoints []InstructionBreakpoint `json:"breakpoints"`
 }
 
+// FunctionBreakpoint identifies a breakpoint by symbol name. Resolution
+// happens at set time via the loaded .dbg symbol table.
+type FunctionBreakpoint struct {
+	Name         string `json:"name"`
+	Condition    string `json:"condition,omitempty"`
+	HitCondition string `json:"hitCondition,omitempty"`
+}
+
+// SetFunctionBreakpointsArguments — replace ALL symbol-name breakpoints.
+type SetFunctionBreakpointsArguments struct {
+	Breakpoints []FunctionBreakpoint `json:"breakpoints"`
+}
+
 // Breakpoint is what `setBreakpoints` / `setInstructionBreakpoints`
 // return: per-entry resolution status plus the resolved location.
 type Breakpoint struct {

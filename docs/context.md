@@ -160,6 +160,7 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - DAP example configs + onboarding docs (issue #53): `docs/dap.md` walkthrough, `examples/dap/launch.json` (VS Code) and `examples/dap/nvim-dap.lua` (nvim-dap). DAP-v1 epic complete.
 - v0.2.0 — release cut after #77 / DAP-v1 epic.
 - DAP stepBack (issue #79, first of #78 DAP-v2 epic): wires the rewind ring into DAP. Snapshot ring promoted from `internal/tui` to `internal/cpu` as `cpu.SnapshotRing` so both the TUI's `<` key and DAP's stepBack share storage. `supportsStepBack: true`.
+- DAP setFunctionBreakpoints (issue #82, DAP-v2): symbol-name bps via `syms.LookupName`. New `bpsByName` map joins `bpsBySrc` and `bpsInst` in `rebuildBPHit`'s union. `supportsFunctionBreakpoints: true`.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars

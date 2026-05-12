@@ -107,8 +107,8 @@ func (s *Server) handleSetInstructionBreakpoints(req Request) {
 	s.sendResponse(req, body{Breakpoints: results})
 }
 
-// rebuildBPHit flattens bpsBySrc + bpsInst into the single PC set the run
-// loop checks. Call under bpMu.
+// rebuildBPHit flattens bpsBySrc + bpsInst + bpsByName into the single PC
+// set the run loop checks. Call under bpMu.
 func (s *Server) rebuildBPHit() {
 	hit := make(map[uint16]bool, len(s.bpsInst))
 	for pc := range s.bpsInst {
@@ -119,7 +119,60 @@ func (s *Server) rebuildBPHit() {
 			hit[pc] = true
 		}
 	}
+	for _, pc := range s.bpsByName {
+		hit[pc] = true
+	}
 	s.bpHit = hit
+}
+
+// handleSetFunctionBreakpoints replaces all symbol-name breakpoints in
+// one call. Each entry resolves through the loaded .dbg symbol table —
+// unresolved names report verified=false with a descriptive message.
+func (s *Server) handleSetFunctionBreakpoints(req Request) {
+	if s.cpu == nil {
+		s.sendErrorResponse(req, "no debuggee — send launch first")
+		return
+	}
+	var args SetFunctionBreakpointsArguments
+	if err := json.Unmarshal(req.Arguments, &args); err != nil {
+		s.sendErrorResponse(req, fmt.Sprintf("bad setFunctionBreakpoints args: %v", err))
+		return
+	}
+
+	newByName := map[string]uint16{}
+	results := make([]Breakpoint, 0, len(args.Breakpoints))
+	for _, bp := range args.Breakpoints {
+		if s.syms == nil {
+			results = append(results, Breakpoint{
+				Verified: false,
+				Message:  "no symbol table loaded (-dbg / dbgPath not set)",
+			})
+			continue
+		}
+		addr, ok := s.syms.LookupName(bp.Name)
+		if !ok {
+			results = append(results, Breakpoint{
+				Verified: false,
+				Message:  fmt.Sprintf("unknown symbol: %s", bp.Name),
+			})
+			continue
+		}
+		newByName[bp.Name] = addr
+		results = append(results, Breakpoint{
+			Verified:                    true,
+			InstructionPointerReference: fmt.Sprintf("$%04X", addr),
+		})
+	}
+
+	s.bpMu.Lock()
+	s.bpsByName = newByName
+	s.rebuildBPHit()
+	s.bpMu.Unlock()
+
+	type body struct {
+		Breakpoints []Breakpoint `json:"breakpoints"`
+	}
+	s.sendResponse(req, body{Breakpoints: results})
 }
 
 // isBreakpoint reports whether pc has a breakpoint pending. Run loop hot
