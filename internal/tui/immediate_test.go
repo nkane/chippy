@@ -44,6 +44,32 @@ func TestImmediate_BadExpression(t *testing.T) {
 	}
 }
 
+// `-1` in the immediate window should render as `$FF (255)` so a
+// register-byte comparison feels natural. Pins the width-aware unary
+// minus from internal/expr (issue #129).
+func TestImmediate_UnaryMinusRendersAsByte(t *testing.T) {
+	m := newImmediateModel()
+	got := m.evaluateImmediate("-1")
+	if got.Err {
+		t.Fatalf("eval error: %s", got.Result)
+	}
+	if got.Result != "$FF  (255)" {
+		t.Fatalf("want $FF (255), got %q", got.Result)
+	}
+}
+
+func TestImmediate_RegisterEqualsNegativeOne(t *testing.T) {
+	m := newImmediateModel()
+	m.CPU.A = 0xFF
+	got := m.evaluateImmediate("A == -1")
+	if got.Err {
+		t.Fatalf("eval error: %s", got.Result)
+	}
+	if got.Result != "$01  (1)" {
+		t.Fatalf("A($FF) == -1 should be true ($01); got %q", got.Result)
+	}
+}
+
 func TestImmediate_FormatWidthByMagnitude(t *testing.T) {
 	cases := []struct {
 		v    uint32
