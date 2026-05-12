@@ -138,15 +138,33 @@ func cmosNOPs(set func(op byte, name string, mode AddrMode, bytes, cycles int, p
 		lo := op & 0x0F
 		switch lo {
 		case 0x02:
-			set(byte(op), "NOP", IMM, 2, 2, false, opNOP)
+			// $x2 slots not used as IZP ops above act as 2-byte/2-cycle
+			// IMM NOPs (load + discard).
+			set(byte(op), "NOP", IMM, 2, 2, false, opNOP2)
 		case 0x03, 0x0B:
+			// $x3 and $xB are all 1-byte/1-cycle NOPs per WDC datasheet.
 			set(byte(op), "NOP", IMP, 1, 1, false, opNOP)
+		case 0x04:
+			// $44 is the only undefined $x4 slot — 2-byte/3-cycle ZP
+			// NOP per WDC silicon. Klaus's `db $44` test at $0DCC
+			// requires exactly this width.
+			set(byte(op), "NOP", ZP, 2, 3, false, opNOP2)
 		case 0x0C:
-			// $5C is documented as 3-byte/8-cycle; other xC slots are
-			// official ops (BIT abs, JMP abs, JMP (abs,X), CPY abs, CPX abs)
-			// already in the table, so the only "???" $xC left is $5C.
-			set(byte(op), "NOP", ABS, 3, 8, false, opNOP)
+			// $5C is the WDC-quirky 3-byte/8-cycle slot. $DC + $FC are
+			// the only other "???" $xC slots; both are 3-byte/4-cycle
+			// ABS NOPs (+1 on page cross).
+			if op == 0x5C {
+				set(byte(op), "NOP", ABS, 3, 8, false, opNOP3)
+			} else {
+				set(byte(op), "NOP", ABS, 3, 4, true, opNOP3)
+			}
 		default:
+			// $54, $D4, $F4 reach here (low nibble 4 above only
+			// matched $44). They're 2-byte/4-cycle ZPX NOPs.
+			if lo == 0x04 || op == 0x54 || op == 0xD4 || op == 0xF4 {
+				set(byte(op), "NOP", ZPX, 2, 4, false, opNOP2)
+				continue
+			}
 			// All other unimplemented: 1-byte/1-cycle NOP.
 			set(byte(op), "NOP", IMP, 1, 1, false, opNOP)
 		}

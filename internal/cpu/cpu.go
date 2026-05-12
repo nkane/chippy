@@ -161,6 +161,11 @@ func (c *CPU) serviceNMI() {
 	c.push16(c.PC)
 	c.push((c.P | FlagU) &^ FlagB)
 	c.setFlag(FlagI, true)
+	// CMOS quirk: interrupt entry also clears D so handlers can rely
+	// on binary mode. NMOS leaves D alone.
+	if c.Variant == VariantCMOS65C02 {
+		c.setFlag(FlagD, false)
+	}
 	lo := uint16(c.Bus.Read(VecNMI))
 	hi := uint16(c.Bus.Read(VecNMI + 1))
 	c.PC = lo | hi<<8
@@ -174,6 +179,9 @@ func (c *CPU) serviceIRQ() {
 	c.push16(c.PC)
 	c.push((c.P | FlagU) &^ FlagB)
 	c.setFlag(FlagI, true)
+	if c.Variant == VariantCMOS65C02 {
+		c.setFlag(FlagD, false)
+	}
 	lo := uint16(c.Bus.Read(VecIRQ))
 	hi := uint16(c.Bus.Read(VecIRQ + 1))
 	c.PC = lo | hi<<8
