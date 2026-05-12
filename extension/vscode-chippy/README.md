@@ -55,3 +55,36 @@ list of launch attributes.
 That's it — the extension is purely glue between VS Code's DAP machinery
 and the chippy binary. All debugger features (stepping, breakpoints,
 disassembly, reverse-step, etc.) are implemented in chippy itself.
+
+## Disconnect / crash handling
+
+The extension spawns `chippy -dap stdio` as a child process when a debug
+session starts. If the chippy binary exits before VS Code asks for a
+disconnect:
+
+- The debug console reports the process exit code in the output panel.
+- VS Code drops out of the debugger UI; press F5 again to start a fresh
+  session.
+- Stderr from chippy is forwarded to the debug console so a panic or a
+  ROM-load error is visible without having to re-run from the CLI.
+
+If you point VS Code at a chippy build that doesn't speak DAP (very old
+binary, or the wrong file picked up via PATH), the session-start fails
+with `spawn ENOENT` or `exited with code 2` depending on the failure
+mode. Set `chippy.binaryPath` to an absolute path to a known-good
+install when that happens.
+
+## Running the test suite
+
+The extension ships a `@vscode/test-electron` harness:
+
+```sh
+npm install
+npm test
+```
+
+CI runs the same suite under `xvfb-run` on Linux. The tests assert the
+extension's debug type is registered, the activation event fires, and
+the `chippy.binaryPath` setting is declared in `package.json`. Catches
+the most common manifest / activation regressions before they reach the
+marketplace.
