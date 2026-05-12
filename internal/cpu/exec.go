@@ -8,7 +8,24 @@ package cpu
 // next opcode is fetched. NMI is checked first (always taken) then IRQ
 // (only if FlagI is clear). Servicing an interrupt clears Halted so a
 // program spinning in a wait-loop can be woken by a peripheral.
+//
+// CMOS halt variants:
+//   - WAI ($CB) halts the CPU until any IRQ or NMI is signalled. The wake
+//     happens even when FlagI is set: if the line is asserted but masked,
+//     execution resumes at the instruction *after* WAI (no service).
+//   - STP ($DB) halts until external reset. Interrupts are ignored while
+//     STP-halted; the only way out is c.Reset(). stoppedBySTP gates the
+//     interrupt-service block below.
 func (c *CPU) Step() int {
+	// STP-halt: ignore everything until Reset clears stoppedBySTP.
+	if c.stoppedBySTP {
+		return 0
+	}
+	// WAI-wake on masked IRQ: line is asserted, FlagI prevents servicing,
+	// but WAI still un-halts so execution continues with the next opcode.
+	if c.Halted && c.irqLine && c.hasFlag(FlagI) && !c.nmiPending {
+		c.Halted = false
+	}
 	// Service pending interrupts at the boundary. An interrupt service is
 	// itself a 7-cycle operation; we do NOT also execute an instruction in
 	// the same Step. The next call to Step will fetch the first opcode of
@@ -324,3 +341,17 @@ func opBRK(c *CPU, _ uint16, _ AddrMode) {
 	c.PC = lo | hi<<8
 }
 func opNOP(c *CPU, _ uint16, _ AddrMode) {}
+
+// opWAI (CMOS $CB) puts the CPU to sleep until an IRQ or NMI is signalled.
+// Once awakened, execution continues with the next opcode; the interrupt
+// handler (if any) runs first via the normal service path on the next
+// Step(). Wake fires even when FlagI masks the IRQ — see Step()'s
+// WAI-wake-on-masked-IRQ block.
+func opWAI(c *CPU, _ uint16, _ AddrMode) { c.Halted = true }
+
+// opSTP (CMOS $DB) halts the CPU permanently; only Reset can clear the
+// stoppedBySTP latch. Interrupts are ignored while in STP-halt.
+func opSTP(c *CPU, _ uint16, _ AddrMode) {
+	c.Halted = true
+	c.stoppedBySTP = true
+}

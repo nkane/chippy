@@ -52,6 +52,12 @@ type CPU struct {
 	// Debug helpers
 	Halted bool
 
+	// stoppedBySTP marks a CMOS STP-induced halt. STP halts until Reset —
+	// unlike a self-jump halt (clearable by any interrupt) or a WAI halt
+	// (clearable by IRQ/NMI), so Step() refuses to service interrupts while
+	// this flag is set.
+	stoppedBySTP bool
+
 	// extraCycles is set by handlers (e.g. taken branches) to add to the
 	// instruction's base cycle count for the current Step. Reset each Step.
 	extraCycles int
@@ -103,6 +109,7 @@ func (c *CPU) Reset() {
 	c.PC = lo | hi<<8
 	c.Cycles = 7
 	c.Halted = false
+	c.stoppedBySTP = false
 }
 
 // flag helpers

@@ -114,9 +114,11 @@ func init() {
 	// patterns. We use the standard table from 6502.org.
 	cmosNOPs(set)
 
-	// CMOS quirk: WAI / STP exist on WDC but not Rockwell; treat as NOPs.
-	set(0xCB, "WAI", IMP, 1, 3, false, opNOP)
-	set(0xDB, "STP", IMP, 1, 3, false, opNOP)
+	// WDC 65C02 halt opcodes (Rockwell omits them; chippy implements WDC).
+	//   WAI ($CB) halts until any IRQ/NMI; service runs on wake.
+	//   STP ($DB) halts until external Reset; interrupts ignored while stopped.
+	set(0xCB, "WAI", IMP, 1, 3, false, opWAI)
+	set(0xDB, "STP", IMP, 1, 3, false, opSTP)
 }
 
 // cmosNOPs installs the WDC-spec NOPs that replace all NMOS undefined opcodes
