@@ -29,6 +29,11 @@
 // The evaluator returns a uint32 internally; callers that need a bool
 // (breakpoint condition) treat non-zero as "fire". Result is masked to
 // 32 bits to keep things simple.
+//
+// Unary minus is width-aware so register-byte comparisons read naturally:
+// `-1` evaluates to `$FF` (not `$FFFFFFFF`), `-$0100` evaluates to
+// `$FF00`, etc. Binary subtraction stays 32-bit modular — wrap `(- v &
+// $FFFF)` explicitly if a different width is needed.
 package expr
 
 import (
@@ -547,7 +552,25 @@ func (p *condParser) parseUnary() (EvalFn, error) {
 		if err != nil {
 			return nil, err
 		}
-		return func(c *cpu.CPU, bus cpu.Bus) uint32 { return uint32(-int32(x(c, bus))) }, nil
+		// Width-aware negation. Picking the smallest power-of-two width
+		// that contains the operand makes `-1` round to `$FF` (byte
+		// negation), so `A == -1` matches a register holding $FF rather
+		// than the 32-bit `$FFFFFFFF` that a naive `-int32(v)` would
+		// emit. Larger operands keep their natural width: `-$0100`
+		// produces `$FF00`, `-$10000` produces `$FFFF0000`.
+		return func(c *cpu.CPU, bus cpu.Bus) uint32 {
+			v := x(c, bus)
+			switch {
+			case v == 0:
+				return 0
+			case v <= 0xFF:
+				return uint32(byte(0 - v))
+			case v <= 0xFFFF:
+				return uint32(uint16(0 - v))
+			default:
+				return 0 - v
+			}
+		}, nil
 	}
 	return p.parsePrimary()
 }
