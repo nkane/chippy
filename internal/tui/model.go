@@ -139,6 +139,14 @@ type Model struct {
 	// the runtime cost. Nil disables the feature; default cap is set in New.
 	Rewind *rewindRing
 
+	// Immediate window — a modal REPL over the chippy expression grammar.
+	// `I` opens, Esc closes; while open, all keystrokes feed
+	// updateImmediate. Each Enter compiles + evaluates the buffer against
+	// current CPU state and appends `{Expr, Result}` to ImmediateHistory.
+	ImmediateActive  bool
+	ImmediateBuf     string
+	ImmediateHistory []ImmediateEntry
+
 	// Disassembly viewport: when DisasmFollow is true (default), the panel
 	// re-anchors on PC each frame. User scroll keys flip it off and pin
 	// DisasmAnchor as the address shown at the top of the window.
@@ -300,6 +308,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.MemEditing {
 			return m.updateMemEdit(msg)
 		}
+		// Immediate window owns input while open.
+		if m.ImmediateActive {
+			return m.updateImmediate(msg)
+		}
 
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -386,6 +398,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s, _ := m.Rewind.Pop()
 			m.CPU.Restore(s, m.RAM)
 			m.Status = fmt.Sprintf("rewind -> $%04X (depth %d)", m.CPU.PC, m.Rewind.Len())
+		case "I":
+			m.ImmediateActive = true
+			m.ImmediateBuf = ""
+			m.Status = "immediate window"
 		case "b":
 			if _, ok := m.Breakpoints[m.CPU.PC]; ok {
 				delete(m.Breakpoints, m.CPU.PC)
@@ -873,6 +889,8 @@ func (m Model) View() string {
 		bodyBlock = lipgloss.Place(m.W, bodyHeight, lipgloss.Center, lipgloss.Center, m.helpModal())
 	case m.ShowBPs:
 		bodyBlock = lipgloss.Place(m.W, bodyHeight, lipgloss.Center, lipgloss.Center, m.bpModal())
+	case m.ImmediateActive:
+		bodyBlock = lipgloss.Place(m.W, bodyHeight, lipgloss.Center, lipgloss.Center, m.immediateModal())
 	default:
 		bodyBlock = lipgloss.PlaceHorizontal(m.W, lipgloss.Center, body)
 	}
@@ -974,6 +992,12 @@ func helpPages() [][]helpSection {
 				{"Tab", "complete verb or symbol (after :bp etc.)"},
 				{"Ctrl-R", "reverse-incremental search history (Ctrl-R again = next)"},
 				{"Esc", "cancel prompt or RI search"},
+			}},
+			{"Immediate window", [][2]string{
+				{"I", "open expression REPL"},
+				{"<expr>", "evaluate against CPU state (A+X, [$0200], PC>=main, …)"},
+				{"↑", "recall last expression"},
+				{"Esc", "close"},
 			}},
 			{"Breakpoints", [][2]string{
 				{":bp X", "toggle plain bp at addr/symbol/file.s:42"},
