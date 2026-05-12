@@ -84,6 +84,8 @@ require("dap").adapters.chippy = {
 | `readMemory` / `writeMemory`     | #51   | Bypasses MMIO — peripherals don't see debugger pokes. |
 | `evaluate`                       | #52   | Watch / hover / debug-console expressions via `internal/expr`. |
 | `completions`                    | #85   | Debug-console autocomplete: registers, flag bits, and loaded `.dbg` symbols. |
+| `setExceptionBreakpoints`        | #83   | Toggles "pause on BRK" via the `brk` filter. Run loop checks for `$00` opcode before each `cpu.Step()`. |
+| `exceptionInfo`                  | #83   | Describes the last-fired exception (`brk` with PC). |
 
 ## Known gaps
 

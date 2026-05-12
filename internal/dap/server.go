@@ -69,6 +69,13 @@ type Server struct {
 	// (stepIn/next/stepOut) and on continue→bp stops. stepBack pops one
 	// snapshot and restores. Same 256-entry ring the TUI uses for `<`.
 	rewind *cpu.SnapshotRing
+
+	// Exception-break state. `brkOnException` is set by
+	// setExceptionBreakpoints when the "brk" filter is enabled; while
+	// true, the run loop pauses just before executing a $00 (BRK)
+	// opcode. `lastExceptionPC` is the PC reported by exceptionInfo.
+	brkOnException  atomic.Bool
+	lastExceptionPC atomic.Uint32
 }
 
 // NewServer wires the transport to a fresh Server. r/w must point at the
@@ -170,6 +177,10 @@ func (s *Server) dispatch(req Request) {
 		s.handleSource(req)
 	case "completions":
 		s.handleCompletions(req)
+	case "setExceptionBreakpoints":
+		s.handleSetExceptionBreakpoints(req)
+	case "exceptionInfo":
+		s.handleExceptionInfo(req)
 	case "disconnect":
 		s.handleDisconnect(req)
 	case "terminate":
@@ -180,6 +191,13 @@ func (s *Server) dispatch(req Request) {
 }
 
 func (s *Server) handleInitialize(req Request) {
+	// initialize response embeds the exception-filter list. Defined here
+	// rather than carried on Capabilities so it stays close to the
+	// initialize handler — Capabilities is a flat bool struct.
+	type capsWithFilters struct {
+		Capabilities
+		ExceptionBreakpointFilters []ExceptionBreakpointsFilter `json:"exceptionBreakpointFilters,omitempty"`
+	}
 	caps := Capabilities{
 		SupportsConfigurationDoneRequest:   true,
 		SupportsConditionalBreakpoints:     true,
@@ -198,8 +216,19 @@ func (s *Server) handleInitialize(req Request) {
 		SupportsRestartRequest:             false,
 		SupportsCompletionsRequest:         true,
 		SupportsSetVariable:                true,
+		SupportsExceptionInfoRequest:       true,
 	}
-	s.sendResponse(req, caps)
+	resp := capsWithFilters{
+		Capabilities: caps,
+		ExceptionBreakpointFilters: []ExceptionBreakpointsFilter{
+			{
+				Filter:      "brk",
+				Label:       "BRK ($00 opcode)",
+				Description: "Pause just before the CPU executes a BRK instruction.",
+			},
+		},
+	}
+	s.sendResponse(req, resp)
 	s.sendEvent("initialized", nil)
 }
 

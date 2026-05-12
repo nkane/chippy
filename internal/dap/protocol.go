@@ -303,3 +303,28 @@ type CompletionItem struct {
 	Start  int    `json:"start,omitempty"`
 	Length int    `json:"length,omitempty"`
 }
+
+// ExceptionBreakpointsFilter is one selectable filter the client offers
+// in its Breakpoints pane. The user toggles each filter on/off; the
+// resulting set arrives via setExceptionBreakpoints.
+type ExceptionBreakpointsFilter struct {
+	Filter            string `json:"filter"`
+	Label             string `json:"label"`
+	Description       string `json:"description,omitempty"`
+	Default           bool   `json:"default,omitempty"`
+	SupportsCondition bool   `json:"supportsCondition,omitempty"`
+}
+
+// SetExceptionBreakpointsArguments is the request body for
+// `setExceptionBreakpoints` — the list of filter IDs currently enabled.
+type SetExceptionBreakpointsArguments struct {
+	Filters []string `json:"filters"`
+}
+
+// ExceptionInfoResponseBody is what `exceptionInfo` returns when the
+// editor asks for details on the active exception.
+type ExceptionInfoResponseBody struct {
+	ExceptionID string `json:"exceptionId"`
+	Description string `json:"description,omitempty"`
+	BreakMode   string `json:"breakMode"`
+}

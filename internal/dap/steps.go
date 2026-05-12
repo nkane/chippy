@@ -71,6 +71,15 @@ func (s *Server) runLoop() {
 			reason = "pause"
 			break
 		}
+		// Exception filter: pause BEFORE executing a BRK so the user
+		// can inspect state at the trap point rather than landing in
+		// the IRQ handler. lastExceptionPC drives exceptionInfo's
+		// description.
+		if s.brkOnException.Load() && s.ram.Read(s.cpu.PC) == 0x00 {
+			s.lastExceptionPC.Store(uint32(s.cpu.PC))
+			reason = "exception"
+			break
+		}
 		s.cpu.Step()
 		if s.cpu.Halted {
 			reason = "exception"
