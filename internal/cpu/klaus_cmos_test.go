@@ -29,15 +29,6 @@ const (
 )
 
 func TestKlausCMOSFunctionalTest(t *testing.T) {
-	// The CMOS table currently treats undocumented opcodes as 1-byte
-	// NOPs — but WDC 65C02 silicon defines several of them as 2-byte
-	// NOPs (e.g. $44 = NOP ZP). This makes the test trap at $0DDE
-	// after ~9k instructions. Tracked as #99; once that lands, drop
-	// the skip and the test will run end-to-end in CI.
-	if os.Getenv("CHIPPY_KLAUS_CMOS_STRICT") == "" {
-		t.Skip("CMOS NOP fills not yet WDC-spec'd; see #99. Set " +
-			"CHIPPY_KLAUS_CMOS_STRICT=1 to run the test anyway.")
-	}
 	bin, err := loadKlausCMOSBinary(t)
 	if err != nil {
 		t.Skipf("klaus cmos rom unavailable (set CHIPPY_KLAUS_CMOS_BIN to a local copy): %v", err)

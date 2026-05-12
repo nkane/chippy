@@ -313,6 +313,12 @@ func opBRK(c *CPU, _ uint16, _ AddrMode) {
 	c.push16(c.PC)
 	c.push(c.P | FlagB | FlagU)
 	c.setFlag(FlagI, true)
+	// CMOS quirk: BRK also clears the D flag (the running CPU's flag,
+	// AFTER the pre-clear value has already been pushed). NMOS leaves
+	// D alone — a real 6502 bug Klaus's test specifically checks for.
+	if c.Variant == VariantCMOS65C02 {
+		c.setFlag(FlagD, false)
+	}
 	lo := uint16(c.Bus.Read(VecIRQ))
 	hi := uint16(c.Bus.Read(VecIRQ + 1))
 	c.PC = lo | hi<<8
