@@ -19,6 +19,14 @@ func (s *Server) handleEvaluate(req Request) {
 		s.sendErrorResponse(req, "no debuggee — send launch first")
 		return
 	}
+	// Evaluating an expression reads CPU + RAM. The run loop also writes
+	// CPU + RAM. Racing those is a -race detector failure (and a real
+	// data hazard). Refuse to evaluate while a continue is in flight;
+	// the editor is expected to pause first when it wants a value.
+	if s.running.Load() {
+		s.sendErrorResponse(req, "CPU is running; pause first to evaluate")
+		return
+	}
 	var args EvaluateArguments
 	if err := json.Unmarshal(req.Arguments, &args); err != nil {
 		s.sendErrorResponse(req, fmt.Sprintf("bad evaluate args: %v", err))
