@@ -3,7 +3,8 @@ import * as fs from 'fs';
 import Mocha from 'mocha';
 
 export function run(): Promise<void> {
-  const mocha = new Mocha({ ui: 'bdd', color: true, timeout: 20000 });
+  // tdd UI is the VS Code testing convention (`suite` / `test`).
+  const mocha = new Mocha({ ui: 'tdd', color: true, timeout: 20000 });
   const testsRoot = __dirname;
 
   return new Promise((resolve, reject) => {
