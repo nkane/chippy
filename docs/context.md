@@ -167,6 +167,7 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - DAP exception bps (issue #83, DAP-v2): `brk` filter advertised in initialize as `exceptionBreakpointFilters`. `setExceptionBreakpoints` flips `brkOnException`; run loop pauses before any `$00` opcode and writes `lastExceptionPC` for the `exceptionInfo` response. `supportsExceptionInfoRequest: true`.
 - DAP bp condition/hitCondition/logMessage (issue #81, DAP-v2): every breakpoint family (source-line, instruction, function) honors the DAP modifier triple. New `bpMeta` per PC carries the compiled `expr.EvalFn`, hit target + running count, and an interpolating log template. `shouldFireBP` is the run-loop hit handler — logMessage emits an `output` event then continues without stopping.
 - DAP integration test (issue #86, DAP-v2): `internal/dap/integration_test.go` under build-tag `integration`. Builds the binary, spawns `chippy -dap stdio`, drives initialize → launch → setInstructionBreakpoints → continue → variables → stackTrace → disconnect via an in-test JSON wire client. New `dap-integration` CI job runs it on every push.
+- DAP attach v1 (issue #87, DAP-v2): `Server.AttachExisting(AttachConfig)` populates debuggee from an externally-built CPU/RAM/MMIO bundle without going through the loader. `attach` request now responds OK + emits stopped(entry) when a debuggee is wired. The TUI plumbing (`:dap PORT` command + shared CPU mutex) is deferred to #97.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars
