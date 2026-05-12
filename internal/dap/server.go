@@ -150,6 +150,8 @@ func (s *Server) dispatch(req Request) {
 		s.handleReadMemory(req)
 	case "writeMemory":
 		s.handleWriteMemory(req)
+	case "evaluate":
+		s.handleEvaluate(req)
 	case "disconnect":
 		s.handleDisconnect(req)
 	case "terminate":
