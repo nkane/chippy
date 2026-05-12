@@ -175,6 +175,7 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - CMOS NOP fills + interrupt D-clear (issue #99): WDC-spec NOP widths for undefined CMOS slots ($44=ZP, $54/$D4/$F4=ZPX, $DC/$FC=ABS, $5C=ABS-quirky 8-cycle). BRK / serviceIRQ / serviceNMI now clear D on CMOS variant (NMOS bug preserved). Klaus 65C02 functional test now passes end-to-end and runs unconditionally in CI.
 - v0.3.1 — patch release after the CMOS correctness pass.
 - `example/c/` — cc65-based C example programs (hello, sum, fizzbuzz) with shared `chippy.cfg` linker config + minimal `crt0.s` runtime. Builds via `make -C example/c`; runs via `chippy -rom example/c/<prog>.bin`. Source-map loader updated to prefer `.c` files over `.s` intermediates when both are recorded for the same PC, so the TUI source view (`v`) shows C source while stepping.
+- Immediate window (issue #70): `I` opens a modal REPL backed by `internal/expr`. Each Enter evaluates the buffer against current CPU state, appends `expr → result` to scrollback. `↑` recalls the last expression. Result formatting matches DAP's evaluate response so both surfaces report identical values.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars
