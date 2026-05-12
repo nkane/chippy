@@ -105,6 +105,24 @@ jobs:
       - name: Run exhaustive decimal-mode test (Bruce Clark Appendix B)
         run: go test -tags=decimal -timeout 2m -run TestDecimal -v ./internal/cpu/...
 
+  wasm:
+    name: wasm build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          cache: true
+
+      - name: Build chippy.wasm
+        env:
+          GOOS: js
+          GOARCH: wasm
+        run: go build -o /tmp/chippy.wasm ./cmd/chippy-wasm
+
   cmos-e2e:
     name: cmos e2e demo
     runs-on: ubuntu-latest

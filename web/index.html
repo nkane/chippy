@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>chippy — 6502 debugger in the browser</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>chippy <span class="tag">wasm playground</span></h1>
+    <p class="sub">
+      The same NMOS 6502 / 65C02 emulator that drives chippy's TUI + DAP server,
+      compiled to WebAssembly. Pick a canned demo or drop your own .bin / .prg / .hex.
+      <a href="https://github.com/nkane/chippy" target="_blank" rel="noopener">repo</a>.
+    </p>
+  </header>
+
+  <main>
+    <section class="controls">
+      <label for="demo">Demo:</label>
+      <select id="demo"></select>
+      <button id="load-demo" type="button">load</button>
+
+      <label class="file-label">
+        own ROM:
+        <input id="file" type="file" accept=".bin,.prg,.hex" />
+      </label>
+
+      <label>
+        format:
+        <select id="format">
+          <option value="bin">bin</option>
+          <option value="prg">prg</option>
+          <option value="hex">hex</option>
+        </select>
+      </label>
+
+      <label>
+        addr:
+        <input id="addr" type="text" value="0x8000" size="6" />
+      </label>
+
+      <label>
+        variant:
+        <select id="variant">
+          <option value="nmos">NMOS 6502</option>
+          <option value="65c02">CMOS 65C02</option>
+        </select>
+      </label>
+    </section>
+
+    <section class="run-controls">
+      <button id="reset" type="button">reset</button>
+      <button id="step" type="button">step (s)</button>
+      <button id="run100" type="button">run 100</button>
+      <button id="run10k" type="button">run 10k</button>
+      <button id="halt" type="button" disabled>halt</button>
+      <span id="status" class="status">idle</span>
+    </section>
+
+    <section class="panes">
+      <div class="pane regs">
+        <h2>registers</h2>
+        <table id="regs-table">
+          <tbody>
+            <tr><th>A</th><td id="reg-a">$00</td><th>X</th><td id="reg-x">$00</td><th>Y</th><td id="reg-y">$00</td></tr>
+            <tr><th>SP</th><td id="reg-sp">$FF</td><th>PC</th><td colspan="3" id="reg-pc">$0000</td></tr>
+            <tr><th>P</th><td colspan="5" id="reg-p">$24 NV-BDIZC<br><span id="reg-flags">. . . . . . . .</span></td></tr>
+            <tr><th>CYC</th><td colspan="5" id="reg-cyc">0</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pane disasm">
+        <h2>disassembly</h2>
+        <pre id="disasm-view">(load a ROM)</pre>
+      </div>
+
+      <div class="pane memory">
+        <h2>memory</h2>
+        <label>view @ <input id="mem-addr" type="text" value="0x0000" size="6" /></label>
+        <pre id="mem-view"></pre>
+      </div>
+
+      <div class="pane output">
+        <h2>text output ($F001)</h2>
+        <pre id="text-out"></pre>
+        <button id="clear-text" type="button">clear</button>
+      </div>
+
+      <div class="pane keyboard">
+        <h2>keyboard input ($F004/$F005)</h2>
+        <p class="hint">Click here, then press a key to inject it into the emulator.</p>
+        <div id="key-capture" tabindex="0">keyboard capture (click + type)</div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span id="wasm-status">loading wasm…</span>
+  </footer>
+
+  <script src="wasm_exec.js"></script>
+  <script src="chippy.js"></script>
+</body>
+</html>

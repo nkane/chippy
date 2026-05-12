@@ -8,6 +8,10 @@
 *.lst
 *.map
 
+# Canned demos shipped with the WASM playground — small, stable, version-controlled
+# so `make -C web serve` works without re-building the example/ ROMs from source.
+!web/demos/*.bin
+
 # Local state
 .chippy/
 ~/.chippy/
