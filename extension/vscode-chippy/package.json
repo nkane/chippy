@@ -26,6 +26,27 @@
     "onDebugDynamicConfigurations:chippy"
   ],
   "contributes": {
+    "languages": [
+      {
+        "id": "ca65",
+        "aliases": ["ca65", "6502 Assembly"],
+        "extensions": [".s", ".s65", ".asm", ".inc"],
+        "configuration": "./ca65.language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ca65",
+        "scopeName": "source.asm.ca65",
+        "path": "./syntaxes/ca65.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "ca65",
+        "path": "./snippets/ca65.json"
+      }
+    ],
     "debuggers": [
       {
         "type": "chippy",

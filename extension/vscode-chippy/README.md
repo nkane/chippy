@@ -51,6 +51,12 @@ list of launch attributes.
   whenever VS Code starts a `chippy` debug session.
 - Ships configuration snippets so `Add Configuration…` in `launch.json`
   offers chippy templates.
+- Ships a TextMate grammar for ca65 / 6502 assembly (`.s`, `.s65`,
+  `.asm`, `.inc`) — colored mnemonics (NMOS + 65C02), directives
+  (`.proc`, `.segment`, `.byte`, …), labels, hex (`$XX`) / binary
+  (`%01`) / decimal literals, comments. Bundled code snippets cover
+  the reset-vector block, `.proc` skeleton, `.ifdef` block, halt loop,
+  and Apple-1 `putc`.
 
 That's it — the extension is purely glue between VS Code's DAP machinery
 and the chippy binary. All debugger features (stepping, breakpoints,
