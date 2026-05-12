@@ -164,6 +164,10 @@ func (s *Server) dispatch(req Request) {
 		s.handleWriteMemory(req)
 	case "evaluate":
 		s.handleEvaluate(req)
+	case "loadedSources":
+		s.handleLoadedSources(req)
+	case "source":
+		s.handleSource(req)
 	case "disconnect":
 		s.handleDisconnect(req)
 	case "terminate":
@@ -186,7 +190,7 @@ func (s *Server) handleInitialize(req Request) {
 		SupportsInstructionBreakpoints:     true,
 		SupportsLogPoints:                  true,
 		SupportsBreakpointLocationsRequest: true,
-		SupportsLoadedSourcesRequest:       false,
+		SupportsLoadedSourcesRequest:       true,
 		SupportsStepBack:                   true,
 		SupportsFunctionBreakpoints:        true,
 		SupportsRestartRequest:             false,
