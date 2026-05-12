@@ -64,12 +64,39 @@ brew tap nkane/tap
 brew install chippy
 ```
 
-### Prebuilt binaries
+### Debian / Ubuntu
+
+```sh
+curl -LO https://github.com/nkane/chippy/releases/latest/download/chippy_<VERSION>_linux_amd64.deb
+sudo dpkg -i chippy_<VERSION>_linux_amd64.deb
+```
+
+### Fedora / RHEL
+
+```sh
+sudo rpm -i https://github.com/nkane/chippy/releases/latest/download/chippy_<VERSION>_linux_amd64.rpm
+```
+
+### Alpine
+
+```sh
+sudo apk add --allow-untrusted chippy_<VERSION>_linux_amd64.apk
+```
+
+### Arch Linux (AUR)
+
+```sh
+yay -S chippy-bin
+# or any other AUR helper
+```
+
+### Prebuilt tarballs
 
 Grab a release archive for your platform from the
 [releases page](https://github.com/nkane/chippy/releases) and drop the
 `chippy` binary on your `$PATH`. Builds available for darwin/linux on
-amd64+arm64 and windows on amd64.
+amd64+arm64 and windows on amd64. `cosign verify-blob` recipe in
+[`SECURITY.md`](SECURITY.md) verifies the bundled signature.
 
 ### From source
 
