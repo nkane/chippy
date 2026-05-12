@@ -158,6 +158,6 @@
     "@vscode/test-electron": "^2.4.0",
     "@vscode/vsce": "^2.24.0",
     "mocha": "^10.4.0",
-    "typescript": "^5.3.0"
+    "typescript": "^6.0.3"
   }
 }
