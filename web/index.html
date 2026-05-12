@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <title>chippy — 6502 debugger in the browser</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- CSP: self only. WASM lives at /chippy.wasm; no third-party scripts. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -56,8 +59,11 @@
       <button id="run100" type="button">run 100</button>
       <button id="run10k" type="button">run 10k</button>
       <button id="halt" type="button" disabled>halt</button>
+      <button id="share" type="button" title="Copy a permalink that reproduces the current ROM + state">share</button>
       <span id="status" class="status">idle</span>
     </section>
+
+    <div id="boot-error" class="boot-error" hidden></div>
 
     <section class="panes">
       <div class="pane regs">
