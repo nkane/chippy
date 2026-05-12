@@ -999,11 +999,20 @@ func helpPages() [][]helpSection {
 				{"0", "unthrottled (max)"},
 			}},
 			{"General", [][2]string{
-				{":", "command line (:goto :pc :watch :speed :bp)"},
+				{":", "command line — see Prompt verbs page for the full list"},
 				{"v", "toggle source / disassembly view"},
 				{"i", "input mode → keystrokes go to keyboard peripheral (Esc exits)"},
 				{"? / h", "toggle this help"},
 				{"q / ^C", "quit"},
+			}},
+			{"Prompt verbs", [][2]string{
+				{":goto X", "scroll memory pane to addr/symbol"},
+				{":pc X", "set CPU PC"},
+				{":run X", "run until addr (one-shot bp + go)"},
+				{":watch X [byte|word] [label]", "add value watch (also :watch reg <A|X|Y|P|SP|PC>)"},
+				{":rmwatch X", "remove a watch (also :rmwatch reg <name>)"},
+				{":clearwatch", "remove ALL watches"},
+				{":speed Hz", "throttle to Hz (0 = max; try :speed 60)"},
 			}},
 		},
 		// Page 2 — panels
