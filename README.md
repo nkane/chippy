@@ -19,6 +19,42 @@ breakpoints can resolve to source lines.
 
 ---
 
+## Why chippy
+
+Plenty of 6502 emulators exist. chippy's pitch is **debugger-first**:
+
+- **TUI + DAP + WASM, one engine.** Same NMOS / 65C02 core powers the
+  terminal UI, the [Debug Adapter Protocol](docs/dap.md) server (so
+  VS Code / nvim-dap / JetBrains can drive it), and the in-browser
+  [WASM playground](https://nkane.dev/chippy/). One implementation, three
+  surfaces.
+- **Source-level debugging from C and ca65.** Auto-detected `.dbg` files
+  turn `.bin` addresses into `file:line` and symbol names — breakpoints,
+  watches, and conditional expressions resolve against the same names you
+  wrote.
+- **Reverse-step that actually scales.** Page-level copy-on-write
+  snapshots cost hundreds of bytes per step instead of 64 KiB, so the
+  rewind ring works during free-run too (a 1000-iter tight loop fits
+  in <1 MiB).
+- **MMIO peripherals you can poke from BASIC-era ROMs.** Apple-1 style
+  TextOutput at $F001 and KeyboardInput at $F004/$F005 ship out of the
+  box; the same `peripheral` package will host VIA 6522 next.
+- **Real 6502 + 65C02 compliance.** Klaus Dormann's functional tests pass
+  end-to-end for both variants; an exhaustive BCD sweep covers every
+  ADC/SBC input combination.
+
+Compared to:
+
+- **[py65](https://github.com/mnaberez/py65)** — Python, no source-level
+  debug, no DAP. Good for scripting.
+- **[lib6502](http://www.piumarta.com/software/lib6502/)** — C library
+  to embed in a host; no debugger of its own.
+- **[visual6502](http://www.visual6502.org/)** — gate-level transistor
+  simulation. Slower and not interactive; chippy is for development
+  workflow, visual6502 is for hardware archaeology.
+
+---
+
 ## Install
 
 ### Homebrew (macOS / Linux)
