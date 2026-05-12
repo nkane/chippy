@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "breakpoints": [
+    {
+      "addr": 32768,
+      "enabled": true,
+      "hitLimit": -1
+    },
+    {
+      "addr": 32848,
+      "enabled": true,
+      "hitLimit": 3,
+      "cond": "A == $42"
+    }
+  ],
+  "mem_bps": [
+    {
+      "addr": 1024,
+      "kind": "rw",
+      "enabled": true
+    }
+  ],
+  "mem_view_addr": 8192,
+  "mem_cursor": 8197,
+  "watches": [
+    {
+      "kind": "mem",
+      "addr": 8192,
+      "label": "score",
+      "width": 2
+    },
+    {
+      "kind": "reg",
+      "reg": "A"
+    }
+  ],
+  "target_hz": 60
+}
