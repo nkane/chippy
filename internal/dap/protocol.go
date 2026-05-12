@@ -254,3 +254,14 @@ type WriteMemoryArguments struct {
 	AllowPartial    bool   `json:"allowPartial,omitempty"`
 	Data            string `json:"data"`
 }
+
+// EvaluateArguments is the request body for `evaluate`. Context indicates
+// where the request came from: "watch", "repl", "hover", "clipboard".
+type EvaluateArguments struct {
+	Expression string `json:"expression"`
+	FrameID    int    `json:"frameId,omitempty"`
+	Context    string `json:"context,omitempty"`
+	Format     struct {
+		Hex bool `json:"hex,omitempty"`
+	} `json:"format,omitempty"`
+}
