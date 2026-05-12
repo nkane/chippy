@@ -73,9 +73,13 @@ func (s *Server) handleAttach(req Request) {
 		}
 	}
 	s.sendResponse(req, nil)
-	_ = args // StopOnEntry / ProcessID currently advisory; we always
-	// emit a stopped event so the editor's debugger UI has a state to
-	// render. Cross-process attach + run-on-attach are follow-up work.
+	// StopOnEntry: pointer-valued, three states.
+	//   nil  → default: emit stopped(entry) so the editor renders state.
+	//   true → same as nil.
+	//   false → skip the stopped event; the host process keeps running.
+	if args.StopOnEntry != nil && !*args.StopOnEntry {
+		return
+	}
 	s.sendEvent("stopped", StoppedEventBody{
 		Reason:            "entry",
 		ThreadID:          1,

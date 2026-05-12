@@ -90,8 +90,10 @@ type Capabilities struct {
 // Matches the CLI flags (rom, addr, reset, cpu, dbg, trace) so a launch
 // config in the editor looks like the chippy CLI invocation.
 type LaunchArguments struct {
-	NoDebug     bool   `json:"noDebug,omitempty"`
-	StopOnEntry bool   `json:"stopOnEntry,omitempty"`
+	NoDebug bool `json:"noDebug,omitempty"`
+	// StopOnEntry: pointer so we can distinguish "absent" (default to
+	// pause) from "explicit false" (auto-run after launch).
+	StopOnEntry *bool  `json:"stopOnEntry,omitempty"`
 	Rom         string `json:"rom,omitempty"`
 	LoadAddr    uint16 `json:"loadAddr,omitempty"`
 	ResetVec    uint16 `json:"resetVec,omitempty"`
@@ -105,8 +107,11 @@ type LaunchArguments struct {
 // `processId` means "attach to whatever debuggee the server is already
 // running"; non-empty is reserved for a future cross-process flow.
 type AttachArguments struct {
-	ProcessID   string `json:"processId,omitempty"`
-	StopOnEntry bool   `json:"stopOnEntry,omitempty"`
+	ProcessID string `json:"processId,omitempty"`
+	// StopOnEntry: pointer so absent / explicit-false / explicit-true
+	// each map to a distinct behavior (default pause / no stopped event
+	// / explicit pause).
+	StopOnEntry *bool `json:"stopOnEntry,omitempty"`
 }
 
 // StoppedEventBody is the body of a `stopped` event. Reason values include
@@ -239,6 +244,25 @@ type Breakpoint struct {
 	Source                      *Source `json:"source,omitempty"`
 	Line                        int     `json:"line,omitempty"`
 	InstructionPointerReference string  `json:"instructionPointerReference,omitempty"`
+}
+
+// BreakpointLocationsArguments — DAP request body for the editor's
+// gutter feature ("here's a line, what positions on that line could
+// actually take a breakpoint?"). We answer at line granularity.
+type BreakpointLocationsArguments struct {
+	Source    Source `json:"source"`
+	Line      int    `json:"line"`
+	Column    int    `json:"column,omitempty"`
+	EndLine   int    `json:"endLine,omitempty"`
+	EndColumn int    `json:"endColumn,omitempty"`
+}
+
+// BreakpointLocation — one position the gutter could mark as bp-able.
+type BreakpointLocation struct {
+	Line      int `json:"line"`
+	Column    int `json:"column,omitempty"`
+	EndLine   int `json:"endLine,omitempty"`
+	EndColumn int `json:"endColumn,omitempty"`
 }
 
 // DisassembleArguments is the request body for `disassemble`.
