@@ -446,6 +446,7 @@ internal/loader/    .bin/.prg/.hex/.o loaders
 internal/symbols/   cc65 .dbg parser, symbol + source-line tables
 internal/tui/       Bubble Tea model, panels, modals, commands
 example/            Bundled ca65 demo programs (source + shared linker cfg + Makefile)
+example/c/          Same idea, but the source is C — cc65 → ca65 → ld65 pipeline
 ```
 
 ---

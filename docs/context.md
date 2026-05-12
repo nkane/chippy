@@ -173,6 +173,8 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - Exhaustive BCD test (issue #60): `internal/cpu/decimal_exhaustive_test.go` (build tag `decimal`) walks every (N1, N2, cin) through ADC and SBC in decimal mode for both variants — 524 288 cases total. Caught a real CMOS BCD bug on invalid-nibble inputs; fix applied to `adcDecimalCMOS` / `sbcDecimalCMOS` (Bruce Clark Appendix B algorithm). New `decimal` CI job runs the suite on every push.
 - CMOS e2e CI (issue #61): new `cmos-e2e` workflow job installs cc65, builds `example/cmos_demo.bin`, runs the existing e2e test with `CHIPPY_CMOS_E2E_STRICT=1` so missing fixtures fail the build instead of silently skipping.
 - CMOS NOP fills + interrupt D-clear (issue #99): WDC-spec NOP widths for undefined CMOS slots ($44=ZP, $54/$D4/$F4=ZPX, $DC/$FC=ABS, $5C=ABS-quirky 8-cycle). BRK / serviceIRQ / serviceNMI now clear D on CMOS variant (NMOS bug preserved). Klaus 65C02 functional test now passes end-to-end and runs unconditionally in CI.
+- v0.3.1 — patch release after the CMOS correctness pass.
+- `example/c/` — cc65-based C example programs (hello, sum, fizzbuzz) with shared `chippy.cfg` linker config + minimal `crt0.s` runtime. Builds via `make -C example/c`; runs via `chippy -rom example/c/<prog>.bin`. Source-map loader updated to prefer `.c` files over `.s` intermediates when both are recorded for the same PC, so the TUI source view (`v`) shows C source while stepping.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars

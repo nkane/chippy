@@ -387,30 +387,46 @@ func LoadSourceMap(dbgPath string) (*SourceMap, error) {
 		return nil, err
 	}
 
+	// Two-pass build: cc65 emits records for both the .s intermediate
+	// and the original .c source at the same PC. We want the .c file
+	// to win so users see C source while stepping. Pass 1 fills the map
+	// from non-.s sources (.c, .h, .inc, etc.); pass 2 backfills any
+	// PCs still uncovered using .s records.
+	isPreferredSource := func(name string) bool {
+		lower := strings.ToLower(name)
+		return !strings.HasSuffix(lower, ".s") &&
+			!strings.HasSuffix(lower, ".asm") &&
+			!strings.HasSuffix(lower, ".mac") &&
+			!strings.HasSuffix(lower, ".inc")
+	}
 	pcMap := map[uint16]SrcLoc{}
-	for _, ln := range lines {
-		fr, ok := files[ln.file]
-		if !ok {
-			continue
-		}
-		for _, sid := range ln.spans {
-			sp, ok := spans[sid]
+	for _, preferred := range []bool{true, false} {
+		for _, ln := range lines {
+			fr, ok := files[ln.file]
 			if !ok {
 				continue
 			}
-			seg, ok := segs[sp.seg]
-			if !ok {
+			if isPreferredSource(fr.name) != preferred {
 				continue
 			}
-			start := seg.start + sp.start
-			for off := uint32(0); off < sp.size; off++ {
-				addr := start + off
-				if addr > 0xFFFF {
-					break
+			for _, sid := range ln.spans {
+				sp, ok := spans[sid]
+				if !ok {
+					continue
 				}
-				// First write wins so we prefer the earliest mapping.
-				if _, exists := pcMap[uint16(addr)]; !exists {
-					pcMap[uint16(addr)] = SrcLoc{File: fr.name, Line: ln.line}
+				seg, ok := segs[sp.seg]
+				if !ok {
+					continue
+				}
+				start := seg.start + sp.start
+				for off := uint32(0); off < sp.size; off++ {
+					addr := start + off
+					if addr > 0xFFFF {
+						break
+					}
+					if _, exists := pcMap[uint16(addr)]; !exists {
+						pcMap[uint16(addr)] = SrcLoc{File: fr.name, Line: ln.line}
+					}
 				}
 			}
 		}
