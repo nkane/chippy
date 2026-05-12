@@ -65,7 +65,7 @@ require("dap").adapters.chippy = {
 |----------------------------------|-------|-------|
 | `initialize`                     | #47   | Negotiates capabilities; reports the full subset below in one shot. |
 | `launch`                         | #47   | Takes `rom`, `loadAddr`, `resetVec`, `linkerCfg`, `dbgPath`, `cpuVariant`, `tracePath`, `stopOnEntry`. |
-| `attach`                         | —     | Not supported. Returns an error. |
+| `attach`                         | #87   | Supported when the host process pre-populates the debuggee via `Server.AttachExisting`. The in-TUI listener that ties this to the `:dap` command is filed as a follow-up (#97). |
 | `disconnect` / `terminate`       | #47   | Tears down the run goroutine, closes the trace file, exits. |
 | `continue` / `pause`             | #50   | Continue spawns a CPU run goroutine; pause flips a signal. |
 | `next` / `stepIn` / `stepOut`    | #50   | Step-over runs to PC+3 past a JSR; step-out runs until SP rises. |
@@ -89,7 +89,7 @@ require("dap").adapters.chippy = {
 
 ## Known gaps
 
-- `attach` is unsupported — only `launch` boots a fresh debuggee.
+- `attach` requires the host process to wire a debuggee via `Server.AttachExisting`. The cross-process / in-TUI flow is filed at #97.
 - Peripherals aren't snapshotted by reverse-step (see #62).
 - The DAP server is a single session per process. To debug two ROMs
   at once, run two `chippy -dap` instances on different ports.

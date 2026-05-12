@@ -140,7 +140,7 @@ func (s *Server) dispatch(req Request) {
 	case "launch":
 		s.handleLaunch(req)
 	case "attach":
-		s.sendErrorResponse(req, "attach is not supported in this build; use launch")
+		s.handleAttach(req)
 	case "configurationDone":
 		s.sendResponse(req, nil)
 	case "continue":

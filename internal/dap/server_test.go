@@ -101,7 +101,9 @@ func TestServer_InitializeHandshake(t *testing.T) {
 	}
 }
 
-func TestServer_AttachUnsupported(t *testing.T) {
+func TestServer_AttachWithoutDebuggeeErrors(t *testing.T) {
+	// attach with no AttachExisting call beforehand should report an
+	// error explaining the host hasn't wired a debuggee yet.
 	var in bytes.Buffer
 	frameRequest(t, &in, 1, "attach", `{}`)
 	frameRequest(t, &in, 2, "disconnect", `{}`)
@@ -116,7 +118,7 @@ func TestServer_AttachUnsupported(t *testing.T) {
 		t.Fatalf("no response captured")
 	}
 	if msgs[0]["success"] != false {
-		t.Fatalf("attach should fail with error response: %v", msgs[0])
+		t.Fatalf("attach without debuggee should fail: %v", msgs[0])
 	}
 	if msgs[0]["message"] == nil {
 		t.Fatalf("error response should include a message: %v", msgs[0])

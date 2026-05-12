@@ -101,6 +101,14 @@ type LaunchArguments struct {
 	TracePath   string `json:"tracePath,omitempty"`
 }
 
+// AttachArguments is the editor-side request body for `attach`. Empty
+// `processId` means "attach to whatever debuggee the server is already
+// running"; non-empty is reserved for a future cross-process flow.
+type AttachArguments struct {
+	ProcessID   string `json:"processId,omitempty"`
+	StopOnEntry bool   `json:"stopOnEntry,omitempty"`
+}
+
 // StoppedEventBody is the body of a `stopped` event. Reason values include
 // "entry", "step", "breakpoint", "pause", "exception".
 type StoppedEventBody struct {
