@@ -19,6 +19,13 @@ package dap
 // runaway program doesn't pin the goroutine.
 const guardSteps = 2_000_000
 
+// outputEventBody mirrors the DAP `output` event payload. Used by
+// logpoint emissions and any future server-to-console traffic.
+type outputEventBody struct {
+	Category string `json:"category,omitempty"`
+	Output   string `json:"output"`
+}
+
 func (s *Server) handleThreads(req Request) {
 	type thread struct {
 		ID   int    `json:"id"`
@@ -86,8 +93,25 @@ func (s *Server) runLoop() {
 			break
 		}
 		if s.isBreakpoint(s.cpu.PC) {
-			reason = "breakpoint"
-			break
+			meta := s.lookupBPMeta(s.cpu.PC)
+			fire, logLine := s.shouldFireBP(meta)
+			if logLine != "" {
+				s.sendEvent("output", outputEventBody{
+					Category: "console",
+					Output:   logLine + "\n",
+				})
+			}
+			if fire {
+				reason = "breakpoint"
+				break
+			}
+			// Continue past a non-firing bp: step once so we don't
+			// re-trigger on the same PC immediately.
+			s.cpu.Step()
+			if s.cpu.Halted {
+				reason = "exception"
+				break
+			}
 		}
 	}
 	s.sendEvent("stopped", StoppedEventBody{
