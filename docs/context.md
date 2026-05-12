@@ -166,6 +166,7 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - DAP completions (issue #85, DAP-v2): debug-console autocomplete returns registers (A/X/Y/P/SP/PC), flag bits (N/V/B/D/I/Z/C), and `.dbg` symbol names matching the cursor's trailing identifier prefix. `supportsCompletionsRequest: true`.
 - DAP exception bps (issue #83, DAP-v2): `brk` filter advertised in initialize as `exceptionBreakpointFilters`. `setExceptionBreakpoints` flips `brkOnException`; run loop pauses before any `$00` opcode and writes `lastExceptionPC` for the `exceptionInfo` response. `supportsExceptionInfoRequest: true`.
 - DAP bp condition/hitCondition/logMessage (issue #81, DAP-v2): every breakpoint family (source-line, instruction, function) honors the DAP modifier triple. New `bpMeta` per PC carries the compiled `expr.EvalFn`, hit target + running count, and an interpolating log template. `shouldFireBP` is the run-loop hit handler — logMessage emits an `output` event then continues without stopping.
+- DAP integration test (issue #86, DAP-v2): `internal/dap/integration_test.go` under build-tag `integration`. Builds the binary, spawns `chippy -dap stdio`, drives initialize → launch → setInstructionBreakpoints → continue → variables → stackTrace → disconnect via an in-test JSON wire client. New `dap-integration` CI job runs it on every push.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars
