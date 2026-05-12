@@ -14,24 +14,28 @@ import (
 	"github.com/nkane/chippy/internal/symbols"
 )
 
-// styles
+// Theme-driven styles. applyTheme() in theme.go reassigns these; the
+// init below picks default until New(c, r) overwrites it from the
+// persisted state (or the CLI `--theme` flag).
 var (
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("213"))
-	panelStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
-	regStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
-	flagOn     = lipgloss.NewStyle().Foreground(lipgloss.Color("46")).Bold(true)
-	flagOff    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	curLine    = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("226")).Bold(true)
-	help       = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true)
-	statusBar  = lipgloss.NewStyle().Background(lipgloss.Color("57")).Foreground(lipgloss.Color("231")).Padding(0, 1)
-	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("207")).Bold(true)
-	dimAddr    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	memBPRead  = lipgloss.NewStyle().Foreground(lipgloss.Color("33")).Bold(true)  // 👁 blue
-	memBPWrite = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true) // ✏ red
-	memBPRW    = lipgloss.NewStyle().Foreground(lipgloss.Color("213")).Bold(true) // 🔁 magenta
-	memCursor  = lipgloss.NewStyle().Reverse(true).Bold(true)                     // mem-panel byte cursor
-	memEdit    = lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Background(lipgloss.Color("88")).Bold(true)
+	titleStyle lipgloss.Style
+	panelStyle lipgloss.Style
+	regStyle   lipgloss.Style
+	flagOn     lipgloss.Style
+	flagOff    lipgloss.Style
+	curLine    lipgloss.Style
+	help       lipgloss.Style
+	statusBar  lipgloss.Style
+	labelStyle lipgloss.Style
+	dimAddr    lipgloss.Style
+	memBPRead  lipgloss.Style
+	memBPWrite lipgloss.Style
+	memBPRW    lipgloss.Style
+	memCursor  lipgloss.Style
+	memEdit    lipgloss.Style
 )
+
+func init() { applyTheme(ThemeDefault) }
 
 const (
 	runTick  = 16 * time.Millisecond
@@ -153,6 +157,11 @@ type Model struct {
 	DisasmFollow bool
 	DisasmAnchor uint16
 
+	// Theme: the active color palette name. Empty/unknown resolves to
+	// default. NO_COLOR env always forces mono regardless. Persisted
+	// alongside the rest of the savedState fields.
+	Theme string
+
 	W, H int
 }
 
@@ -164,6 +173,10 @@ type disasmCacheEntry struct {
 
 func New(c *cpu.CPU, r *cpu.RAM) Model {
 	r.EnableShadow() // CoW page tracking powers the rewind ring (issue #66).
+	// Pick theme from NO_COLOR env at start; CLI / state-file overrides
+	// land later via WithTheme / loadState.
+	t := resolveTheme(string(ThemeDefault))
+	applyTheme(t)
 	return Model{
 		CPU:           c,
 		RAM:           r,
@@ -177,9 +190,22 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 		HistIdx:       -1,
 		RIMatchIdx:    -1,
 		Rewind:        newRewindRing(defaultRewindCap),
+		Theme:         string(t),
 		W:             120,
 		H:             40,
 	}
+}
+
+// WithTheme overrides the theme picked by New. Used by the CLI's
+// --theme flag. Empty string keeps whatever New chose.
+func (m Model) WithTheme(name string) Model {
+	if name == "" {
+		return m
+	}
+	t := resolveTheme(name)
+	applyTheme(t)
+	m.Theme = string(t)
+	return m
 }
 
 // WithWBus attaches a bus wrapper that records memory watchpoint hits. The
@@ -1081,6 +1107,12 @@ func helpPages() [][]helpSection {
 			{"Text output ($F001)", [][2]string{
 				{":textsave PATH", "dump TextOutput buffer to a file"},
 				{"--text-buf-cap N", "TextOutput buffer cap in bytes (default 64 KiB; 0 = unbounded)"},
+			}},
+			{"Theme", [][2]string{
+				{":theme", "show current palette"},
+				{":theme NAME", "switch palette: default | mono | protan | tritan"},
+				{"--theme NAME", "CLI flag — pick the palette at startup"},
+				{"NO_COLOR=1", "env var: force mono regardless of theme"},
 			}},
 		},
 	}

@@ -22,6 +22,7 @@ var defaultVerbs = func() []string {
 		"rmbpr", "rmbpw", "rmbprw",
 		"trace",
 		"textsave",
+		"theme",
 		"help", "?",
 		"q", "quit",
 	}
@@ -115,6 +116,10 @@ func completePrompt(buf string, syms *symbols.Table) (string, bool) {
 	case "speed":
 		if argPos == 1 {
 			return completeAgainstPool(buf, trailing, speedSuggestions)
+		}
+	case "theme":
+		if argPos == 1 {
+			return completeAgainstPool(buf, trailing, AvailableThemes())
 		}
 	}
 	// :bp / :bpr / :bpw / :bprw: address at pos 1 (symbol completion);

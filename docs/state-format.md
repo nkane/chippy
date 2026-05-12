@@ -41,6 +41,7 @@ Field names match the JSON tags on `savedState` in
 | `input_mode` | bool | keyboard-input-routing-to-CPU mode |
 | `disasm_anchor` | uint16 | manual scroll position in the disassembly pane |
 | `immediate_history` | array of ImmediateEntry | immediate-window scrollback |
+| `theme` | string | active color palette (`default` / `mono` / `protan` / `tritan`) |
 
 The pointer-typed `disasm_follow` and `stack_annotate` exist so a v0
 legacy file's absence of those fields doesn't decode to `false` and
