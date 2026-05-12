@@ -83,6 +83,7 @@ require("dap").adapters.chippy = {
 | `disassemble`                    | #51, #80 | Variant-aware via `cpu.DisasmCPU`. Negative `instructionOffset` resolves via `cpu.WalkBack` for pre-context. |
 | `readMemory` / `writeMemory`     | #51   | Bypasses MMIO — peripherals don't see debugger pokes. |
 | `evaluate`                       | #52   | Watch / hover / debug-console expressions via `internal/expr`. |
+| `completions`                    | #85   | Debug-console autocomplete: registers, flag bits, and loaded `.dbg` symbols. |
 
 ## Known gaps
 

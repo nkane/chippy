@@ -168,6 +168,8 @@ func (s *Server) dispatch(req Request) {
 		s.handleLoadedSources(req)
 	case "source":
 		s.handleSource(req)
+	case "completions":
+		s.handleCompletions(req)
 	case "disconnect":
 		s.handleDisconnect(req)
 	case "terminate":
@@ -194,7 +196,7 @@ func (s *Server) handleInitialize(req Request) {
 		SupportsStepBack:                   true,
 		SupportsFunctionBreakpoints:        true,
 		SupportsRestartRequest:             false,
-		SupportsCompletionsRequest:         false,
+		SupportsCompletionsRequest:         true,
 		SupportsSetVariable:                true,
 	}
 	s.sendResponse(req, caps)

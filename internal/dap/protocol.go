@@ -285,3 +285,21 @@ type SourceArguments struct {
 	Source          Source `json:"source"`
 	SourceReference int    `json:"sourceReference,omitempty"`
 }
+
+// CompletionsArguments is the request body for `completions`. Text is the
+// in-progress expression; Column is the 1-based cursor position.
+type CompletionsArguments struct {
+	FrameID int    `json:"frameId,omitempty"`
+	Text    string `json:"text"`
+	Column  int    `json:"column"`
+	Line    int    `json:"line,omitempty"`
+}
+
+// CompletionItem is one row in a `completions` response.
+type CompletionItem struct {
+	Label  string `json:"label"`
+	Text   string `json:"text,omitempty"`
+	Type   string `json:"type,omitempty"`
+	Start  int    `json:"start,omitempty"`
+	Length int    `json:"length,omitempty"`
+}
