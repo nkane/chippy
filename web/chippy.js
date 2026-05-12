@@ -100,11 +100,13 @@ async function loadDemo() {
     const r = await fetch(demo.file);
     if (!r.ok) throw new Error(`fetch ${demo.file}: ${r.status}`);
     const bytes = new Uint8Array(await r.arrayBuffer());
-    const result = window.chippy.load(bytes, { format: demo.format, addr: demo.addr });
+    const opts = { format: demo.format, addr: demo.addr };
+    const result = window.chippy.load(bytes, opts);
     if (!result.ok) {
       status('load failed: ' + result.error);
       return;
     }
+    lastLoaded = { bytes, opts: { ...opts, variant: document.getElementById('variant').value } };
     status(`loaded ${demo.name} (${result.format}, $${result.loadAddr.toString(16).toUpperCase()}, ${result.size}B)`);
     renderState();
   } catch (err) {
@@ -116,11 +118,13 @@ async function loadUserFile(file) {
   const buf = new Uint8Array(await file.arrayBuffer());
   const fmt = document.getElementById('format').value;
   const addr = parseAddr(document.getElementById('addr').value);
-  const result = window.chippy.load(buf, { format: fmt, addr });
+  const opts = { format: fmt, addr };
+  const result = window.chippy.load(buf, opts);
   if (!result.ok) {
     status('load failed: ' + result.error);
     return;
   }
+  lastLoaded = { bytes: buf, opts: { ...opts, variant: document.getElementById('variant').value } };
   status(`loaded ${file.name} (${result.format}, $${result.loadAddr.toString(16).toUpperCase()}, ${result.size}B)`);
   renderState();
 }
@@ -192,6 +196,7 @@ function bindUI() {
   });
   document.getElementById('variant').addEventListener('change', variantChanged);
   document.getElementById('mem-addr').addEventListener('change', renderState);
+  document.getElementById('share').addEventListener('click', copyShareLink);
 
   // Keyboard shortcut: lower-case "s" steps when not in an input.
   document.addEventListener('keydown', (ev) => {
@@ -215,10 +220,119 @@ async function boot() {
   go.run(result.instance);
   wasmStatus('chippy.wasm ready');
   bindUI();
+  await maybeLoadFromHash();
   renderState();
+  registerServiceWorker(); // non-blocking; offline-ready on repeat visits
+}
+
+// Share permalink: encode the loaded ROM + variant + load addr + format
+// into the URL fragment. Fragment stays client-side so we don't ship
+// the bytes to any server.
+function buildShareLink(opts, bytes) {
+  const params = new URLSearchParams();
+  params.set('format', opts.format);
+  if (opts.addr) params.set('addr', String(opts.addr));
+  if (opts.variant) params.set('variant', opts.variant);
+  if (bytes && bytes.length) {
+    params.set('rom', base64Encode(bytes));
+  }
+  return location.origin + location.pathname + '#' + params.toString();
+}
+
+let lastLoaded = null; // {bytes, opts} so share can rebuild the link.
+
+function copyShareLink() {
+  if (!lastLoaded) {
+    status('share: load a ROM first');
+    return;
+  }
+  const link = buildShareLink(lastLoaded.opts, lastLoaded.bytes);
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(link).then(
+      () => status('share link copied to clipboard'),
+      () => fallbackShare(link),
+    );
+    return;
+  }
+  fallbackShare(link);
+}
+
+function fallbackShare(link) {
+  // Clipboard API unavailable (insecure context, old browsers). Stuff
+  // the link into the URL bar so user can copy from the address bar.
+  history.replaceState(null, '', link);
+  status('share link in URL bar');
+}
+
+function base64Encode(bytes) {
+  // chunk to avoid String.fromCharCode call-stack limits on large ROMs
+  let s = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(s);
+}
+
+function base64Decode(s) {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function maybeLoadFromHash() {
+  if (!location.hash || location.hash.length < 2) return;
+  const params = new URLSearchParams(location.hash.slice(1));
+  const romB64 = params.get('rom');
+  if (!romB64) return;
+  let bytes;
+  try {
+    bytes = base64Decode(romB64);
+  } catch (err) {
+    status('share link: bad base64 (' + err.message + ')');
+    return;
+  }
+  const format = params.get('format') || 'bin';
+  const addr = params.get('addr') ? parseAddr(params.get('addr')) : 0x8000;
+  const variant = params.get('variant') || 'nmos';
+  document.getElementById('variant').value = variant;
+  window.chippy.setVariant(variant);
+  const opts = { format, addr };
+  const result = window.chippy.load(bytes, opts);
+  if (!result.ok) {
+    status('share-link load failed: ' + result.error);
+    return;
+  }
+  lastLoaded = { bytes, opts: { ...opts, variant } };
+  status(`loaded from share link (${result.format}, $${result.loadAddr.toString(16).toUpperCase()}, ${result.size}B)`);
+}
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('sw.js').catch((err) => {
+    console.warn('service worker registration failed:', err);
+  });
+}
+
+function showBootError(msg) {
+  const node = document.getElementById('boot-error');
+  if (!node) {
+    wasmStatus(msg);
+    return;
+  }
+  node.textContent = msg;
+  node.hidden = false;
+  wasmStatus('boot failed — see banner above');
 }
 
 boot().catch((err) => {
-  wasmStatus('boot failed: ' + err.message);
   console.error(err);
+  showBootError(
+    'Could not load chippy.wasm.\n\n' +
+    err.message + '\n\n' +
+    'If you are running from a file:// URL, browsers refuse to ' +
+    'instantiate WASM there. Use `make -C web serve` (or any static ' +
+    'HTTP server) and reload from http://localhost:8080/.'
+  );
 });
