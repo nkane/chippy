@@ -24,6 +24,12 @@ builds:
     ignore:
       - goos: windows
         goarch: arm64
+    # -trimpath strips absolute repo paths from the binary so the build
+    # is path-independent; -buildvcs=true stamps the commit + dirty bit
+    # into debug.BuildInfo (verifiable via `go version -m chippy`).
+    flags:
+      - -trimpath
+      - -buildvcs=true
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
@@ -49,6 +55,32 @@ archives:
 
 checksum:
   name_template: 'checksums.txt'
+
+# Keyless cosign signing via the GitHub Actions OIDC identity. No
+# private key — the signature is bound to the workflow that produced
+# it. Verify with:
+#   cosign verify-blob \
+#     --certificate-identity=https://github.com/nkane/chippy/.github/workflows/release.yml@refs/tags/<TAG> \
+#     --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+#     --bundle <ASSET>.cosign.bundle <ASSET>
+signs:
+  - id: cosign
+    cmd: cosign
+    artifacts: all
+    signature: "${artifact}.cosign.bundle"
+    args:
+      - sign-blob
+      - --yes
+      - --bundle=${signature}
+      - ${artifact}
+
+# Software Bill of Materials (SBOM). Generates one SPDX file per
+# archive via syft, attached to the GitHub Release.
+sboms:
+  - id: spdx
+    artifacts: archive
+    documents:
+      - "${artifact}.spdx.sbom.json"
 
 snapshot:
   version_template: '{{ incpatch .Version }}-next'
