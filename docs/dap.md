@@ -75,9 +75,9 @@ require("dap").adapters.chippy = {
 | `scopes`                         | #48   | Two scopes per frame: Registers, Flags. |
 | `variables`                      | #48   | ref=1 → A/X/Y/SP/PC/P/Cycles; ref=2 → 8 P-flag bits. |
 | `setVariable`                    | #48   | Writes hex / decimal to a register or flag bit. |
-| `setBreakpoints`                 | #49   | Source-line bps resolved through the `.dbg` source map. |
-| `setInstructionBreakpoints`      | #49   | Address bps (`$XX`, `0xXX`, decimal). |
-| `setFunctionBreakpoints`         | #82   | Symbol-name bps via `syms.LookupName`. Unknown names report `verified: false`. |
+| `setBreakpoints`                 | #49, #81 | Source-line bps resolved through the `.dbg` source map. Honors `condition` / `hitCondition` (integer) / `logMessage` (with `{expr}` interpolation). |
+| `setInstructionBreakpoints`      | #49, #81 | Address bps (`$XX`, `0xXX`, decimal). Same modifier support as source bps. |
+| `setFunctionBreakpoints`         | #82, #81 | Symbol-name bps via `syms.LookupName`. Same modifier support. |
 | `loadedSources`                  | #84   | Lists every file the loaded `.dbg` references. |
 | `source`                         | #84   | Returns file contents for a previously-listed Source. Basename-matches if the client passes an absolute path. |
 | `disassemble`                    | #51, #80 | Variant-aware via `cpu.DisasmCPU`. Negative `instructionOffset` resolves via `cpu.WalkBack` for pre-context. |

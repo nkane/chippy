@@ -28,6 +28,7 @@ func (s *Server) handleSetBreakpoints(req Request) {
 
 	srcKey := canonicalSourcePath(args.Source)
 	resolved := make(map[int]uint16)
+	metaForLine := make(map[int]*bpMeta)
 	results := make([]Breakpoint, 0, len(args.Breakpoints))
 	for _, bp := range args.Breakpoints {
 		pc, ok := s.lookupSourceLine(args.Source, bp.Line)
@@ -39,7 +40,19 @@ func (s *Server) handleSetBreakpoints(req Request) {
 			})
 			continue
 		}
+		meta, mErr := s.buildBPMeta(bp.Condition, bp.HitCondition, bp.LogMessage)
+		if mErr != nil {
+			results = append(results, Breakpoint{
+				Verified: false,
+				Line:     bp.Line,
+				Message:  mErr.Error(),
+			})
+			continue
+		}
 		resolved[bp.Line] = pc
+		if meta != nil {
+			metaForLine[bp.Line] = meta
+		}
 		results = append(results, Breakpoint{
 			Verified:                    true,
 			Line:                        bp.Line,
@@ -51,8 +64,14 @@ func (s *Server) handleSetBreakpoints(req Request) {
 	s.bpMu.Lock()
 	if len(resolved) == 0 {
 		delete(s.bpsBySrc, srcKey)
+		delete(s.bpMetaBySrc, srcKey)
 	} else {
 		s.bpsBySrc[srcKey] = resolved
+		if len(metaForLine) > 0 {
+			s.bpMetaBySrc[srcKey] = metaForLine
+		} else {
+			delete(s.bpMetaBySrc, srcKey)
+		}
 	}
 	s.rebuildBPHit()
 	s.bpMu.Unlock()
@@ -78,6 +97,7 @@ func (s *Server) handleSetInstructionBreakpoints(req Request) {
 	}
 
 	newInst := map[uint16]bool{}
+	newMeta := map[uint16]*bpMeta{}
 	results := make([]Breakpoint, 0, len(args.Breakpoints))
 	for _, bp := range args.Breakpoints {
 		n, err := parseDAPNumber(bp.InstructionReference)
@@ -89,7 +109,18 @@ func (s *Server) handleSetInstructionBreakpoints(req Request) {
 			continue
 		}
 		pc := uint16(int(n) + bp.Offset)
+		meta, mErr := s.buildBPMeta(bp.Condition, bp.HitCondition, "")
+		if mErr != nil {
+			results = append(results, Breakpoint{
+				Verified: false,
+				Message:  mErr.Error(),
+			})
+			continue
+		}
 		newInst[pc] = true
+		if meta != nil {
+			newMeta[pc] = meta
+		}
 		results = append(results, Breakpoint{
 			Verified:                    true,
 			InstructionPointerReference: fmt.Sprintf("$%04X", pc),
@@ -98,6 +129,7 @@ func (s *Server) handleSetInstructionBreakpoints(req Request) {
 
 	s.bpMu.Lock()
 	s.bpsInst = newInst
+	s.bpMetaInst = newMeta
 	s.rebuildBPHit()
 	s.bpMu.Unlock()
 
@@ -108,21 +140,52 @@ func (s *Server) handleSetInstructionBreakpoints(req Request) {
 }
 
 // rebuildBPHit flattens bpsBySrc + bpsInst + bpsByName into the single PC
-// set the run loop checks. Call under bpMu.
+// set the run loop checks, and rebuilds bpMetaByPC so the run loop's
+// hit handler can look up condition/hit/log modifiers in one read. Call
+// under bpMu.
+//
+// When the same PC is set by multiple sources (e.g. both a source-line
+// and an instruction bp) the instruction-side meta wins. Function and
+// source meta are layered after, with source last — bp set ordering is
+// stable for typical sessions, so this is a defensible v1.
 func (s *Server) rebuildBPHit() {
 	hit := make(map[uint16]bool, len(s.bpsInst))
+	metaByPC := make(map[uint16]*bpMeta)
+
 	for pc := range s.bpsInst {
 		hit[pc] = true
-	}
-	for _, lineMap := range s.bpsBySrc {
-		for _, pc := range lineMap {
-			hit[pc] = true
+		if m := s.bpMetaInst[pc]; m != nil {
+			metaByPC[pc] = m
 		}
 	}
-	for _, pc := range s.bpsByName {
+	for name, pc := range s.bpsByName {
 		hit[pc] = true
+		if m := s.bpMetaByName[name]; m != nil {
+			metaByPC[pc] = m
+		}
 	}
+	for path, lineMap := range s.bpsBySrc {
+		metaForLine := s.bpMetaBySrc[path]
+		for line, pc := range lineMap {
+			hit[pc] = true
+			if metaForLine != nil {
+				if m := metaForLine[line]; m != nil {
+					metaByPC[pc] = m
+				}
+			}
+		}
+	}
+
 	s.bpHit = hit
+	s.bpMetaByPC = metaByPC
+}
+
+// lookupBPMeta returns the meta for pc, or nil if the bp has no
+// modifiers. Read under bpMu.
+func (s *Server) lookupBPMeta(pc uint16) *bpMeta {
+	s.bpMu.Lock()
+	defer s.bpMu.Unlock()
+	return s.bpMetaByPC[pc]
 }
 
 // handleSetFunctionBreakpoints replaces all symbol-name breakpoints in
@@ -140,6 +203,7 @@ func (s *Server) handleSetFunctionBreakpoints(req Request) {
 	}
 
 	newByName := map[string]uint16{}
+	newMeta := map[string]*bpMeta{}
 	results := make([]Breakpoint, 0, len(args.Breakpoints))
 	for _, bp := range args.Breakpoints {
 		if s.syms == nil {
@@ -157,7 +221,18 @@ func (s *Server) handleSetFunctionBreakpoints(req Request) {
 			})
 			continue
 		}
+		meta, mErr := s.buildBPMeta(bp.Condition, bp.HitCondition, "")
+		if mErr != nil {
+			results = append(results, Breakpoint{
+				Verified: false,
+				Message:  mErr.Error(),
+			})
+			continue
+		}
 		newByName[bp.Name] = addr
+		if meta != nil {
+			newMeta[bp.Name] = meta
+		}
 		results = append(results, Breakpoint{
 			Verified:                    true,
 			InstructionPointerReference: fmt.Sprintf("$%04X", addr),
@@ -166,6 +241,7 @@ func (s *Server) handleSetFunctionBreakpoints(req Request) {
 
 	s.bpMu.Lock()
 	s.bpsByName = newByName
+	s.bpMetaByName = newMeta
 	s.rebuildBPHit()
 	s.bpMu.Unlock()
 
