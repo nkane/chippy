@@ -157,7 +157,9 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - DAP breakpoints (issue #49): `setBreakpoints` (source-line, resolved via `srcMap.PCToSrc` reverse-lookup) and `setInstructionBreakpoints` (address). Both are destructive against their respective namespace per DAP spec. Run loop checks `bpHit` (flattened union) at each Step and emits `stopped` with reason=breakpoint.
 - DAP disassemble / readMemory / writeMemory (issue #51): `disassemble` routes through `cpu.DisasmCPU` (variant-aware), reports `address`, `instructionBytes`, `instruction`, `symbol`, `location`/`line`; `readMemory`/`writeMemory` bypass MMIO so peripheral side-effects don't fire on debugger pokes. Base64 envelope per spec.
 - DAP evaluate (issue #52): `evaluate` request compiles + runs the same expression grammar used by `:bp X if E`. Expression compiler moved from `internal/tui/cond.go` to a new `internal/expr` package so DAP and TUI share semantics (`expr.Compile`, `expr.EvalFn`); `tui.compileCondition` is now a thin wrapper.
-- DAP example configs + onboarding docs (issue #53): `docs/dap.md` walkthrough, `examples/dap/launch.json` (VS Code) and `examples/dap/nvim-dap.lua` (nvim-dap). DAP epic complete.
+- DAP example configs + onboarding docs (issue #53): `docs/dap.md` walkthrough, `examples/dap/launch.json` (VS Code) and `examples/dap/nvim-dap.lua` (nvim-dap). DAP-v1 epic complete.
+- v0.2.0 — release cut after #77 / DAP-v1 epic.
+- DAP stepBack (issue #79, first of #78 DAP-v2 epic): wires the rewind ring into DAP. Snapshot ring promoted from `internal/tui` to `internal/cpu` as `cpu.SnapshotRing` so both the TUI's `<` key and DAP's stepBack share storage. `supportsStepBack: true`.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars

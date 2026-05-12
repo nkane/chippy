@@ -63,6 +63,11 @@ type Server struct {
 	bpsBySrc map[string]map[int]uint16
 	bpsInst  map[uint16]bool
 	bpHit    map[uint16]bool
+
+	// Reverse-step ring. Populated on every explicit-step request
+	// (stepIn/next/stepOut) and on continue→bp stops. stepBack pops one
+	// snapshot and restores. Same 256-entry ring the TUI uses for `<`.
+	rewind *cpu.SnapshotRing
 }
 
 // NewServer wires the transport to a fresh Server. r/w must point at the
@@ -75,6 +80,7 @@ func NewServer(r io.Reader, w io.Writer) *Server {
 		bpsBySrc: map[string]map[int]uint16{},
 		bpsInst:  map[uint16]bool{},
 		bpHit:    map[uint16]bool{},
+		rewind:   cpu.NewSnapshotRing(cpu.DefaultSnapshotRingCap),
 	}
 }
 
@@ -130,6 +136,8 @@ func (s *Server) dispatch(req Request) {
 		s.handleStepOut(req)
 	case "pause":
 		s.handlePause(req)
+	case "stepBack":
+		s.handleStepBack(req)
 	case "threads":
 		s.handleThreads(req)
 	case "stackTrace":
@@ -175,7 +183,7 @@ func (s *Server) handleInitialize(req Request) {
 		SupportsLogPoints:                  true,
 		SupportsBreakpointLocationsRequest: true,
 		SupportsLoadedSourcesRequest:       false,
-		SupportsStepBack:                   false,
+		SupportsStepBack:                   true,
 		SupportsFunctionBreakpoints:        false,
 		SupportsRestartRequest:             false,
 		SupportsCompletionsRequest:         false,
