@@ -1,0 +1,158 @@
+{
+  "name": "vscode-chippy",
+  "displayName": "Chippy 6502 Debugger",
+  "description": "VS Code debug adapter for chippy — the 6502 emulator + debugger.",
+  "version": "0.1.0",
+  "publisher": "nkane",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nkane/chippy.git",
+    "directory": "extension/vscode-chippy"
+  },
+  "bugs": {
+    "url": "https://github.com/nkane/chippy/issues"
+  },
+  "homepage": "https://github.com/nkane/chippy/tree/main/extension/vscode-chippy",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Debuggers"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onDebugResolve:chippy",
+    "onDebugDynamicConfigurations:chippy"
+  ],
+  "contributes": {
+    "debuggers": [
+      {
+        "type": "chippy",
+        "label": "Chippy 6502",
+        "languages": [
+          "ca65",
+          "c"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "rom"
+            ],
+            "properties": {
+              "rom": {
+                "type": "string",
+                "description": "Path to the binary to load (.bin, .prg, .hex, or cc65 .o + linker config)."
+              },
+              "loadAddr": {
+                "type": "number",
+                "description": "Address the .bin/.hex content is placed at. Ignored for .prg (which carries its own load address) and cc65 builds (which read the linker config).",
+                "default": 32768
+              },
+              "linkerCfg": {
+                "type": "string",
+                "description": "ld65 config file. Required when rom is a .o object; ignored otherwise."
+              },
+              "resetVec": {
+                "type": "number",
+                "description": "Override the reset vector at $FFFC/$FFFD. Defaults to the load address when zero.",
+                "default": 0
+              },
+              "cpuVariant": {
+                "type": "string",
+                "enum": [
+                  "nmos",
+                  "6502",
+                  "65c02",
+                  "cmos",
+                  "cmos65c02"
+                ],
+                "description": "CPU variant to emulate.",
+                "default": "nmos"
+              },
+              "dbgPath": {
+                "type": "string",
+                "description": "Path to the cc65/ca65 .dbg file. Defaults to sibling of rom."
+              },
+              "tracePath": {
+                "type": "string",
+                "description": "Optional file for per-instruction execution trace."
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Pause at the reset vector before running.",
+                "default": true
+              }
+            }
+          },
+          "attach": {
+            "properties": {
+              "processId": {
+                "type": "number",
+                "description": "Advisory; chippy attach v1 ignores it and uses the AttachExisting-wired debuggee."
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "chippy",
+            "request": "launch",
+            "name": "chippy: launch ROM",
+            "rom": "${workspaceFolder}/build/program.bin",
+            "cpuVariant": "nmos",
+            "stopOnEntry": true
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Chippy: Launch NMOS ROM",
+            "description": "Launch a .bin/.prg/.hex on the NMOS 6502.",
+            "body": {
+              "type": "chippy",
+              "request": "launch",
+              "name": "chippy: ${1:program}",
+              "rom": "^\"\\${workspaceFolder}/build/${1:program}.bin\"",
+              "cpuVariant": "nmos",
+              "stopOnEntry": true
+            }
+          },
+          {
+            "label": "Chippy: Launch CMOS 65C02 ROM",
+            "description": "Launch on the WDC 65C02 variant.",
+            "body": {
+              "type": "chippy",
+              "request": "launch",
+              "name": "chippy: ${1:program} (65C02)",
+              "rom": "^\"\\${workspaceFolder}/build/${1:program}.bin\"",
+              "cpuVariant": "65c02",
+              "stopOnEntry": true
+            }
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "Chippy",
+      "properties": {
+        "chippy.binaryPath": {
+          "type": "string",
+          "default": "chippy",
+          "description": "Path to the chippy binary. If unset, the extension expects it on PATH."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.75.0",
+    "@vscode/vsce": "^2.24.0",
+    "typescript": "^5.3.0"
+  }
+}
