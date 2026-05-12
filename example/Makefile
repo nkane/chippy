@@ -11,7 +11,8 @@
 
 CFG := load_five.cfg
 
-PROGRAMS := load_five count_to_ten fibonacci stack_demo bcd_add cmos_demo hello
+PROGRAMS := load_five count_to_ten fibonacci stack_demo bcd_add cmos_demo hello \
+            mul16 echo timer_irq guess
 
 OBJS := $(PROGRAMS:=.o)
 BINS := $(PROGRAMS:=.bin)

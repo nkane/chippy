@@ -1,6 +1,6 @@
 # chippy example programs
 
-Five small ca65/cc65 programs, all linked against the shared
+Eleven small ca65 programs, all linked against the shared
 `load_five.cfg` (ROM at `$8000-$FFFF`, reset vector at `$FFFC`). Each one is
 self-contained — assemble, then load the resulting `.bin` in chippy.
 
@@ -24,8 +24,24 @@ make clean
 | `fibonacci`    | Zero-page state, ADC carry-out, indexed store  | 13 bytes at `$0200..$020C`, X=`$0D`      |
 | `stack_demo`   | `PHA` / `PLA` order, register transfers        | A=`$11`, X=`$33`, Y=`$22`, SP=`$FF`      |
 | `bcd_add`      | `SED` + `ADC` decimal-mode arithmetic          | A=`$07`, X=`$01` (BCD: 49 + 58 = 107)    |
+| `mul16`        | 16x16 → 32-bit shift-add multiply; ZP state    | $0050..0053 = `$06260060` ($1234 * $5678)|
+| `echo`         | Apple-1 I/O — poll $F005, read $F004, write $F001 | runs forever; type in TUI input mode  |
+| `timer_irq`    | IRQ vector + RTI alongside a busy main loop    | MAIN_TICK + IRQ_TICK in zero page        |
+| `guess`        | Interactive state machine driven by keyboard   | prints `<` / `>` / `!` per guess         |
+| `hello`        | Apple-1 putc loop — write a string to $F001    | "HELLO WORLD\n" in the output pane       |
+| `cmos_demo`    | 65C02-only opcodes (BBR/STZ/BRA/etc.)          | requires `-cpu 65c02`                    |
 
-All programs spin on a `JMP halt` so the TUI keeps showing the final state.
+All programs spin on a `JMP halt` (or an infinite poll loop) so the TUI keeps showing live state.
+
+## Categorized
+
+| Category       | Try first             | Then                                |
+|----------------|-----------------------|-------------------------------------|
+| Basic CPU      | `load_five`           | `count_to_ten`, `stack_demo`        |
+| Arithmetic     | `fibonacci`           | `mul16`, `bcd_add`                  |
+| I/O            | `hello`               | `echo`, `guess`                     |
+| Interrupts     | `timer_irq`           | —                                   |
+| CMOS-only      | `cmos_demo`           | —                                   |
 
 ## Suggested chippy session
 
