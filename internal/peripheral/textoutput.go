@@ -3,6 +3,13 @@
 // space; reads and writes to that region are routed to the device.
 package peripheral
 
+// DefaultTextOutputCap caps the live TextOutput buffer at 64 KiB by
+// default. A long-running program that loops writes to $F001 would
+// otherwise grow the slice without bound (and inflate every reverse-step
+// snapshot along with it). 64 KiB is enough to hold a full screen of
+// output many times over while keeping memory predictable.
+const DefaultTextOutputCap = 64 * 1024
+
 // TextOutput is an Apple-1-style write-only console at a single address
 // (conventionally $F001). Each byte written is appended to an internal
 // buffer that the TUI can render.
@@ -11,13 +18,31 @@ package peripheral
 // lower bits; for chippy we accept the raw byte and let the renderer
 // decide. CR (0x0D) is translated to LF (0x0A) so naive monitor programs
 // produce the line breaks a Unix terminal expects.
+//
+// The buffer is bounded by Cap (zero means unbounded, mostly useful for
+// tests). When a write would overflow, the oldest quarter of the buffer
+// is dropped — amortizing the shift cost across many writes while
+// keeping reverse-step snapshots small.
 type TextOutput struct {
 	Addr uint16
+	Cap  int // 0 = unbounded
 	buf  []byte
 }
 
-// NewTextOutput creates a TextOutput peripheral at addr.
-func NewTextOutput(addr uint16) *TextOutput { return &TextOutput{Addr: addr} }
+// NewTextOutput creates a TextOutput peripheral at addr with the default
+// 64 KiB buffer cap. Use NewTextOutputWithCap to override.
+func NewTextOutput(addr uint16) *TextOutput {
+	return &TextOutput{Addr: addr, Cap: DefaultTextOutputCap}
+}
+
+// NewTextOutputWithCap creates a TextOutput at addr with an explicit
+// buffer cap. cap <= 0 disables bounding.
+func NewTextOutputWithCap(addr uint16, cap int) *TextOutput {
+	if cap < 0 {
+		cap = 0
+	}
+	return &TextOutput{Addr: addr, Cap: cap}
+}
 
 func (t *TextOutput) Range() (uint16, uint16) { return t.Addr, t.Addr }
 
@@ -36,6 +61,15 @@ func (t *TextOutput) Write(addr uint16, v byte) {
 	}
 	// Apple-1 conventions: bit 7 set on the high ASCII. Strip it so the
 	// buffer carries plain 7-bit text.
+	if t.Cap > 0 && len(t.buf) >= t.Cap {
+		// Drop the oldest quarter so the next batch of writes is O(1)
+		// again instead of triggering this shift every byte.
+		drop := t.Cap / 4
+		if drop < 1 {
+			drop = 1
+		}
+		t.buf = append(t.buf[:0], t.buf[drop:]...)
+	}
 	t.buf = append(t.buf, v&0x7F)
 }
 
