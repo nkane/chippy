@@ -104,3 +104,26 @@ jobs:
 
       - name: Run exhaustive decimal-mode test (Bruce Clark Appendix B)
         run: go test -tags=decimal -timeout 2m -run TestDecimal -v ./internal/cpu/...
+
+  cmos-e2e:
+    name: cmos e2e demo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          cache: true
+
+      - name: Install cc65 toolchain
+        run: sudo apt-get update && sudo apt-get install -y cc65
+
+      - name: Build example/cmos_demo.bin
+        run: make -C example cmos_demo.bin
+
+      - name: Run CMOS demo end-to-end test
+        env:
+          CHIPPY_CMOS_E2E_STRICT: "1"
+        run: go test -v -run TestCMOSDemo ./internal/cpu/...

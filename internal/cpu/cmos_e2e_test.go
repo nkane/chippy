@@ -1,6 +1,7 @@
 package cpu_test
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -23,6 +24,12 @@ func TestCMOSDemo_E2E(t *testing.T) {
 
 	ram := cpu.NewRAM()
 	if _, err := loader.Load(ram, bin, loader.Options{Addr: 0x8000}); err != nil {
+		// CI sets CHIPPY_CMOS_E2E_STRICT=1 so a missing fixture fails
+		// the build instead of silently skipping. Local devs run
+		// `make -C example cmos_demo.bin` once and it Just Works.
+		if os.Getenv("CHIPPY_CMOS_E2E_STRICT") != "" {
+			t.Fatalf("cmos_demo.bin missing under strict mode (CI must build it before running this test): %v", err)
+		}
 		t.Skipf("cmos_demo.bin not built (run `make -C example cmos_demo.bin`): %v", err)
 	}
 

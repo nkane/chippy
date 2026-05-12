@@ -171,6 +171,7 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - v0.3.0 — release cut after DAP-v2 push.
 - Klaus 65C02 functional test (issue #59): `internal/cpu/klaus_cmos_test.go` runs against `65C02_extended_opcodes_test.bin` (download-on-demand + sha256-pinned). v1 skipped behind `CHIPPY_KLAUS_CMOS_STRICT` env because chippy's CMOS undocumented-opcode slots aren't WDC-spec'd yet (bug #99); test infrastructure is ready for #99's fix to be validated against.
 - Exhaustive BCD test (issue #60): `internal/cpu/decimal_exhaustive_test.go` (build tag `decimal`) walks every (N1, N2, cin) through ADC and SBC in decimal mode for both variants — 524 288 cases total. Caught a real CMOS BCD bug on invalid-nibble inputs; fix applied to `adcDecimalCMOS` / `sbcDecimalCMOS` (Bruce Clark Appendix B algorithm). New `decimal` CI job runs the suite on every push.
+- CMOS e2e CI (issue #61): new `cmos-e2e` workflow job installs cc65, builds `example/cmos_demo.bin`, runs the existing e2e test with `CHIPPY_CMOS_E2E_STRICT=1` so missing fixtures fail the build instead of silently skipping.
 
 ### Open issues
 - #22 (homebrew-core) — blocked on stars
