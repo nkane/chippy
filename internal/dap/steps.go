@@ -101,7 +101,37 @@ func (s *Server) handleStepIn(req Request) {
 	if !s.requireStopped(req) {
 		return
 	}
+	s.snapshotForRewind()
 	s.cpu.Step()
+	s.sendResponse(req, nil)
+	s.sendEvent("stopped", StoppedEventBody{Reason: "step", ThreadID: 1, AllThreadsStopped: true})
+}
+
+// snapshotForRewind pushes a pre-step CPU+RAM snapshot onto the ring so
+// stepBack can undo. Matches the TUI's behavior: only explicit-step
+// paths snapshot — continue runs don't, to avoid the 64 KiB/step cost
+// at full throughput.
+func (s *Server) snapshotForRewind() {
+	if s.rewind == nil || s.cpu == nil || s.ram == nil {
+		return
+	}
+	s.rewind.Push(s.cpu.Snapshot(s.ram))
+}
+
+// handleStepBack pops one snapshot and restores. Same protocol shape as
+// stepIn — request response + stopped event. Reason="step" because DAP
+// has no reverse-specific reason and editors render the stop the same
+// way either direction.
+func (s *Server) handleStepBack(req Request) {
+	if !s.requireStopped(req) {
+		return
+	}
+	if s.rewind == nil || s.rewind.Len() == 0 {
+		s.sendErrorResponse(req, "rewind buffer is empty")
+		return
+	}
+	snap, _ := s.rewind.Pop()
+	s.cpu.Restore(snap, s.ram)
 	s.sendResponse(req, nil)
 	s.sendEvent("stopped", StoppedEventBody{Reason: "step", ThreadID: 1, AllThreadsStopped: true})
 }
@@ -112,6 +142,7 @@ func (s *Server) handleNext(req Request) {
 	if !s.requireStopped(req) {
 		return
 	}
+	s.snapshotForRewind()
 	op := s.ram.Read(s.cpu.PC)
 	if op != 0x20 {
 		s.cpu.Step()
@@ -134,6 +165,7 @@ func (s *Server) handleStepOut(req Request) {
 	if !s.requireStopped(req) {
 		return
 	}
+	s.snapshotForRewind()
 	startSP := s.cpu.SP
 	for i := 0; i < guardSteps; i++ {
 		s.cpu.Step()

@@ -69,6 +69,7 @@ require("dap").adapters.chippy = {
 | `disconnect` / `terminate`       | #47   | Tears down the run goroutine, closes the trace file, exits. |
 | `continue` / `pause`             | #50   | Continue spawns a CPU run goroutine; pause flips a signal. |
 | `next` / `stepIn` / `stepOut`    | #50   | Step-over runs to PC+3 past a JSR; step-out runs until SP rises. |
+| `stepBack`                       | #79   | Pops one snapshot from the 256-entry rewind ring and restores CPU+RAM. Only pre-step paths push — `continue` runs aren't reversible. |
 | `threads`                        | #50   | One virtual thread (`id=1`, name=`cpu`). |
 | `stackTrace`                     | #48   | Walks JSR frames via `cpu.DetectStackFrame`. |
 | `scopes`                         | #48   | Two scopes per frame: Registers, Flags. |
@@ -82,9 +83,6 @@ require("dap").adapters.chippy = {
 
 ## Known gaps
 
-- `stepBack` is unsupported in DAP. The TUI's `<` rewind ring (#54)
-  isn't yet wired to the adapter; reverse-step over DAP is filed as a
-  follow-up.
 - `attach` is unsupported — only `launch` boots a fresh debuggee.
 - `disassemble` clamps negative `instructionOffset` to 0; backward
   walks would need the TUI's `walkBack` heuristic.
