@@ -106,3 +106,19 @@ For everything else, open a regular issue with:
   has, the better the playground experience for newcomers.
 - Editor integration matrix — if you wire chippy into your editor and
   it works (or doesn't), file an issue with the launch config.
+
+## Re-recording the README onboarding GIF
+
+The hero animation at the top of `README.md` is produced by:
+
+```sh
+docs/media/record-onboarding.sh
+```
+
+The script wants `asciinema` + `agg` on `PATH`. It records a ~25-second
+scripted session into `docs/media/onboarding.cast` and renders the GIF
+into `docs/media/onboarding.gif`. Both files are overwritten in place
+— commit the new pair when the cast is clean.
+
+Re-record after any UI change that's user-visible from the first
+30 seconds: new keybinding, theme rework, panel reordering.
