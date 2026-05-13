@@ -3,7 +3,7 @@
   "displayName": "Chippy 6502 Debugger",
   "description": "VS Code debug adapter for chippy — the 6502 emulator + debugger.",
   "version": "0.1.0",
-  "publisher": "nkane",
+  "publisher": "Hidden-Pixel",
   "license": "MIT",
   "repository": {
     "type": "git",

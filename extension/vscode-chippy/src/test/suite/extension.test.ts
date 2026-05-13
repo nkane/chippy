@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 // a typo in `contributes.debuggers[].type`, a removed activation event,
 // or a broken DebugAdapterDescriptorFactory factory function.
 
-const EXT_ID = 'nkane.vscode-chippy';
+const EXT_ID = 'Hidden-Pixel.vscode-chippy';
 
 suite('vscode-chippy', () => {
   test('extension is present', () => {
