@@ -12,6 +12,10 @@
 # so `make -C web serve` works without re-building the example/ ROMs from source.
 !web/demos/*.bin
 
+# MkDocs build output
+site/
+_site/
+
 # Local state
 .chippy/
 ~/.chippy/

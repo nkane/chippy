@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'web/**'
+      - 'docs/**'
+      - 'mkdocs.yml'
       - 'cmd/chippy-wasm/**'
       - 'internal/**'
       - 'go.mod'
@@ -34,6 +36,17 @@ jobs:
           go-version: 'stable'
           cache: true
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Install mkdocs-material
+        run: pip install mkdocs-material
+
+      - name: Build docs site
+        run: mkdocs build --strict --site-dir _site
+
       - name: Build chippy.wasm
         env:
           GOOS: js
@@ -43,10 +56,15 @@ jobs:
       - name: Refresh wasm_exec.js from the build toolchain
         run: cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" web/wasm_exec.js
 
+      - name: Nest the WASM playground under /playground/
+        run: |
+          mkdir -p _site/playground
+          cp -r web/. _site/playground/
+
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: web
+          path: _site
 
   deploy:
     needs: build

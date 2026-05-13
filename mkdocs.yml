@@ -1,0 +1,63 @@
+site_name: chippy
+site_url: https://nkane.dev/chippy/
+site_description: TUI 6502 emulator + ca65/cc65 source-level debugger
+site_author: Nick Kane
+repo_url: https://github.com/nkane/chippy
+repo_name: nkane/chippy
+edit_uri: edit/main/docs/
+copyright: MIT — Nick Kane
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+
+nav:
+  - Home: index.md
+  - Quick start: quickstart.md
+  - Reference:
+      - DAP server: dap.md
+      - State-file format: state-format.md
+      - Perf baseline: perf-baseline.md
+      - Editor matrix: editors.md
+  - Internals:
+      - Architecture (context dump): context.md
+  - Mascot:
+      - mascot-prompts.md
+  - Playground: https://nkane.dev/chippy/playground/
