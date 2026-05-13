@@ -66,17 +66,72 @@ debugger UI is chippy's.
 
 ## Repo layout
 
-**Decision**: monorepo. nessy lives inside the chippy repo as
-`cmd/nessy/` + `internal/nes/`. Rationale:
+**Decision: monorepo through nessy v0.3, then split.**
 
-- Lets us evolve `internal/cpu` shape (e.g. adding bus-cycle hooks
-  the PPU needs) without breaking a separate-repo consumer's `go.mod`.
-- chippy is small enough that the build / test matrix can absorb it.
-- A future split is trivial: `git filter-branch` extracts `cmd/nessy/`
-  + `internal/nes/` + `go.mod` shim.
+nessy lives inside the chippy repo as `cmd/nessy/` + `internal/nes/`
+through v0.1 → v0.3 (NROM + MMC1 + UxROM playable, audio shipping).
+By v0.3 the `internal/cpu` shape will have stabilised — we'll know
+whether `BusTicker` is the right primitive or something subtler —
+and we extract `nessy` into `github.com/nkane/nessy` against a
+post-split `chippy v2.0` that promotes the runtime packages out of
+`internal/`.
 
-If/when nessy becomes its own surface with its own release cadence,
-revisit.
+### Why monorepo for the bootstrap phase
+
+- nessy's PPU needs a per-cycle `cpu.Step()` hook that chippy doesn't
+  currently expose. Mono lets one PR change `internal/cpu` + add the
+  PPU consumer atomically — no version-fight, no go.work juggling.
+- `internal/cpu` is in `internal/` (Go forbids external import). To
+  split now we'd need to either promote those packages to public
+  paths immediately — committing chippy to Go-API stability during
+  the noisiest design phase — or vendor / `go.work` our way through,
+  both ugly.
+- Cross-cutting changes during the design phase (e.g. "add bus-ticker
+  + use it in PPU + adjust perfgate") stay one PR / one review /
+  one bisect timeline.
+- Single CI matrix, single goreleaser pipeline.
+
+### Why split at v0.3
+
+- Identity. chippy is the debugger; nessy is the NES. Separate repos
+  signal that to users far better than one repo with a split mascot.
+- Release cadence. chippy v1.2 shouldn't block nessy v0.4 (or vice
+  versa). Tag streams diverge cleanly.
+- Dependency hygiene. chippy's tarball stops carrying Ebiten +
+  audio-mixing transitives. `homebrew-core` review path (#22) stays
+  small.
+- Public API. By v0.3 cpu / dap / peripheral / symbols / expr /
+  trace / snapshot will all be exercised by both products plus the
+  WASM playground; promoting them to public packages with a v2.0
+  stability promise is a one-time tax we'd have paid eventually.
+
+### Mechanical split recipe
+
+When v0.3 lands:
+
+```sh
+# 1. Cut a chippy release that promotes packages from internal/ to
+#    public paths and bumps to v2.0.0 (API stability commitment).
+git mv internal/cpu pkg/cpu
+git mv internal/peripheral pkg/peripheral
+git mv internal/dap pkg/dap
+git mv internal/symbols pkg/symbols
+git mv internal/expr pkg/expr
+git mv internal/trace pkg/trace
+# update imports + tag v2.0.0
+
+# 2. Extract nessy's tree into its own repo, rewriting history.
+git clone --no-local . /tmp/nessy
+cd /tmp/nessy
+git filter-repo \
+  --path cmd/nessy --path internal/nes \
+  --path-rename cmd/nessy:cmd/nessy \
+  --path-rename internal/nes:internal/nes
+# 3. Push to github.com/nkane/nessy; depend on chippy v2.0.
+```
+
+Until then, the plan below is monorepo-shaped: PRs land in the
+chippy repo, file paths assume `cmd/nessy/` + `internal/nes/`.
 
 ## What we reuse from chippy
 
