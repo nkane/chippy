@@ -100,8 +100,11 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   max-height: 320px;
 }
 .regs table { border-collapse: collapse; font: 0.85rem ui-monospace, SFMono-Regular, Menlo, monospace; }
-.regs th, .regs td { padding: 0.2em 0.6em; text-align: left; }
+.regs th, .regs td { padding: 0.2em 0.6em; text-align: left; vertical-align: top; }
 .regs th { color: var(--muted); font-weight: normal; }
+/* P-register stack: 3 monospace rows (hex / legend / bits) so the
+   letter columns line up under their bit positions. */
+.reg-p-stack { margin: 0; font: inherit; white-space: pre; line-height: 1.2; }
 #key-capture {
   background: #1f2630;
   border: 1px dashed var(--border);
