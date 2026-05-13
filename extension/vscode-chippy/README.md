@@ -80,6 +80,28 @@ with `spawn ENOENT` or `exited with code 2` depending on the failure
 mode. Set `chippy.binaryPath` to an absolute path to a known-good
 install when that happens.
 
+## Publishing to the marketplace
+
+CI auto-publishes whenever a non-prerelease tag (no `-` in the tag
+name) lands on the chippy repo. The job lives in
+`.github/workflows/release.yml` and:
+
+1. Strips the `v` from the git tag and `npm version`s the extension
+   to match (`vsce` refuses stale versions).
+2. Runs `npm ci && npm run compile`.
+3. Calls `vsce publish --pat $VSCE_PAT`.
+
+To enable for the first time:
+
+1. Create a publisher (`nkane`) on the [VS Code marketplace](https://marketplace.visualstudio.com/manage).
+2. Issue a Personal Access Token with **Marketplace > Manage** scope
+   (azure-devops PAT).
+3. Add it as the `VSCE_PAT` repo secret in `Settings → Secrets and
+   variables → Actions`.
+
+The first successful publish replaces the local `.vsix` install
+instructions in this README with a marketplace link.
+
 ## Running the test suite
 
 The extension ships a `@vscode/test-electron` harness:
