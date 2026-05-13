@@ -13,6 +13,7 @@ import (
 	"github.com/nkane/chippy/internal/cpu"
 	"github.com/nkane/chippy/internal/peripheral"
 	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/internal/trace"
 )
 
 // Theme-driven styles. applyTheme() in theme.go reassigns these; the
@@ -180,6 +181,13 @@ type Model struct {
 	// config.
 	DAPListenAddr string
 
+	// TraceReplay (optional) — when non-nil, step keys scroll through
+	// a pre-recorded execution trace instead of advancing the live
+	// CPU. Issue #64. The CPU's regs are kept in sync with the
+	// current frame so every panel reads as if the CPU were paused at
+	// that PC.
+	TraceReplay *trace.Replay
+
 	W, H int
 }
 
@@ -292,6 +300,37 @@ func (m Model) WithRunOnStart(run bool) Model {
 	return m
 }
 
+// WithTraceReplay attaches a pre-parsed Replay so step keys scroll
+// through recorded frames instead of running the live CPU. Issue #64.
+// The first frame's regs are copied to the CPU so initial render
+// matches the recording.
+func (m Model) WithTraceReplay(r *trace.Replay) Model {
+	if r == nil || r.Len() == 0 {
+		return m
+	}
+	m.TraceReplay = r
+	m.applyTraceFrame()
+	m.Status = fmt.Sprintf("trace replay (frame 1/%d)", r.Len())
+	return m
+}
+
+// applyTraceFrame syncs the CPU's registers from the current Replay
+// frame so every render path reads as if the live CPU were paused at
+// that PC. No-op when TraceReplay is nil.
+func (m *Model) applyTraceFrame() {
+	if m.TraceReplay == nil {
+		return
+	}
+	f, ok := m.TraceReplay.Current()
+	if !ok {
+		return
+	}
+	m.CPU.A, m.CPU.X, m.CPU.Y = f.A, f.X, f.Y
+	m.CPU.SP, m.CPU.P, m.CPU.PC = f.SP, f.P, f.PC
+	m.CPU.Cycles = f.Cycles
+	m.CPU.Halted = false
+}
+
 // WithSourceMap loads PC->(file,line) mapping from cc65 .dbg file lines.
 func (m Model) WithSourceMap(sm *symbols.SourceMap) Model {
 	if sm == nil {
@@ -389,7 +428,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Status = "disasm view"
 			}
 		case "s":
-			if m.CPU.Halted {
+			if m.TraceReplay != nil {
+				m.TraceReplay.Step(1)
+				m.applyTraceFrame()
+				m.Status = fmt.Sprintf("trace replay (frame %d/%d)",
+					m.TraceReplay.Index+1, m.TraceReplay.Len())
+			} else if m.CPU.Halted {
 				m.Status = "halted (press R to reset)"
 			} else {
 				m.step()
@@ -437,6 +481,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.Status = "reset"
 		case "<":
+			if m.TraceReplay != nil {
+				m.TraceReplay.Step(-1)
+				m.applyTraceFrame()
+				m.Status = fmt.Sprintf("trace replay (frame %d/%d)",
+					m.TraceReplay.Index+1, m.TraceReplay.Len())
+				break
+			}
 			if m.Rewind == nil || m.Rewind.Len() == 0 {
 				m.Status = "rewind: empty"
 				break
@@ -1146,6 +1197,12 @@ func helpPages() [][]helpSection {
 				{":dap PORT", "start a TCP DAP listener so editors can attach"},
 				{":dap 0", "auto-assign a free port"},
 				{":dap stop", "close the listener"},
+			}},
+			{"Trace replay", [][2]string{
+				{"--trace-replay PATH", "open a recorded trace; step keys scroll frames"},
+				{"s", "advance one trace frame (CPU stays paused)"},
+				{"<", "rewind one trace frame"},
+				{"status", "shows `trace replay (frame N/M)` while active"},
 			}},
 		},
 	}
