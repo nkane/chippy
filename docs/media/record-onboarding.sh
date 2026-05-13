@@ -1,63 +1,70 @@
 #!/usr/bin/env bash
-# record-onboarding.sh — produce docs/media/onboarding.cast +
-# onboarding.gif for the README's hero animation.
+# record-onboarding.sh — capture docs/media/onboarding.cast +
+# onboarding.gif for the README hero.
 #
-# Requirements:
-#   asciinema    — record terminal sessions
-#   agg          — render .cast → .gif (https://github.com/asciinema/agg)
-#   chippy       — `go install ./cmd/chippy` or use a release build
-#   example/c    — pre-built (cd example/c && make all)
+# Wrapper around asciinema + agg. You drive the chippy session
+# yourself during the recording (Bubble Tea's altscreen and
+# scripted-keystroke shims don't cooperate cleanly — keys get
+# dropped or mis-ordered).
 #
-# Usage:
-#   docs/media/record-onboarding.sh
+# Suggested session (~25 seconds, hero-GIF-friendly):
+#   chippy -rom example/c/hello.bin
+#   wait ~2s for the TUI to settle
+#   press `s` four times — watch the reg pane update
+#   press `r` to free-run, then `r` again to pause
+#   press `<` once to reverse-step
+#   press `q` to quit
 #
-# The script drives a scripted ~25-second session in a child terminal
-# (via tmux send-keys / `expect`). To re-record, just run again — the
-# cast + gif are overwritten in place.
+# Requirements: asciinema, agg, chippy on PATH, example/c/hello.bin
+# built (cc65 needed; `make -C example/c hello.bin`).
 
 set -euo pipefail
-
 cd "$(dirname "$0")/../.."
 
-if ! command -v asciinema >/dev/null; then
-  echo "install asciinema: brew install asciinema (or apt install asciinema)" >&2
-  exit 1
-fi
-if ! command -v agg >/dev/null; then
-  echo "install agg: cargo install --git https://github.com/asciinema/agg" >&2
-  exit 1
-fi
+for tool in asciinema agg chippy; do
+  if ! command -v "$tool" >/dev/null; then
+    echo "missing dependency: $tool" >&2
+    case $tool in
+      asciinema) echo "  brew install asciinema   (or apt install asciinema)" >&2 ;;
+      agg)       echo "  cargo install --git https://github.com/asciinema/agg" >&2 ;;
+      chippy)    echo "  go install ./cmd/chippy" >&2 ;;
+    esac
+    exit 1
+  fi
+done
 
-# Build a fresh chippy + the C examples if missing.
-go build -o /tmp/chippy ./cmd/chippy
-make -C example/c hello.bin >/dev/null
+if [ ! -f example/c/hello.bin ]; then
+  echo "example/c/hello.bin missing — build it first:" >&2
+  echo "  make -C example/c hello.bin" >&2
+  exit 1
+fi
 
 CAST=docs/media/onboarding.cast
 GIF=docs/media/onboarding.gif
 
-# Drive a scripted session. The `expect`-flavored bits below are
-# bash-friendly: sleep between input lines so each frame is readable
-# in the resulting GIF.
-SCRIPT=$(mktemp)
-cat >"$SCRIPT" <<'EOS'
-#!/usr/bin/env bash
-set -e
-/tmp/chippy -rom example/c/hello.bin &
-PID=$!
-# Give the TUI time to render.
-sleep 1.5
-# Keystrokes are sent into the TTY via tmux below — this script just
-# launches chippy and waits to be killed by the parent.
-wait $PID 2>/dev/null || true
-EOS
-chmod +x "$SCRIPT"
+cat <<EOF
 
-# 25-second cap on the recording; that's roughly the longest you want
-# a hero GIF to be before it loops.
-asciinema rec --overwrite --command "$SCRIPT" --idle-time-limit 1 --title "chippy — your first ROM in 25 s" "$CAST"
+Recording $CAST. Drive the session yourself:
 
-# Render with a 30 cols-wide / 10 lines tall window — README hero
-# rendering looks crisper than the default 80x24.
+  1. chippy -rom example/c/hello.bin
+  2. wait ~2 seconds (let the TUI settle)
+  3. press s s s s    (step four instructions)
+  4. press r          (free-run)
+  5. press r          (pause)
+  6. press <          (reverse-step once)
+  7. press q          (quit)
+
+Aim for ~25 seconds total. Ctrl-D when done.
+
+EOF
+
+asciinema rec --overwrite --idle-time-limit 1 \
+  --title "chippy — your first ROM in 25 s" \
+  --cols 110 --rows 32 \
+  "$CAST"
+
+echo "rendering $GIF..."
 agg --theme monokai --speed 1.5 --cols 110 --rows 32 "$CAST" "$GIF"
 
 echo "wrote $CAST and $GIF"
+echo "uncomment the screencast line in README.md to surface it."
