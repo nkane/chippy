@@ -10,10 +10,14 @@
 
 Output docs/media/onboarding.gif
 
-Set Shell "bash"
-Set FontSize 16
-Set Width 1280
-Set Height 800
+Set Shell "zsh"
+# chippy's TUI needs roughly 130 cols × 45 rows of cells to render
+# every panel without clipping. Smaller font + larger window gives
+# the layout room to breathe; the resulting GIF compresses fine.
+Set FontSize 12
+Set Width 1600
+Set Height 1000
+Set Padding 20
 Set Theme "Dracula"
 Set TypingSpeed 60ms
 
