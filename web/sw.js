@@ -1,7 +1,7 @@
 // Tiny service worker: cache-first for the static assets, network-first
 // for everything else. Bump CACHE_NAME when shipping a new build so
 // clients evict the stale wasm blob.
-const CACHE_NAME = 'chippy-v2'; // bumped: CSP needed wasm-unsafe-eval
+const CACHE_NAME = 'chippy-v3'; // bumped: P-register pane alignment fix
 const ASSETS = [
   './',
   './index.html',
