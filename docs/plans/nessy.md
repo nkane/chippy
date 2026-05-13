@@ -133,6 +133,44 @@ git filter-repo \
 Until then, the plan below is monorepo-shaped: PRs land in the
 chippy repo, file paths assume `cmd/nessy/` + `internal/nes/`.
 
+### Future three-way split (option, not commitment)
+
+If a *third* emulator ever lands (Apple II, C64, 2600 — anything that
+reuses the chippy CPU + TUI), the v0.3 two-way split (`chippy` +
+`nessy`) gets re-evaluated as a three-way:
+
+```
+chippy/   — pure 6502 / 65C02 library. No UI. cpu / peripheral / dap /
+            snapshot / symbols / expr / trace.
+dippy/    — generic CPU-emulator TUI debugger. Bubble Tea, panels,
+            breakpoints, watch. Drives any chippy.Bus or any DAP
+            server.
+nessy/    — NES emulator (chippy + nessy-specific PPU / APU / cart).
+fizzy/    — hypothetical Apple II (chippy + Apple-specific peripherals).
+            Reuses dippy's TUI for free.
+```
+
+The TUI's CPU-agnostic parts (panels, command line, watch, conditional
+breakpoints, immediate window, theme, state-file) are already generic.
+The CPU-specific bits (6502 disassembly, flag rendering, symbol
+table) would move to chippy core as render hooks dippy calls.
+
+**Trigger**: a second emulator + obvious TUI duplication. Default is
+**don't split this far**. The cost of a third repo (third release
+pipeline, third version-bump cascade, three-way cross-cutting PRs)
+isn't worth paying unless there's an actual second consumer.
+
+If/when it triggers, extraction is mechanical:
+
+```sh
+# from the v0.3+ chippy monorepo:
+git filter-repo --path internal/tui --path-rename internal/tui:internal/dippy
+# in a fresh dippy repo, depend on chippy@v2.x for the CPU library
+# nessy's go.mod adds dippy as a second dependency
+```
+
+Until then, dippy is **YAGNI**. The TUI lives inside chippy.
+
 ## What we reuse from chippy
 
 | chippy package        | nessy use                                                  |
