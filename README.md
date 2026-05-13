@@ -172,6 +172,7 @@ Flags:
 | `-dap`  | —       | Run as a [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) server instead of the TUI. Accepts `stdio` (editor pipes stdin/stdout) or `tcp:PORT` (server listens, editor connects out). See [`docs/dap.md`](docs/dap.md) for the request list, supported launch arguments, and VS Code / nvim-dap onboarding. |
 | `-text-buf-cap` | `65536` | TextOutput ($F001) buffer cap in bytes. Older bytes are evicted when full. `0` disables the bound. Dump the live buffer with `:textsave PATH`. |
 | `-theme` | `default` | Color palette: `default` / `mono` / `protan` (red-green safe) / `tritan` (blue-yellow safe). `NO_COLOR=1` env forces `mono` regardless. Switch at runtime with `:theme NAME`; the choice persists across launches. |
+| `-trace-replay` | — | Path to a prior `.trace` file. Opens the TUI in replay mode — `s` and `<` scroll through recorded frames instead of running the live CPU. The CPU register state is synced from the active frame so every panel renders as if paused at that PC. |
 
 Examples:
 

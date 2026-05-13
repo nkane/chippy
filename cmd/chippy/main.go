@@ -12,22 +12,24 @@ import (
 	"github.com/nkane/chippy/internal/loader"
 	"github.com/nkane/chippy/internal/peripheral"
 	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/internal/trace"
 	"github.com/nkane/chippy/internal/tui"
 )
 
 func main() {
 	var (
-		romPath    = flag.String("rom", "", "program to load (.bin .prg .hex .o)")
-		loadAddr   = flag.Uint("addr", 0x8000, "load address for raw .bin (ignored for .prg/.hex/.o)")
-		resetVec   = flag.Uint("reset", 0, "reset vector override (0 = use file's existing vector or load address)")
-		cfg        = flag.String("cfg", "", "ld65 linker config (.cfg) — required when loading .o files")
-		dbgPath    = flag.String("dbg", "", "cc65 .dbg symbol file (auto-detected as <rom>.dbg if omitted)")
-		cpuFlag    = flag.String("cpu", "nmos", "CPU variant: nmos | 65c02")
-		tracePath  = flag.String("trace", "", "write per-instruction execution trace to this file")
-		runOnStart = flag.Bool("run-on-start", false, "start the CPU running instead of paused (pair with -trace for non-interactive capture)")
-		dapMode    = flag.String("dap", "", "run as a Debug Adapter Protocol server instead of the TUI: 'stdio' or 'tcp:PORT'")
-		textBufCap = flag.Int("text-buf-cap", peripheral.DefaultTextOutputCap, "TextOutput ($F001) buffer cap in bytes; 0 = unbounded")
-		theme      = flag.String("theme", "", "color palette: default | mono | protan | tritan. NO_COLOR=1 forces mono regardless.")
+		romPath     = flag.String("rom", "", "program to load (.bin .prg .hex .o)")
+		loadAddr    = flag.Uint("addr", 0x8000, "load address for raw .bin (ignored for .prg/.hex/.o)")
+		resetVec    = flag.Uint("reset", 0, "reset vector override (0 = use file's existing vector or load address)")
+		cfg         = flag.String("cfg", "", "ld65 linker config (.cfg) — required when loading .o files")
+		dbgPath     = flag.String("dbg", "", "cc65 .dbg symbol file (auto-detected as <rom>.dbg if omitted)")
+		cpuFlag     = flag.String("cpu", "nmos", "CPU variant: nmos | 65c02")
+		tracePath   = flag.String("trace", "", "write per-instruction execution trace to this file")
+		runOnStart  = flag.Bool("run-on-start", false, "start the CPU running instead of paused (pair with -trace for non-interactive capture)")
+		dapMode     = flag.String("dap", "", "run as a Debug Adapter Protocol server instead of the TUI: 'stdio' or 'tcp:PORT'")
+		textBufCap  = flag.Int("text-buf-cap", peripheral.DefaultTextOutputCap, "TextOutput ($F001) buffer cap in bytes; 0 = unbounded")
+		theme       = flag.String("theme", "", "color palette: default | mono | protan | tritan. NO_COLOR=1 forces mono regardless.")
+		traceReplay = flag.String("trace-replay", "", "open a prior trace file in replay mode (step keys scroll through recorded frames; CPU stays paused)")
 	)
 	flag.Parse()
 
@@ -156,6 +158,21 @@ func main() {
 	wbus := tui.NewWBus(mmio)
 	c.Bus = wbus
 
+	var replay *trace.Replay
+	if *traceReplay != "" {
+		f, err := os.Open(*traceReplay)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "trace-replay: %v\n", err)
+			os.Exit(1)
+		}
+		replay, err = trace.Parse(f)
+		f.Close()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "trace-replay: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	model := tui.New(c, ram).
 		WithWBus(wbus).
 		WithTextOutput(textOut).
@@ -163,7 +180,8 @@ func main() {
 		WithTracer(tracer).
 		WithHistoryPath(tui.DefaultHistoryPath()).
 		WithRunOnStart(*runOnStart).
-		WithTheme(*theme)
+		WithTheme(*theme).
+		WithTraceReplay(replay)
 	if syms != nil {
 		model = model.WithSymbols(syms)
 	}
