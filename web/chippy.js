@@ -47,8 +47,11 @@ function renderState() {
   document.getElementById('reg-sp').textContent = fmtHex(s.sp, 2);
   document.getElementById('reg-pc').textContent = fmtHex(s.pc, 4);
   document.getElementById('reg-cyc').textContent = s.cycles.toString();
-  document.getElementById('reg-flags').textContent = flagBits(s.p);
-  document.getElementById('reg-p').firstChild.textContent = fmtHex(s.p, 2) + ' NV-BDIZC';
+  // P pane renders as three rows in a monospace <pre>: hex value,
+  // legend, then live flag state — each row 8 chars wide so the
+  // letters line up under their bit positions.
+  document.getElementById('reg-p').textContent =
+    fmtHex(s.p, 2) + '\nNV-BDIZC\n' + flagBits(s.p);
 
   renderDisasm(s.pc);
   renderMemory();
