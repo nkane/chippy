@@ -115,10 +115,14 @@ The hero animation at the top of `README.md` is produced by:
 docs/media/record-onboarding.sh
 ```
 
-The script wants `asciinema` + `agg` on `PATH`. It records a ~25-second
-scripted session into `docs/media/onboarding.cast` and renders the GIF
-into `docs/media/onboarding.gif`. Both files are overwritten in place
-— commit the new pair when the cast is clean.
+The script drives [vhs](https://github.com/charmbracelet/vhs) — same
+people as Bubble Tea, so altscreen + keystroke injection just work.
+Edit `docs/media/onboarding.tape` to change the session script (the
+DSL covers `Type`, `Sleep`, `Enter`, etc.).
 
-Re-record after any UI change that's user-visible from the first
-30 seconds: new keybinding, theme rework, panel reordering.
+Install: `brew install vhs` (or `go install
+github.com/charmbracelet/vhs@latest`). Output overwrites
+`docs/media/onboarding.gif`.
+
+Re-record after any UI change visible in the first 25 seconds — new
+keybinding, theme rework, panel reordering.
