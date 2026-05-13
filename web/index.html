@@ -4,9 +4,13 @@
   <meta charset="UTF-8" />
   <title>chippy — 6502 debugger in the browser</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- CSP: self only. WASM lives at /chippy.wasm; no third-party scripts. -->
+  <!-- CSP: self only. `wasm-unsafe-eval` is required for
+       WebAssembly.instantiate*; without it modern browsers refuse to
+       compile the wasm blob (silent error / blank register pane).
+       https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/script-src#unsafe_webassembly_execution
+       No remote scripts; no inline scripts; no third-party fetches. -->
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" />
+        content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
