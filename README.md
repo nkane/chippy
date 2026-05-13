@@ -7,6 +7,10 @@
 
 A TUI 6502 emulator and debugger, written in Go.
 
+<!-- Onboarding screencast — produce docs/media/onboarding.gif via
+     `docs/media/record-onboarding.sh` then enable the line below. -->
+<!-- ![chippy onboarding screencast](docs/media/onboarding.gif) -->
+
 `chippy` emulates the NMOS 6502 CPU and presents a terminal UI built with
 [Bubble Tea](https://github.com/charmbracelet/bubbletea) for inspecting
 registers, flags, the stack, live disassembly, and memory while you single-step
