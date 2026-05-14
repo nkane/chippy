@@ -1,15 +1,18 @@
+//go:build spike
+
 // cmd/spike-ebiten — graphics-library evaluation spike for nessy
 // (issue #182). Validates that Ebiten can sustain 60 fps blitting a
 // 256x240 RGBA framebuffer while a background goroutine simulates an
 // NES CPU's cycle workload.
 //
-// Run:
+// Build-tagged `spike` so the default `go build ./...` (and CI Ubuntu
+// runners that lack X11 dev headers) skip it. Run locally:
 //
-//	go run ./cmd/spike-ebiten
+//	go run -tags=spike ./cmd/spike-ebiten
 //
 // Press ESC to quit. The window title shows the live frame timing
 // and the simulated cycle throughput. Pass / fail decision criteria
-// for the spike are documented in docs/plans/nessy.md.
+// for the spike are documented in docs/plans/spike-results.md.
 //
 // This binary is throwaway — delete after the v0.1 PPU lands.
 package main

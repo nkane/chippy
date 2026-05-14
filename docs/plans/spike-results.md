@@ -61,8 +61,11 @@ The spike binary at `cmd/spike-ebiten/` does:
 **To verify locally:**
 
 ```sh
-go run ./cmd/spike-ebiten
+go run -tags=spike ./cmd/spike-ebiten
 ```
+
+The `spike` build tag keeps CI (Ubuntu runner without X11 dev
+headers) from trying to compile this binary.
 
 Watch the window title. Pass criteria:
 - `fps >= 59`
