@@ -27,14 +27,27 @@ func main() {
 		tracePath   = flag.String("trace", "", "write per-instruction execution trace to this file")
 		runOnStart  = flag.Bool("run-on-start", false, "start the CPU running instead of paused (pair with -trace for non-interactive capture)")
 		dapMode     = flag.String("dap", "", "run as a Debug Adapter Protocol server instead of the TUI: 'stdio' or 'tcp:PORT'")
+		dapAttach   = flag.String("dap-attach", "", "connect out to a remote DAP server (tcp:HOST:PORT) — Phase A: handshake-only smoke test, see #180")
 		textBufCap  = flag.Int("text-buf-cap", peripheral.DefaultTextOutputCap, "TextOutput ($F001) buffer cap in bytes; 0 = unbounded")
 		theme       = flag.String("theme", "", "color palette: default | mono | protan | tritan. NO_COLOR=1 forces mono regardless.")
 		traceReplay = flag.String("trace-replay", "", "open a prior trace file in replay mode (step keys scroll through recorded frames; CPU stays paused)")
 	)
 	flag.Parse()
 
+	if *dapMode != "" && *dapAttach != "" {
+		fmt.Fprintln(os.Stderr, "chippy: -dap and -dap-attach are mutually exclusive")
+		os.Exit(2)
+	}
 	if *dapMode != "" {
 		runDAP(*dapMode)
+		return
+	}
+	if *dapAttach != "" {
+		if *romPath != "" {
+			fmt.Fprintln(os.Stderr, "chippy: -rom and -dap-attach are mutually exclusive (attach mode reads state from the remote)")
+			os.Exit(2)
+		}
+		runDAPAttach(*dapAttach)
 		return
 	}
 
