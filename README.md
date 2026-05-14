@@ -118,6 +118,32 @@ go test ./...
 Optional: install [cc65](https://cc65.github.io/) to assemble your own
 programs.
 
+### nessy (NES emulator, experimental)
+
+`cmd/nessy` is an NES emulator built on chippy's CPU + bus + DAP server.
+It's behind the `nessy` build tag because it pulls in
+[Ebiten](https://ebitengine.org/) for the game window, which needs X11 / GL
+dev headers on Linux that the default CI runners don't carry.
+
+```sh
+# darwin / windows
+go build -tags=nessy -o nessy ./cmd/nessy
+./nessy game.nes
+
+# linux (one-time install)
+sudo apt-get install -y libgl1-mesa-dev xorg-dev libasound2-dev \
+  libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
+go build -tags=nessy -o nessy ./cmd/nessy
+```
+
+v0.1 scope: iNES mapper 0 (NROM) ROMs, background-only rendering at 60 fps,
+standard joypad input on player 1, DAP server on `:14785` so
+`chippy -dap-attach tcp:localhost:14785` can attach the TUI. No sprites, no
+audio, no scrolling — see [`docs/plans/nessy.md`](docs/plans/nessy.md) for
+the v0.2+ roadmap.
+
+Controls: Arrows = D-pad, Z = A, X = B, Enter = Start, Right Shift = Select.
+
 ---
 
 ## Quick start
