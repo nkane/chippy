@@ -82,6 +82,15 @@ func (w *WBus) Write(addr uint16, v byte) {
 	}
 }
 
+// Tick forwards the per-instruction cycle delta to the inner bus
+// (typically a *cpu.MMIO) so peripherals registered there can advance
+// time-based state. WBus itself has no time-based state to advance.
+func (w *WBus) Tick(cycles int) {
+	if t, ok := w.Inner.(cpu.Ticker); ok {
+		t.Tick(cycles)
+	}
+}
+
 func (w *WBus) push(h MemHit) {
 	w.hits[w.head] = h
 	w.head = (w.head + 1) % hitRingCap

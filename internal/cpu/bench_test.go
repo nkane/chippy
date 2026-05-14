@@ -46,3 +46,31 @@ func BenchmarkStep_WithSnapshot(b *testing.B) {
 		_ = ram.TakeShadow()
 	}
 }
+
+// tickerBus wraps a *RAM and counts ticks. Used by
+// BenchmarkStep_WithTicker to measure the bus-ticker hook's overhead
+// (#175) — nessy's PPU + APU + future VIA peripherals rely on this
+// firing after every Step.
+type tickerBus struct {
+	ram   *RAM
+	total int
+}
+
+func (t *tickerBus) Read(addr uint16) byte     { return t.ram.Read(addr) }
+func (t *tickerBus) Write(addr uint16, v byte) { t.ram.Write(addr, v) }
+func (t *tickerBus) Tick(cycles int)           { t.total += cycles }
+
+func BenchmarkStep_WithTicker(b *testing.B) {
+	ram := NewRAM()
+	for i := range ram.Data {
+		ram.Data[i] = 0xEA
+	}
+	ram.Write(VecReset, 0x00)
+	ram.Write(VecReset+1, 0x00)
+	bus := &tickerBus{ram: ram}
+	c := New(bus)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		c.Step()
+	}
+}
