@@ -1,0 +1,288 @@
+// Package ppu models the NES Picture Processing Unit (2C02 / 2C07).
+//
+// v0.1 ships background-only rendering. The PPU advances three dots per
+// CPU cycle, walks the 341 × 262 NTSC frame timing diagram, sets the
+// vblank flag at scanline 241 dot 1 (with NMI if PPUCTRL bit 7 is set),
+// and at that boundary renders the visible 256 × 240 region to an RGBA
+// framebuffer using the nametable / attribute / pattern-table state in
+// effect at vblank entry.
+//
+// Out of scope for v0.1 (deliberately deferred):
+//   - Sprites (OAM rendering, sprite-0 hit, sprite overflow)
+//   - $4014 OAMDMA — the byte copy is straightforward but it requires
+//     a CPU "stall N cycles" hook that doesn't exist yet (#175 added
+//     the inbound Ticker direction, not outbound stall).
+//   - Mid-frame scrolling and the v/t/x/w internal-latch state machine.
+//   - Greyscale and color-emphasis bits (PPUMASK bits 0, 5-7).
+//   - Pre-render scanline odd-frame dot-skip.
+//
+// These cost real ROMs accuracy on dynamic / scrolling games, but v0.1
+// only commits to static title screens.
+package ppu
+
+import (
+	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/internal/nes"
+)
+
+const (
+	ScreenWidth  = 256
+	ScreenHeight = 240
+
+	dotsPerScanline   = 341
+	scanlinesPerFrame = 262
+	vblankScanline    = 241
+	preRenderScanline = 261
+)
+
+// Cart is the PPU-side view of the cartridge. cart.Cartridge satisfies
+// this; the ppu package only needs the PPU bus and the mirroring scheme.
+type Cart interface {
+	PPURead(addr uint16) byte
+	PPUWrite(addr uint16, v byte)
+	Mirroring() nes.Mirroring
+}
+
+// NMI is the CPU's edge-triggered non-maskable-interrupt line. *cpu.CPU
+// satisfies it via TriggerNMI(). Kept as an interface so tests can
+// assert NMI was raised without spinning up a full CPU.
+type NMI interface {
+	TriggerNMI()
+}
+
+// PPU is the Peripheral that claims $2000-$3FFF on the CPU bus. The
+// 8-byte register window at $2000-$2007 is mirrored every 8 bytes up
+// to $3FFF.
+type PPU struct {
+	cart Cart
+	nmi  NMI
+
+	// Latched registers ($2000-$2007).
+	ctrl    byte // $2000 PPUCTRL
+	mask    byte // $2001 PPUMASK
+	status  byte // $2002 PPUSTATUS (bit 7 = vblank)
+	oamAddr byte // $2003 OAMADDR
+
+	// VRAM addressing latches. The 2C02 has a 15-bit "v" current
+	// address used by $2007 access (and rendering, on real silicon).
+	// $2005 / $2006 share a single write-toggle "w" — first write sets
+	// the high half, second write sets the low half. v0.1 ignores the
+	// fine X / scroll subtleties since we don't model mid-frame
+	// scrolling; only "v" matters for $2007 r/w.
+	v        uint16
+	w        bool
+	readBuf  byte // $2007 read returns the previously-buffered byte
+	scrollX  byte // most-recent $2005 X (snapshotted at frame render)
+	scrollY  byte // most-recent $2005 Y
+	scrollHi bool // tracks $2005 toggle state alongside $2006
+
+	// Memory the PPU owns directly.
+	vram    [0x800]byte // 2 KiB nametable RAM
+	oam     [256]byte   // sprite memory
+	palette [32]byte    // palette RAM
+
+	// Timing.
+	scanline   int
+	dot        int
+	frameCount uint64
+
+	// Framebuffer: 256 × 240 RGBA. Rendered at vblank entry; presented
+	// to the host via Frame().
+	frame [ScreenWidth * ScreenHeight * 4]byte
+}
+
+// New constructs a PPU wired to a cartridge (for PPU-bus pattern-table
+// access + nametable mirroring) and an NMI sink (the CPU). Both may be
+// nil for register-level tests that don't exercise rendering or NMI.
+func New(cart Cart, nmi NMI) *PPU {
+	p := &PPU{cart: cart, nmi: nmi}
+	p.Reset()
+	return p
+}
+
+// Reset clears the PPU to a deterministic post-power state. Real
+// silicon's reset behavior is a bit fuzzier (writes ignored for a
+// short window, etc.) — chippy follows the convention emulators settle
+// on.
+func (p *PPU) Reset() {
+	p.ctrl, p.mask, p.status, p.oamAddr = 0, 0, 0, 0
+	p.v, p.w, p.readBuf = 0, false, 0
+	p.scrollX, p.scrollY, p.scrollHi = 0, 0, false
+	p.scanline, p.dot, p.frameCount = preRenderScanline, 0, 0
+	for i := range p.vram {
+		p.vram[i] = 0
+	}
+	for i := range p.oam {
+		p.oam[i] = 0
+	}
+	for i := range p.palette {
+		p.palette[i] = 0
+	}
+	for i := range p.frame {
+		p.frame[i] = 0
+	}
+}
+
+// Range claims $2000-$3FFF (the mirrored register window). $4014
+// OAMDMA is deliberately not claimed here — see package doc.
+func (p *PPU) Range() (uint16, uint16) { return 0x2000, 0x3FFF }
+
+// Read services CPU reads of mirrored PPU registers.
+func (p *PPU) Read(addr uint16) byte {
+	switch 0x2000 | (addr & 0x0007) {
+	case 0x2002:
+		// PPUSTATUS: top 3 bits return the live flags; the bottom 5 are
+		// "open-bus" — many ROMs see the last data on the PPU bus there,
+		// but for v0.1 we return 0. Reading also clears vblank (bit 7)
+		// and resets the $2005 / $2006 write-toggle.
+		s := p.status & 0xE0
+		p.status &^= 0x80
+		p.w = false
+		p.scrollHi = false
+		return s
+	case 0x2004:
+		return p.oam[p.oamAddr]
+	case 0x2007:
+		// $2007 reads are buffered: each read returns the previously
+		// buffered byte, then refills the buffer from VRAM[v]. Reads
+		// from palette space ($3F00-$3FFF) bypass the buffer and
+		// return immediately; the buffer is loaded with the mirrored
+		// nametable byte underneath the palette region.
+		var out byte
+		addrV := p.v & 0x3FFF
+		if addrV >= 0x3F00 {
+			out = p.busRead(addrV)
+			p.readBuf = p.busRead(addrV - 0x1000)
+		} else {
+			out = p.readBuf
+			p.readBuf = p.busRead(addrV)
+		}
+		p.incVRAMAddr()
+		return out
+	}
+	return 0
+}
+
+// Write services CPU writes to mirrored PPU registers.
+func (p *PPU) Write(addr uint16, v byte) {
+	switch 0x2000 | (addr & 0x0007) {
+	case 0x2000:
+		prev := p.ctrl
+		p.ctrl = v
+		// 2C02 quirk: setting PPUCTRL bit 7 while vblank is already
+		// pending triggers an immediate NMI. Important for some games
+		// (and a known nestest probe).
+		if prev&0x80 == 0 && v&0x80 != 0 && p.status&0x80 != 0 && p.nmi != nil {
+			p.nmi.TriggerNMI()
+		}
+	case 0x2001:
+		p.mask = v
+	case 0x2003:
+		p.oamAddr = v
+	case 0x2004:
+		p.oam[p.oamAddr] = v
+		p.oamAddr++
+	case 0x2005:
+		if !p.scrollHi {
+			p.scrollX = v
+			p.scrollHi = true
+		} else {
+			p.scrollY = v
+			p.scrollHi = false
+		}
+	case 0x2006:
+		if !p.w {
+			// First write: high byte of 15-bit address. Real silicon
+			// stores in the "t" temp latch; v0.1 just builds v
+			// directly since we don't model mid-frame fine-scroll.
+			p.v = (p.v & 0x00FF) | (uint16(v&0x3F) << 8)
+			p.w = true
+		} else {
+			p.v = (p.v & 0xFF00) | uint16(v)
+			p.w = false
+		}
+	case 0x2007:
+		p.busWrite(p.v&0x3FFF, v)
+		p.incVRAMAddr()
+	}
+}
+
+// incVRAMAddr advances v after a $2007 access. PPUCTRL bit 2 selects
+// step 1 vs step 32.
+func (p *PPU) incVRAMAddr() {
+	if p.ctrl&0x04 != 0 {
+		p.v += 32
+	} else {
+		p.v++
+	}
+	p.v &= 0x3FFF
+}
+
+// Tick advances the PPU by 3 * cpuCycles dots — the 2C02 / 2A03 share a
+// master clock, with the PPU running 3× the CPU's rate. Crosses scanline
+// boundaries and triggers vblank / NMI at the right dot.
+func (p *PPU) Tick(cpuCycles int) {
+	for range cpuCycles * 3 {
+		p.stepDot()
+	}
+}
+
+func (p *PPU) stepDot() {
+	p.dot++
+	if p.dot >= dotsPerScanline {
+		p.dot = 0
+		p.scanline++
+		if p.scanline >= scanlinesPerFrame {
+			p.scanline = 0
+			p.frameCount++
+		}
+	}
+	switch {
+	case p.scanline == vblankScanline && p.dot == 1:
+		// Render the visible frame using state captured at vblank
+		// entry, then raise vblank + NMI.
+		p.renderFrame()
+		p.status |= 0x80
+		if p.ctrl&0x80 != 0 && p.nmi != nil {
+			p.nmi.TriggerNMI()
+		}
+	case p.scanline == preRenderScanline && p.dot == 1:
+		// End of vblank / start of pre-render: clear vblank, sprite-0
+		// hit, sprite overflow. v0.1 doesn't model the latter two so
+		// they're always clear, but the mask covers their bits for
+		// when they land.
+		p.status &^= 0xE0
+	}
+}
+
+// FrameBuffer returns a 256 × 240 RGBA byte slice. Indexed row-major,
+// 4 bytes per pixel (R, G, B, A). The returned slice aliases the PPU's
+// internal frame; callers must not mutate it. A fresh copy is rendered
+// at vblank entry — calling FrameBuffer at any other time returns the
+// most-recent frame.
+func (p *PPU) FrameBuffer() []byte { return p.frame[:] }
+
+// FrameCount is the number of frames rendered since reset. Tests use
+// this to detect "we crossed a frame boundary".
+func (p *PPU) FrameCount() uint64 { return p.frameCount }
+
+// Status returns the current PPUSTATUS without the read side effect of
+// clearing vblank. Exposed for tests and the debug TUI.
+func (p *PPU) Status() byte { return p.status }
+
+// Scanline / Dot expose the timing cursor. Useful for tests and a
+// future PPU debug panel.
+func (p *PPU) Scanline() int { return p.scanline }
+func (p *PPU) Dot() int      { return p.dot }
+
+// WriteOAM is the entry point for $4014 OAMDMA once it lands — copies a
+// byte into OAM at the current oamAddr cursor and bumps. Exposed
+// separately from $2004 so a future OAMDMA peripheral doesn't have to
+// route through the mirrored register decoder.
+func (p *PPU) WriteOAM(v byte) {
+	p.oam[p.oamAddr] = v
+	p.oamAddr++
+}
+
+// compile-time check: PPU satisfies cpu.Peripheral.
+var _ cpu.Peripheral = (*PPU)(nil)
