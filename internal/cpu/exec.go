@@ -67,6 +67,14 @@ func (c *CPU) Step() int {
 		cycles++
 	}
 	c.Cycles += uint64(cycles)
+	// Per-instruction bus tick. Peripherals that need time-based state
+	// (PPU, APU, future VIA timers) implement Ticker and receive the
+	// cycle delta after each instruction. The Ticker assertion is
+	// cached on c.busTicker at SetBus time so the no-ticker fast path
+	// is one nil-check; perfgate ceiling holds.
+	if c.busTicker != nil {
+		c.busTicker.Tick(cycles)
+	}
 	// Self-jump detection: a `JMP self` (or any instruction that leaves PC
 	// pointing back at its own opcode) means the program has halted.
 	if c.PC == startPC {

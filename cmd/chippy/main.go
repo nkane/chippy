@@ -156,7 +156,7 @@ func main() {
 	// then swap c.Bus to the wrapper. WithWBus attaches the CPU pointer and
 	// hands the watch map to the wrapper.
 	wbus := tui.NewWBus(mmio)
-	c.Bus = wbus
+	c.SetBus(wbus)
 
 	var replay *trace.Replay
 	if *traceReplay != "" {

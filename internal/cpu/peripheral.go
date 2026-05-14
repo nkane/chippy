@@ -72,3 +72,18 @@ func (m *MMIO) Write(addr uint16, v byte) {
 	}
 	m.Inner.Write(addr, v)
 }
+
+// Tick fans out per-instruction cycle deltas to every registered
+// peripheral that implements Ticker. Also forwards to Inner if it
+// implements Ticker (e.g. a host wrapper around MMIO that wants its
+// own bookkeeping). Satisfies the Ticker contract from ticker.go.
+func (m *MMIO) Tick(cycles int) {
+	for _, p := range m.peripherals {
+		if t, ok := p.(Ticker); ok {
+			t.Tick(cycles)
+		}
+	}
+	if t, ok := m.Inner.(Ticker); ok {
+		t.Tick(cycles)
+	}
+}

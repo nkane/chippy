@@ -42,7 +42,11 @@ type CPU struct {
 	PC             uint16
 	Cycles         uint64
 	Bus            Bus
-	Variant        Variant
+	// busTicker is a cached type assertion on Bus. Set via SetBus().
+	// Step() checks this instead of doing a per-call type assertion;
+	// the no-ticker fast path stays single-digit-ns.
+	busTicker Ticker
+	Variant   Variant
 
 	// Optional per-instruction execution hook. When non-nil, Step() invokes
 	// Tracer.LogStep at the instruction boundary just before opcode fetch.
@@ -82,10 +86,23 @@ func New(bus Bus) *CPU {
 
 // NewVariant constructs a CPU with the given variant.
 func NewVariant(bus Bus, v Variant) *CPU {
-	c := &CPU{Bus: bus, Variant: v}
+	c := &CPU{Variant: v}
+	c.SetBus(bus)
 	c.bindTable()
 	c.Reset()
 	return c
+}
+
+// SetBus swaps the CPU's bus and refreshes the cached busTicker
+// (#175). Callers must use this rather than assigning c.Bus directly
+// so the per-Step ticker dispatch stays correct after a bus wrap.
+func (c *CPU) SetBus(b Bus) {
+	c.Bus = b
+	if t, ok := b.(Ticker); ok {
+		c.busTicker = t
+	} else {
+		c.busTicker = nil
+	}
 }
 
 func (c *CPU) bindTable() {
