@@ -25,12 +25,20 @@ type Variant int
 const (
 	VariantNMOS      Variant = iota // MOS 6502 (default)
 	VariantCMOS65C02                // WDC/Rockwell 65C02
+	// VariantNES models the Ricoh 2A03 found in the NES — an NMOS 6502
+	// with decimal-mode arithmetic disabled (the FlagD bit still
+	// toggles via SED/CLD/PHP/PLP so programs can probe it, but
+	// ADC/SBC under D=1 behave as if D were clear). All other behavior
+	// matches NMOS, including the JMP-indirect page-wrap bug.
+	VariantNES
 )
 
 func (v Variant) String() string {
 	switch v {
 	case VariantCMOS65C02:
 		return "65c02"
+	case VariantNES:
+		return "nes"
 	default:
 		return "nmos"
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -319,11 +320,13 @@ func (s *Server) bootDebuggee(args LaunchArguments) error {
 		return fmt.Errorf("a launch is already active; disconnect first")
 	}
 	var variant cpu.Variant
-	switch args.CPUVariant {
+	switch strings.ToLower(args.CPUVariant) {
 	case "", "nmos", "6502":
 		variant = cpu.VariantNMOS
 	case "65c02", "cmos", "cmos65c02":
 		variant = cpu.VariantCMOS65C02
+	case "nes", "2a03", "ricoh":
+		variant = cpu.VariantNES
 	default:
 		return fmt.Errorf("unknown cpuVariant %q", args.CPUVariant)
 	}
