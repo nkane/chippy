@@ -145,7 +145,9 @@ func opADC(c *CPU, addr uint16, m AddrMode) {
 	if c.hasFlag(FlagC) {
 		carry = 1
 	}
-	if c.hasFlag(FlagD) {
+	// Ricoh 2A03 (VariantNES): FlagD toggles but has no effect on ADC.
+	// Skip the decimal path entirely.
+	if c.hasFlag(FlagD) && c.Variant != VariantNES {
 		if c.Variant == VariantCMOS65C02 {
 			adcDecimalCMOS(c, v, carry)
 		} else {
@@ -170,7 +172,8 @@ func opSBC(c *CPU, addr uint16, m AddrMode) {
 	if c.hasFlag(FlagC) {
 		carry = 1
 	}
-	if c.hasFlag(FlagD) {
+	// Same VariantNES no-BCD rule as opADC.
+	if c.hasFlag(FlagD) && c.Variant != VariantNES {
 		if c.Variant == VariantCMOS65C02 {
 			sbcDecimalCMOS(c, v, carry)
 		} else {

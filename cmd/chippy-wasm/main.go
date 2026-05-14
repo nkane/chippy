@@ -298,6 +298,8 @@ func jsSetVariant(this js.Value, args []js.Value) interface{} {
 		variant = cpu.VariantNMOS
 	case "65c02", "cmos", "cmos65c02":
 		variant = cpu.VariantCMOS65C02
+	case "nes", "2a03", "ricoh":
+		variant = cpu.VariantNES
 	default:
 		return errObj("unknown variant " + args[0].String())
 	}
