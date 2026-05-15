@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/nkane/chippy/internal/nes/joypad"
@@ -58,6 +59,37 @@ func TestDemo_InputEcho_Inspect(t *testing.T) {
 		t.Logf("  %02X %02X %02X  x%d", k[0], k[1], k[2], n)
 	}
 	t.Log("rough ASCII map (top half of screen):")
+	for y := 0; y < 240; y += 4 {
+		var row [64]byte
+		for x := 0; x < 256; x += 4 {
+			off := (y*256 + x) * 4
+			if int(fb[off])+int(fb[off+1])+int(fb[off+2]) > 400 {
+				row[x/4] = '#'
+			} else {
+				row[x/4] = '.'
+			}
+		}
+		t.Log(string(row[:]))
+	}
+}
+
+// TestDemo_VBlankBounce_Inspect: renders the bouncing demo at the
+// frame count given by CHIPPY_DEMO_FRAMES (default 5) and prints a
+// textual screenshot. Lets us watch the tile walk across the
+// playfield by re-running with increasing frame counts.
+func TestDemo_VBlankBounce_Inspect(t *testing.T) {
+	if os.Getenv("CHIPPY_DEMO_INSPECT") == "" {
+		t.Skip("set CHIPPY_DEMO_INSPECT=1 to render this demo")
+	}
+	frames := 5
+	if v := os.Getenv("CHIPPY_DEMO_FRAMES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			frames = n
+		}
+	}
+	romPath := filepath.Join("..", "..", "roms", "demos", "vblank-bounce", "vblank-bounce.nes")
+	fb, bus := runDemoFramesInternal(t, romPath, frames, nil)
+	t.Logf("CPU PC=%04X Cycles=%d  PPU frames=%d", bus.cpu.PC, bus.cpu.Cycles, bus.ppu.FrameCount())
 	for y := 0; y < 240; y += 4 {
 		var row [64]byte
 		for x := 0; x < 256; x += 4 {
