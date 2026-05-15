@@ -144,6 +144,32 @@ the v0.2+ roadmap.
 
 Controls: Arrows = D-pad, Z = A, X = B, Enter = Start, Right Shift = Select.
 
+#### Demos
+
+Three homemade demos ship under [`roms/demos/`](roms/demos/) — hand-rolled
+ca65 sources + checked-in `.nes` artifacts. Each doubles as a framebuffer-hash
+regression test under `cmd/nessy/demo_*_test.go`:
+
+| Demo | What it tests | Source |
+|---|---|---|
+| [`hello-bg`](roms/demos/hello-bg/) | PPU bg renderer + palette + nametable + reset path | Static "HELLO NESSY" title screen |
+| [`input-echo`](roms/demos/input-echo/) | $4016 joypad strobe + serial shift + per-frame VRAM writes | 8 indicator boxes light up under live joypad input |
+| [`vblank-bounce`](roms/demos/vblank-bounce/) | PPU NMI line + CPU NMI service + `JMP self` idle | Single tile bounces inside the playfield |
+
+Run any of them:
+
+```sh
+./nessy roms/demos/hello-bg/hello-bg.nes
+./nessy roms/demos/input-echo/input-echo.nes
+./nessy roms/demos/vblank-bounce/vblank-bounce.nes
+```
+
+Rebuild from ca65 source (requires `brew install cc65` / `apt-get install cc65`):
+
+```sh
+make -C roms/demos all
+```
+
 ---
 
 ## Quick start

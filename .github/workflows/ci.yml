@@ -60,6 +60,26 @@ jobs:
         with:
           version: v2.12.2
 
+  nessy-build:
+    # Validates the `-tags=nessy` build on every PR so regressions in
+    # the cmd/nessy / Ebiten coupling surface before release time.
+    # darwin is the cheapest runner (no apt-get X11 deps), so we use
+    # it as the canary; the release workflow exercises every platform
+    # on tag.
+    name: nessy tagged build (darwin)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          cache: true
+
+      - name: Build nessy (-tags=nessy)
+        run: go build -tags=nessy -o /tmp/nessy ./cmd/nessy
+
   klaus:
     name: klaus functional test
     runs-on: ubuntu-latest
