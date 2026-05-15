@@ -1,5 +1,11 @@
-# goreleaser config for chippy
+# goreleaser config for chippy.
 # https://goreleaser.com
+#
+# Tag scheme: chippy keeps the bare `vX.Y.Z` scheme it shipped with at
+# v1.0.0. nessy ships under `nessy-vX.Y.Z` via a custom workflow path —
+# goreleaser OSS doesn't support monorepo tag prefixes (pro-only), so
+# the workflow gates jobs on `startsWith(github.ref_name, 'nessy-')`
+# instead. See `docs/RELEASE.md`.
 version: 2
 
 project_name: chippy
