@@ -14,7 +14,7 @@
 # Toolchain (cc65 ≥ 2.19) on macOS:  brew install cc65
 #               on debian/ubuntu:    sudo apt-get install cc65
 
-DEMOS := hello-bg
+DEMOS := hello-bg input-echo
 
 CA65      := ca65
 LD65      := ld65

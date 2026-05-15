@@ -18,10 +18,25 @@ func runDemoFrames(t *testing.T, romPath string, frameCount int) []byte {
 	return fb
 }
 
+// runDemoFramesWithInput is like runDemoFrames but invokes a setup
+// hook with the live nesBus before stepping — used by input-driven
+// demo tests to push joypad state before the program's main loop
+// strobes $4016.
+func runDemoFramesWithInput(t *testing.T, romPath string, frameCount int, setup func(*nesBus)) []byte {
+	fb, _ := runDemoFramesInternal(t, romPath, frameCount, setup)
+	return fb
+}
+
 // runDemoFramesWithBus is the diagnostic variant — exposes the live
 // nesBus so inspect tests can probe CPU + PPU state alongside the
 // rendered framebuffer.
 func runDemoFramesWithBus(t *testing.T, romPath string, frameCount int) ([]byte, *nesBus) {
+	return runDemoFramesInternal(t, romPath, frameCount, nil)
+}
+
+// runDemoFramesInternal is the shared body: parse → buildNES → optional
+// setup hook → step for N frames worth of cycles → return framebuffer.
+func runDemoFramesInternal(t *testing.T, romPath string, frameCount int, setup func(*nesBus)) ([]byte, *nesBus) {
 	t.Helper()
 	data, err := os.ReadFile(romPath)
 	if err != nil {
@@ -34,6 +49,9 @@ func runDemoFramesWithBus(t *testing.T, romPath string, frameCount int) ([]byte,
 	bus, err := buildNES(rom)
 	if err != nil {
 		t.Fatalf("buildNES: %v", err)
+	}
+	if setup != nil {
+		setup(bus)
 	}
 	// Mirror cmd/nessy's per-frame stepping — one Update() worth of
 	// cycles per simulated frame. cpuCyclesPerFrame is defined in
