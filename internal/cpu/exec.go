@@ -76,8 +76,16 @@ func (c *CPU) Step() int {
 		c.busTicker.Tick(cycles)
 	}
 	// Self-jump detection: a `JMP self` (or any instruction that leaves PC
-	// pointing back at its own opcode) means the program has halted.
-	if c.PC == startPC {
+	// pointing back at its own opcode) means the program has halted —
+	// but ONLY on the chippy debugger variants (NMOS, 65C02), where the
+	// heuristic powers the TUI's "halted (press R)" status line and is
+	// documented behavior. NES programs legitimately spin on `JMP self`
+	// while waiting for NMI: the main loop sits in a tight spin and the
+	// NMI handler does all the per-frame work. Halt-marking that idle
+	// would stall the bus-ticker fan-out (Step returns 0 once Halted)
+	// and freeze the PPU. Skip the heuristic on VariantNES so the
+	// canonical NES idle pattern keeps the system clock running.
+	if c.PC == startPC && c.Variant != VariantNES {
 		c.Halted = true
 	}
 	return cycles

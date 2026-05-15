@@ -43,13 +43,12 @@ func runDemoFramesWithBus(t *testing.T, romPath string, frameCount int) ([]byte,
 	target := uint64(frameCount) * cyclesPerFrame
 	for bus.cpu.Cycles < target {
 		if bus.cpu.Halted {
-			// CPU is in a `JMP self` spin (or hit a KIL). The PPU
-			// still needs to tick so the renderer captures the
-			// post-init framebuffer — Step() short-circuits the
-			// busTicker fan-out once Halted is true, so we drive
-			// the PPU manually here. One "instruction" worth of
-			// cycles per loop iteration mirrors what a JMP-self
-			// would have cost (3 cycles).
+			// Safety net for ROMs that hit a real halt opcode
+			// (KIL / STP). VariantNES skips the JMP-self auto-halt
+			// heuristic, so the canonical NES idle pattern keeps
+			// Step() driving the bus-ticker — this branch shouldn't
+			// fire for a well-formed demo. Kept so a corrupt ROM
+			// doesn't deadlock the test.
 			bus.ppu.Tick(3)
 			bus.cpu.Cycles += 3
 			continue
