@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/internal/dap"
 	"github.com/nkane/chippy/internal/peripheral"
 	"github.com/nkane/chippy/internal/symbols"
 	"github.com/nkane/chippy/internal/trace"
@@ -46,6 +47,38 @@ const (
 
 type tickMsg struct{}
 
+// dapEventMsg wraps a single DAP event from the RemoteSource for the
+// TUI's Update loop. Emitted by waitForDAPEvent.
+type dapEventMsg struct {
+	ev dap.Event
+}
+
+// dapClosedMsg fires when the RemoteSource's event channel closes (the
+// underlying DAP connection ended). The TUI treats this as a graceful
+// shutdown signal.
+type dapClosedMsg struct{}
+
+// waitForDAPEvent returns a tea.Cmd that blocks on the source's event
+// channel and emits a dapEventMsg / dapClosedMsg. The Update handler
+// re-schedules itself after consuming each event so the loop continues
+// for the program's lifetime.
+func waitForDAPEvent(src Source) tea.Cmd {
+	if src == nil {
+		return nil
+	}
+	ch := src.Events()
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ev, ok := <-ch
+		if !ok {
+			return dapClosedMsg{}
+		}
+		return dapEventMsg{ev: ev}
+	}
+}
+
 // Watch is a pinned memory address shown in the watch panel.
 type Watch struct {
 	// Kind is "mem" (default) or "reg". Empty string treated as "mem" for
@@ -58,9 +91,17 @@ type Watch struct {
 }
 
 type Model struct {
-	CPU         *cpu.CPU
-	RAM         *cpu.RAM
-	WBus        *WBus // optional: bus wrapper that records mem watch hits
+	CPU  *cpu.CPU
+	RAM  *cpu.RAM
+	WBus *WBus // optional: bus wrapper that records mem watch hits
+
+	// Source abstracts the step / reset / breakpoint / rewind control
+	// paths so the TUI can drive either a local in-process CPU
+	// (LocalSource — default) or a remote DAP-backed CPU
+	// (RemoteSource — used by `chippy -dap-attach`). Display panels
+	// continue to read CPU + RAM fields directly because the source
+	// keeps them populated as a mirror in both modes.
+	Source      Source
 	Syms        *symbols.Table
 	Running     bool
 	Breakpoints map[uint16]*Breakpoint
@@ -203,7 +244,8 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 	// land later via WithTheme / loadState.
 	t := resolveTheme(string(ThemeDefault))
 	applyTheme(t)
-	return Model{
+	rewind := newRewindRing(defaultRewindCap)
+	m := Model{
 		CPU:           c,
 		RAM:           r,
 		Breakpoints:   map[uint16]*Breakpoint{},
@@ -215,11 +257,22 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 		StackAnnotate: true,
 		HistIdx:       -1,
 		RIMatchIdx:    -1,
-		Rewind:        newRewindRing(defaultRewindCap),
+		Rewind:        rewind,
 		Theme:         string(t),
 		W:             120,
 		H:             40,
 	}
+	m.Source = NewLocalSource(c, r)
+	return m
+}
+
+// WithSource replaces the default LocalSource with a custom source —
+// typically a *RemoteSource built by cmd/chippy -dap-attach. The
+// Model's CPU + RAM remain in place as the display mirror; the source
+// is expected to keep them populated.
+func (m Model) WithSource(s Source) Model {
+	m.Source = s
+	return m
 }
 
 // WithTheme overrides the theme picked by New. Used by the CLI's
@@ -343,7 +396,13 @@ func (m Model) WithSourceMap(sm *symbols.SourceMap) Model {
 	return m
 }
 
-func (m Model) Init() tea.Cmd { return m.scheduleTick() }
+func (m Model) Init() tea.Cmd {
+	cmds := []tea.Cmd{m.scheduleTick()}
+	if c := waitForDAPEvent(m.Source); c != nil {
+		cmds = append(cmds, c)
+	}
+	return tea.Batch(cmds...)
+}
 
 func (m Model) scheduleTick() tea.Cmd {
 	d := idleTick
@@ -469,12 +528,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			m.Running = !m.Running
+			if m.Source != nil && m.Source.Attached() {
+				if m.Running {
+					if err := m.Source.Continue(); err != nil {
+						m.Running = false
+						m.Status = fmt.Sprintf("continue: %v", err)
+						break
+					}
+				} else {
+					if err := m.Source.Pause(); err != nil {
+						m.Status = fmt.Sprintf("pause: %v", err)
+					}
+				}
+			}
 			if m.Running {
 				m.Status = fmt.Sprintf("running @ %s", speedLabel(m.TargetHz))
 			} else {
 				m.Status = "paused"
 			}
 		case "R":
+			if m.Source != nil && m.Source.Attached() {
+				m.Status = "reset: not supported in attach mode"
+				break
+			}
 			m.CPU.Reset()
 			if m.Rewind != nil {
 				m.Rewind.Reset()
@@ -507,6 +583,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Breakpoints[m.CPU.PC] = newBP(m.CPU.PC)
 			}
 			m.Status = fmt.Sprintf("toggle bp $%04X", m.CPU.PC)
+			m.syncSourceBreakpoints()
 			m.saveState()
 		case "+", "=":
 			m.bumpSpeed(+1)
@@ -566,8 +643,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.scheduleTick()
 
+	case dapEventMsg:
+		switch msg.ev.Event {
+		case "stopped":
+			m.Running = false
+			_ = m.Source.RefreshRegs()
+			m.Status = fmt.Sprintf("stopped at $%04X", m.CPU.PC)
+		case "terminated":
+			return m, tea.Quit
+		}
+		return m, waitForDAPEvent(m.Source)
+	case dapClosedMsg:
+		m.Status = "remote disconnected"
+		m.Running = false
+		return m, tea.Quit
 	case tickMsg:
 		if m.Running {
+			// In remote-attach mode the server owns execution after a
+			// `continue` request; the local tickMsg loop must not
+			// step. The server's `stopped` event flips m.Running back
+			// off via the dap event pump.
+			if m.Source != nil && m.Source.Attached() {
+				return m, m.scheduleTick()
+			}
 			budget := m.runBudget()
 			for i := 0; i < budget; i++ {
 				m.step()
@@ -659,12 +757,12 @@ func (m *Model) step() int {
 		defer m.CPUMu.Unlock()
 	}
 	if m.Rewind == nil {
-		return m.CPU.Step()
+		return m.Source.Step()
 	}
 	snap := m.CPU.Snapshot(m.RAM)
 	m.captureperipherals(&snap)
 	m.RAM.ResetShadow()
-	n := m.CPU.Step()
+	n := m.Source.Step()
 	snap.Pages = m.RAM.TakeShadow()
 	m.Rewind.Push(snap)
 	return n
@@ -703,6 +801,25 @@ func (m *Model) restoreperipherals(s cpu.Snapshot) {
 			m.Keyboard.Restore(state)
 		}
 	}
+}
+
+// syncSourceBreakpoints pushes the current PC breakpoint set to the
+// Source. LocalSource is a no-op (the Model's run-loop checks the
+// `m.Breakpoints` map inline); RemoteSource forwards via DAP
+// `setInstructionBreakpoints`. Called after any mutation of the
+// breakpoint map.
+func (m *Model) syncSourceBreakpoints() {
+	if m.Source == nil {
+		return
+	}
+	pcs := make([]uint16, 0, len(m.Breakpoints))
+	for pc, bp := range m.Breakpoints {
+		if bp == nil || !bp.Enabled {
+			continue
+		}
+		pcs = append(pcs, pc)
+	}
+	_ = m.Source.SetBreakpoints(pcs)
 }
 
 // statusAfterStep updates Status reflecting halt or normal stepping outcome.
