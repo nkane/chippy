@@ -1,19 +1,31 @@
 name: release
 
+# Tag scheme:
+#   vX.Y.Z         → chippy release. Goreleaser flow: homebrew tap,
+#                    AUR, .deb / .rpm / .apk, VS Code marketplace,
+#                    cosign signatures, SPDX SBOMs.
+#   nessy-vX.Y.Z   → nessy alpha. Custom per-OS build jobs produce
+#                    darwin (amd64+arm64), linux (amd64), windows
+#                    (amd64) binaries bundled with demo ROMs. No
+#                    homebrew / AUR / marketplace yet (alpha-only).
+#
+# See `docs/RELEASE.md` for the full release-cutting playbook.
 on:
   push:
     tags:
       - 'v*'
+      - 'nessy-v*'
 
 # id-token: write lets cosign mint a keyless OIDC certificate bound to
-# this workflow. contents: write is required for the release-asset
-# uploads goreleaser performs.
+# this workflow. contents: write is required for release-asset uploads.
 permissions:
   contents: write
   id-token: write
 
 jobs:
+  # ----- chippy release (goreleaser flow) -----
   goreleaser:
+    if: startsWith(github.ref_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -37,7 +49,7 @@ jobs:
         with:
           distribution: goreleaser
           version: '~> v2'
-          args: release --clean
+          args: release --clean --config .goreleaser.chippy.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
@@ -48,8 +60,9 @@ jobs:
     needs: goreleaser
     runs-on: ubuntu-latest
     # Skip prereleases (rc / beta tags); marketplace can't unpublish a
-    # released version. Tag a normal `vX.Y.Z` to ship.
-    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    # released version. Only fires on stable chippy releases (bare
+    # `vX.Y.Z` with no prerelease suffix).
+    if: startsWith(github.ref_name, 'v') && !contains(github.ref_name, '-')
     defaults:
       run:
         working-directory: extension/vscode-chippy
@@ -80,3 +93,118 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: npx vsce publish --pat "$VSCE_PAT" --no-dependencies
+
+  # ----- nessy release (custom multi-OS build) -----
+  # Four parallel build jobs produce native binaries via CGO + each
+  # platform's graphics dev libs. First runner reaches `gh release
+  # create` and wins the release-creation race; subsequent runners
+  # attach their artifacts via `gh release upload --clobber`. No
+  # cosign / SBOM for nessy v0.1 alpha — those land when nessy
+  # graduates.
+  nessy-build:
+    if: startsWith(github.ref_name, 'nessy-v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            binary: nessy
+            archive_ext: tar.gz
+          - os: macos-latest      # arm64
+            goos: darwin
+            goarch: arm64
+            binary: nessy
+            archive_ext: tar.gz
+          - os: macos-13          # x86_64
+            goos: darwin
+            goarch: amd64
+            binary: nessy
+            archive_ext: tar.gz
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            binary: nessy.exe
+            archive_ext: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          cache: true
+
+      # Ebiten on Linux pulls in X11 / GL / audio dev headers at build
+      # time. macOS + Windows runners bundle their equivalents.
+      - name: Install Linux build dependencies
+        if: matrix.goos == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev xorg-dev libasound2-dev \
+            libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
+
+      - name: Build nessy
+        shell: bash
+        run: |
+          mkdir -p dist
+          go build -tags=nessy -trimpath -ldflags="-s -w" \
+            -o "dist/${{ matrix.binary }}" ./cmd/nessy
+
+      - name: Package
+        shell: bash
+        run: |
+          ver="${GITHUB_REF_NAME#nessy-v}"
+          stage="nessy_${ver}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          mkdir -p "$stage"
+          cp "dist/${{ matrix.binary }}" "$stage/"
+          cp README.md LICENSE "$stage/" 2>/dev/null || true
+          # Bundle every demo so users can verify the install with a
+          # known-good payload.
+          mkdir -p "$stage/demos"
+          for d in roms/demos/*/; do
+            name=$(basename "$d")
+            cp -r "$d" "$stage/demos/$name"
+          done
+          if [ "${{ matrix.archive_ext }}" = "zip" ]; then
+            # PowerShell is the most portable cross-platform zip on
+            # Windows runners.
+            powershell -Command "Compress-Archive -Path '$stage' -DestinationPath '${stage}.zip'"
+          else
+            tar -czf "${stage}.tar.gz" "$stage"
+          fi
+          ls -la "${stage}".*
+
+      - name: Generate checksum
+        shell: bash
+        run: |
+          ver="${GITHUB_REF_NAME#nessy-v}"
+          archive="nessy_${ver}_${{ matrix.goos }}_${{ matrix.goarch }}.${{ matrix.archive_ext }}"
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$archive" > "$archive.sha256"
+          else
+            shasum -a 256 "$archive" > "$archive.sha256"
+          fi
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          ver="${GITHUB_REF_NAME#nessy-v}"
+          archive="nessy_${ver}_${{ matrix.goos }}_${{ matrix.goarch }}.${{ matrix.archive_ext }}"
+          # First runner here creates the release; subsequent runners
+          # fall through to upload. `gh release view` exits non-zero
+          # only when the release doesn't exist, so we `|| true` the
+          # create when the view succeeds.
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "nessy alpha release. NROM-only, background-only PPU, no audio. Source-build is the supported path on every platform; the attached binaries are convenience artifacts." \
+              --prerelease
+          gh release upload "$GITHUB_REF_NAME" "$archive" "$archive.sha256" --clobber

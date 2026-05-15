@@ -8,9 +8,14 @@ Go-based TUI 6502 emulator + debugger (Bubble Tea, Lipgloss). Targets ca65/cc65 
 
 ## Branch & PR flow
 - One GitHub issue → branch `feat/<short-name>` off `main`.
-- Conventional Commits: `feat:`, `fix:`, `docs:`, `ci:`, `test:`, `refactor:`, `chore:` — these feed `.goreleaser.yml` changelog grouping.
+- Conventional Commits: `feat:`, `fix:`, `docs:`, `ci:`, `test:`, `refactor:`, `chore:` — these feed `.goreleaser.chippy.yml` changelog grouping.
 - PR body ends with `Closes #N`.
 - Squash-merge with `--delete-branch`. Defer follow-ups by filing new issues.
+
+## Release tag scheme
+- chippy ships under bare `vX.Y.Z` tags. Goreleaser via `.goreleaser.chippy.yml` (last released: `v1.0.0`).
+- nessy ships under `nessy-vX.Y.Z` tags. Custom multi-OS workflow (no goreleaser; alpha-only).
+- Full process in [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## Docs are part of every PR (not a follow-up)
 Every PR ships with the documentation changes its diff implies. Update **in the same PR**, never as a separate cleanup:
