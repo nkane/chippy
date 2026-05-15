@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/nkane/chippy/internal/nes/joypad"
 )
 
 // TestDemo_HelloBG_Inspect (skipped by default — guarded with
@@ -12,6 +14,64 @@ import (
 // before pinning helloBGFrameSHA. Run with:
 //
 //	CHIPPY_DEMO_INSPECT=1 go test -run TestDemo_HelloBG_Inspect -v ./cmd/nessy/...
+//
+// TestDemo_InputEcho_Inspect renders the input-echo demo with a
+// caller-selected button held (CHIPPY_DEMO_BUTTON env), prints
+// summary stats + a textual screenshot. Skipped without
+// CHIPPY_DEMO_INSPECT. Examples:
+//
+//	CHIPPY_DEMO_INSPECT=1 go test -run TestDemo_InputEcho_Inspect -v ./cmd/nessy/...
+//	CHIPPY_DEMO_INSPECT=1 CHIPPY_DEMO_BUTTON=Up go test ...
+func TestDemo_InputEcho_Inspect(t *testing.T) {
+	if os.Getenv("CHIPPY_DEMO_INSPECT") == "" {
+		t.Skip("set CHIPPY_DEMO_INSPECT=1 to render this demo")
+	}
+	romPath := filepath.Join("..", "..", "roms", "demos", "input-echo", "input-echo.nes")
+	setup := func(bus *nesBus) {
+		switch os.Getenv("CHIPPY_DEMO_BUTTON") {
+		case "Up":
+			bus.joy.P1.Set(joypad.ButtonUp, true)
+		case "Down":
+			bus.joy.P1.Set(joypad.ButtonDown, true)
+		case "Left":
+			bus.joy.P1.Set(joypad.ButtonLeft, true)
+		case "Right":
+			bus.joy.P1.Set(joypad.ButtonRight, true)
+		case "A":
+			bus.joy.P1.Set(joypad.ButtonA, true)
+		case "B":
+			bus.joy.P1.Set(joypad.ButtonB, true)
+		case "Select":
+			bus.joy.P1.Set(joypad.ButtonSelect, true)
+		case "Start":
+			bus.joy.P1.Set(joypad.ButtonStart, true)
+		}
+	}
+	fb, _ := runDemoFramesInternal(t, romPath, 7, setup)
+	seen := map[[3]byte]int{}
+	for i := 0; i < len(fb); i += 4 {
+		k := [3]byte{fb[i], fb[i+1], fb[i+2]}
+		seen[k]++
+	}
+	t.Logf("distinct RGB triplets: %d", len(seen))
+	for k, n := range seen {
+		t.Logf("  %02X %02X %02X  x%d", k[0], k[1], k[2], n)
+	}
+	t.Log("rough ASCII map (top half of screen):")
+	for y := 0; y < 240; y += 4 {
+		var row [64]byte
+		for x := 0; x < 256; x += 4 {
+			off := (y*256 + x) * 4
+			if int(fb[off])+int(fb[off+1])+int(fb[off+2]) > 400 {
+				row[x/4] = '#'
+			} else {
+				row[x/4] = '.'
+			}
+		}
+		t.Log(string(row[:]))
+	}
+}
+
 func TestDemo_HelloBG_Inspect(t *testing.T) {
 	if os.Getenv("CHIPPY_DEMO_INSPECT") == "" {
 		t.Skip("set CHIPPY_DEMO_INSPECT=1 to render this demo")
