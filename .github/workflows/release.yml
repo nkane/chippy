@@ -147,6 +147,12 @@ jobs:
   # attach their artifacts via `gh release upload --clobber`. No
   # cosign / SBOM for nessy v0.1 alpha — those land when nessy
   # graduates.
+  #
+  # Both darwin targets build on `macos-latest` (Apple Silicon). The
+  # amd64 variant cross-compiles via clang's `-target x86_64-apple-macos`
+  # — the macOS SDK ships both arch slices, so CGO + Ebiten just
+  # work. Previously the matrix used `macos-13` for darwin/amd64, but
+  # that runner pool has unpredictable multi-hour queues (#208).
   nessy-build:
     if: startsWith(github.ref_name, 'nessy-v')
     strategy:
@@ -158,12 +164,12 @@ jobs:
             goarch: amd64
             binary: nessy
             archive_ext: tar.gz
-          - os: macos-latest      # arm64
+          - os: macos-latest      # arm64; native build
             goos: darwin
             goarch: arm64
             binary: nessy
             archive_ext: tar.gz
-          - os: macos-13          # x86_64
+          - os: macos-latest      # arm64 runner; cross-compile for amd64
             goos: darwin
             goarch: amd64
             binary: nessy
@@ -197,10 +203,23 @@ jobs:
 
       - name: Build nessy
         shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '1'
         run: |
+          # darwin/amd64 from an Apple Silicon runner needs an explicit
+          # clang -target so the linker pulls the x86_64 SDK slice. The
+          # macOS SDK on `macos-latest` ships both slices; this just
+          # tells CGO which to use.
+          if [ "${{ matrix.goos }}" = "darwin" ] && [ "${{ matrix.goarch }}" = "amd64" ] && [ "$(uname -m)" = "arm64" ]; then
+            export CC="cc -target x86_64-apple-macos"
+            export CXX="c++ -target x86_64-apple-macos"
+          fi
           mkdir -p dist
           go build -tags=nessy -trimpath -ldflags="-s -w" \
             -o "dist/${{ matrix.binary }}" ./cmd/nessy
+          file "dist/${{ matrix.binary }}" || true
 
       - name: Package
         shell: bash
