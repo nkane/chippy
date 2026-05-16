@@ -361,6 +361,19 @@ func (m *Model) runCommand(line string) string {
 			return fmt.Sprintf("%d breakpoints", len(m.Breakpoints))
 		}
 		return m.cmdBP(args)
+	case "syms", "symbols":
+		if m.Syms == nil || !m.Syms.Has() {
+			return "no symbols loaded (pass -dbg PATH or assemble with -g)"
+		}
+		m.ShowSyms = true
+		m.SymsCursor = 0
+		m.SymsOffset = 0
+		if len(args) > 0 {
+			m.SymsFilter = strings.Join(args, " ")
+		} else {
+			m.SymsFilter = ""
+		}
+		return "symbols"
 	case "bpr":
 		return m.cmdMemBP(args, MemBPRead)
 	case "bpw":
