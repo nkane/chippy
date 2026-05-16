@@ -10,6 +10,7 @@ import (
 
 	"github.com/nkane/chippy/internal/cpu"
 	"github.com/nkane/chippy/internal/dap"
+	"github.com/nkane/chippy/internal/symbols"
 	"github.com/nkane/chippy/internal/tui"
 )
 
@@ -33,7 +34,11 @@ func runDAPAttach(addr string) {
 		fmt.Fprintln(os.Stderr, "dap-attach:", err)
 		os.Exit(1)
 	}
-	runAttachedTUI(client, addr, fmt.Sprintf("attached: %s", addr))
+	runAttachedTUI(attachedTUIConfig{
+		client: client,
+		addr:   addr,
+		status: fmt.Sprintf("attached: %s", addr),
+	})
 }
 
 // dialAndHandshake opens a DAP connection and drives initialize +
@@ -72,33 +77,65 @@ func dialAndHandshake(addr string, stopOnEntry bool) (*dap.Client, error) {
 	return client, nil
 }
 
+// attachedTUIConfig bundles every knob runAttachedTUI accepts so
+// adding new optional knobs doesn't keep ballooning the function
+// signature.
+type attachedTUIConfig struct {
+	client *dap.Client
+	addr   string
+	status string
+
+	// syms / srcMap (optional) populate the TUI's symbol-name +
+	// PC→source-line maps so the disasm panel renders names and `v`
+	// can switch to the source panel. Both processes (this chippy +
+	// the remote nessy) run on the same machine, so loading the
+	// `.dbg` locally is the cheapest path to source-view.
+	syms   *symbols.Table
+	srcMap *symbols.SourceMap
+
+	// showSource defaults the panel to source-view on startup (vs
+	// disasm). `-nessy` flips this on so the user sees ca65 lines
+	// immediately; `-dap-attach` keeps the disasm-first default
+	// since the attached process may not have local source.
+	showSource bool
+
+	// onExit hooks run after RemoteSource.Close() and before this
+	// helper returns. Launcher uses it to SIGTERM the nessy child.
+	onExit []func()
+}
+
 // runAttachedTUI builds the mirror CPU + RAM, wraps the live client in
 // a RemoteSource, refreshes initial register state, and runs the TUI
 // to completion. On exit (clean or error) the RemoteSource is closed
 // — which sends a DAP `disconnect` and tears down the wire.
-//
-// `onExit`, if non-nil, runs after RemoteSource.Close() and before
-// returning to the caller. The launcher uses it to SIGTERM the nessy
-// child process so the game window goes away when the TUI quits.
-func runAttachedTUI(client *dap.Client, addr, initialStatus string, onExit ...func()) {
+func runAttachedTUI(c attachedTUIConfig) {
 	// Mirror state. The TUI's display panels read these fields
 	// directly; RemoteSource writes them after every step / refresh.
 	ram := cpu.NewRAM()
 	mirror := cpu.NewVariant(ram, cpu.VariantNMOS)
 
-	source := tui.NewRemoteSource(client, mirror, ram, addr)
+	source := tui.NewRemoteSource(c.client, mirror, ram, c.addr)
 	if err := source.RefreshRegs(); err != nil {
 		fmt.Fprintln(os.Stderr, "chippy: initial register sync:", err)
 		// Continue anyway — the next stopped event will refresh.
 	}
 
 	model := tui.New(mirror, ram).WithSource(source)
-	model.Status = initialStatus
+	if c.syms != nil {
+		model = model.WithSymbols(c.syms)
+	}
+	if c.srcMap != nil {
+		model = model.WithSourceMap(c.srcMap)
+	}
+	if c.showSource {
+		model.ShowSource = true
+	}
+	model.Status = c.status
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	_, runErr := p.Run()
 	_ = source.Close()
-	for _, fn := range onExit {
+	for _, fn := range c.onExit {
 		if fn != nil {
 			fn()
 		}
