@@ -51,6 +51,15 @@ func newGame(bus *nesBus, cpuMu *sync.Mutex) *game {
 
 func (g *game) Update() error {
 	g.pollInput()
+	// When a DAP client is attached, the server's `continue` runLoop
+	// (or its single-step requests) is the sole stepper. The game
+	// loop yields so the user can pause, single-step, set
+	// breakpoints, etc. without the game running away underneath
+	// them. Draw still fires every frame, so the screen reflects
+	// whatever framebuffer state the PPU has rendered up to now.
+	if dapAttached.Load() > 0 {
+		return nil
+	}
 	g.cpuMu.Lock()
 	defer g.cpuMu.Unlock()
 	target := g.bus.cpu.Cycles + cpuCyclesPerFrame
