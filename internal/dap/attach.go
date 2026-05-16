@@ -34,6 +34,18 @@ type AttachConfig struct {
 	// concurrent access from the host (e.g. the TUI's `:dap` command).
 	// nil = no concurrent access; server runs unlocked.
 	CPUMu *sync.Mutex
+
+	// OnAttached fires once after the editor's `attach` request
+	// succeeds. Hosts use this to pause their own run loop while a
+	// client is driving the CPU — e.g. nessy gates its game loop on
+	// "has a client attached" so the only CPU stepper is the server's
+	// `continue` runLoop. Optional; nil means "do nothing".
+	OnAttached func()
+
+	// OnDisconnected mirrors OnAttached. Fires when the server tears
+	// down: either via a `disconnect` request or wire EOF in Serve().
+	// Hosts resume their autonomous run loop. Optional.
+	OnDisconnected func()
 }
 
 // AttachExisting wires an already-constructed debuggee into the server
@@ -57,6 +69,8 @@ func (s *Server) AttachExisting(cfg AttachConfig) error {
 	s.textOut = cfg.TextOut
 	s.keyIn = cfg.KeyIn
 	s.cpuMu = cfg.CPUMu
+	s.onAttached = cfg.OnAttached
+	s.onDisconnected = cfg.OnDisconnected
 	return nil
 }
 
@@ -82,6 +96,12 @@ func (s *Server) handleAttach(req Request) {
 		}
 	}
 	s.sendResponse(req, nil)
+	// Notify the host that a client has attached. Hosts use this to
+	// gate their own run loops (e.g. nessy pauses its game loop while
+	// the DAP server owns execution).
+	if s.onAttached != nil {
+		s.onAttached()
+	}
 	// StopOnEntry: pointer-valued, three states.
 	//   nil  → default: emit stopped(entry) so the editor renders state.
 	//   true → same as nil.

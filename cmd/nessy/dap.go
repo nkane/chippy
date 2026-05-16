@@ -7,9 +7,21 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/nkane/chippy/internal/dap"
 )
+
+// dapAttached counts active DAP sessions. The game loop checks this
+// before stepping the CPU — when one or more clients are attached,
+// the server's `continue` runLoop owns execution and the game loop
+// only paints frames. nil → no client → autonomous run.
+//
+// Package-level since there is one game per process. The counter is
+// atomic because OnAttached / OnDisconnected fire from the DAP
+// session goroutine while the game loop reads from the Ebiten Update
+// goroutine.
+var dapAttached atomic.Int32
 
 // runDAPListener accepts incoming DAP connections on the given TCP port
 // and serves each one against the live NES bus. The cpuMu is shared
@@ -18,12 +30,12 @@ import (
 // `:dap PORT` (internal/tui/dap_attach.go) — see issue #97 for design
 // notes.
 //
-// Currently the DAP server's own continue loop and nessy's game loop
-// will both call cpu.Step() under the same mutex once a client issues
-// `continue`. The mutex serializes them but they double-step the CPU.
-// For v0.1 this is acceptable (TUI `:dap` path has the same property);
-// real "pause" semantics that gate the game loop on a remote flag is a
-// v0.2 polish item.
+// OnAttached / OnDisconnected callbacks increment / decrement
+// `dapAttached`. The game loop checks that counter to decide whether
+// to step the CPU. When a client attaches, the server's runLoop (set
+// up by `continue`) becomes the sole stepper; the game loop yields.
+// When the last client disconnects, the game loop resumes its
+// autonomous run.
 func runDAPListener(port int, bus *nesBus, cpuMu *sync.Mutex) {
 	addr := fmt.Sprintf(":%d", port)
 	ln, err := net.Listen("tcp", addr)
@@ -46,6 +58,12 @@ func runDAPListener(port int, bus *nesBus, cpuMu *sync.Mutex) {
 				RAM:   bus.ram,
 				MMIO:  bus.mmio,
 				CPUMu: cpuMu,
+				OnAttached: func() {
+					dapAttached.Add(1)
+				},
+				OnDisconnected: func() {
+					dapAttached.Add(-1)
+				},
 			}
 			if err := s.AttachExisting(cfg); err != nil {
 				fmt.Fprintln(os.Stderr, "nessy: DAP attach:", err)

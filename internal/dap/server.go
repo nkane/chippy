@@ -86,6 +86,19 @@ type Server struct {
 	// RAM / peripheral access with a concurrently-running TUI. nil
 	// means single-surface mode; the locking helpers below are no-ops.
 	cpuMu *sync.Mutex
+
+	// onAttached / onDisconnected fire at the request lifecycle
+	// boundaries: handleAttach success + disconnect/EOF. Hosts use
+	// these to gate their own run loops (e.g. nessy pauses its game
+	// loop while a client is attached so the server's `continue`
+	// runLoop owns execution). nil = no-op. Set via AttachConfig.
+	onAttached     func()
+	onDisconnected func()
+
+	// disconnectedFired guards onDisconnected against double-fire
+	// when both Serve()'s EOF exit and a client-initiated disconnect
+	// race to invoke it.
+	disconnectedFired atomic.Bool
 }
 
 // lockCPU acquires s.cpuMu if present. Paired with unlockCPU. Used by
@@ -123,8 +136,11 @@ func NewServer(r io.Reader, w io.Writer) *Server {
 }
 
 // Serve runs the dispatch loop until EOF, write failure, or a successful
-// disconnect/terminate. Returns nil on a clean shutdown.
+// disconnect/terminate. Returns nil on a clean shutdown. Fires
+// OnDisconnected exactly once on exit so the host can resume its own
+// run loop.
 func (s *Server) Serve() error {
+	defer s.fireDisconnected()
 	for {
 		if s.terminated {
 			return nil
@@ -408,6 +424,7 @@ func (s *Server) handleDisconnect(req Request) {
 		_ = s.tracer.Close()
 	}
 	s.terminated = true
+	s.fireDisconnected()
 }
 
 func (s *Server) handleTerminate(req Request) {
@@ -418,6 +435,21 @@ func (s *Server) handleTerminate(req Request) {
 		_ = s.tracer.Close()
 	}
 	s.terminated = true
+	s.fireDisconnected()
+}
+
+// fireDisconnected invokes the host's OnDisconnected callback (if any)
+// exactly once per Server. The `disconnectedFired` guard handles the
+// case where Serve()'s EOF path and a client-initiated disconnect
+// request both try to fire it.
+func (s *Server) fireDisconnected() {
+	if s.onDisconnected == nil {
+		return
+	}
+	if s.disconnectedFired.Swap(true) {
+		return
+	}
+	s.onDisconnected()
 }
 
 // stopRunLoop signals the run-loop goroutine (if any) to exit and waits
