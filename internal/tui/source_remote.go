@@ -77,16 +77,22 @@ func (s *RemoteSource) demuxEvents() {
 		if s.closed.Load() {
 			return
 		}
-		// Route `stopped` to the request-response wait helper; every
-		// other event (output, terminated, etc.) goes to the TUI.
+		// `stopped` events need to reach TWO places:
+		//   - s.stopped — consumed by Step's waitForStop for the
+		//     request-response synchronization of a single stepIn.
+		//   - s.external — consumed by the TUI's dapEventMsg pump
+		//     so the source-view, registers, and run flag refresh
+		//     when the server stops mid-continue (breakpoint hit,
+		//     pause request, exception).
+		// Earlier routing sent stopped events ONLY to s.stopped, so
+		// after `continue` + bp-hit the TUI never refreshed until
+		// the user toggled state manually — the entire screen
+		// looked frozen.
 		if ev.Event == "stopped" {
 			select {
 			case s.stopped <- ev:
 			default:
-				// stopped channel full — drop to keep the read loop
-				// moving. Step's waitForStop will see the next one.
 			}
-			continue
 		}
 		select {
 		case s.external <- ev:
