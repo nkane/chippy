@@ -31,7 +31,7 @@ func referenceADC(n1, n2, cin uint8, cmos bool) (a uint8, c, n, v, z bool) {
 	binByte := byte(bin)
 	flagNbin := binByte&0x80 != 0
 	flagZbin := binByte == 0
-	flagV := ((^(uint16(n1)^uint16(n2)))&(uint16(n1)^bin))&0x80 != 0
+	flagV := ((^(uint16(n1) ^ uint16(n2)))&(uint16(n1)^bin))&0x80 != 0
 
 	al := uint16(n1&0x0F) + uint16(n2&0x0F) + uint16(cin)
 	if al >= 0x0A {
@@ -63,7 +63,7 @@ func referenceSBC(n1, n2, cin uint8, cmos bool) (a uint8, c, n, v, z bool) {
 	bin := uint16(n1) + w + uint16(cin)
 	binByte := byte(bin)
 	flagC := bin > 0xFF
-	flagV := ((^(uint16(n1)^w))&(uint16(n1)^bin))&0x80 != 0
+	flagV := ((^(uint16(n1) ^ w))&(uint16(n1)^bin))&0x80 != 0
 	flagNbin := binByte&0x80 != 0
 	flagZbin := binByte == 0
 
