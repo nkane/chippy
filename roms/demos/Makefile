@@ -18,7 +18,11 @@ DEMOS := hello-bg input-echo vblank-bounce
 
 CA65      := ca65
 LD65      := ld65
-CA65FLAGS := -t none
+# -g emits debug info in the .o file; --dbgfile writes a sibling
+# `.dbg` next to each `.nes` so nessy can auto-detect the source map
+# (issue #211). The dbg + map files are committed alongside the .nes
+# artifact so the source-aware TUI attach works out-of-the-box.
+CA65FLAGS := -t none -g
 LD65FLAGS :=
 
 .PHONY: all clean $(DEMOS)
@@ -32,10 +36,10 @@ $(1): $(1)/$(1).nes
 
 $(1)/$(1).nes: $(1)/$(1).s $(1)/$(1).cfg
 	$$(CA65) $$(CA65FLAGS) -o $(1)/$(1).o $(1)/$(1).s
-	$$(LD65) $$(LD65FLAGS) -C $(1)/$(1).cfg -m $(1)/$(1).map -o $(1)/$(1).nes $(1)/$(1).o
+	$$(LD65) $$(LD65FLAGS) -C $(1)/$(1).cfg -m $(1)/$(1).map --dbgfile $(1)/$(1).dbg -o $(1)/$(1).nes $(1)/$(1).o
 endef
 
 $(foreach d,$(DEMOS),$(eval $(call demo_rule,$(d))))
 
 clean:
-	$(RM) */*.o */*.map */*.nes
+	$(RM) */*.o */*.map */*.nes */*.dbg

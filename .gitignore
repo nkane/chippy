@@ -12,6 +12,11 @@
 # so `make -C web serve` works without re-building the example/ ROMs from source.
 !web/demos/*.bin
 
+# nessy demo ROMs — built artifacts committed so `nessy game.nes` and the
+# nessy-side source-view (-dap-attach) work without rebuilding from ca65.
+!roms/demos/*/*.nes
+!roms/demos/*/*.dbg
+
 # MkDocs build output
 site/
 _site/

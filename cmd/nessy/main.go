@@ -12,17 +12,19 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 
 	"github.com/nkane/chippy/internal/nes"
+	"github.com/nkane/chippy/internal/symbols"
 )
 
 func main() {
 	var (
 		romPath = flag.String("rom", "", "iNES ROM path (positional arg also accepted)")
+		dbgPath = flag.String("dbg", "", "cc65/ld65 .dbg symbol file (auto-detected as <rom>.dbg if omitted)")
 		dapPort = flag.Int("dap-port", 14785, "DAP server TCP port; 0 disables the listener")
 		scale   = flag.Int("scale", 3, "integer window scale (3 → 768x720)")
 		mute    = flag.Bool("mute", false, "disable audio (no-op in v0.1, APU lands in v0.2)")
 	)
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: nessy [-rom PATH | PATH] [-dap-port N] [-scale N] [-mute]\n\n")
+		fmt.Fprintf(os.Stderr, "usage: nessy [-rom PATH | PATH] [-dbg PATH] [-dap-port N] [-scale N] [-mute]\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -59,12 +61,37 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Optional ca65 / ld65 .dbg symbol + source map. Auto-detect as
+	// `<rom>.dbg` sibling if the user didn't pass -dbg. Missing /
+	// unreadable files surface as warnings, not errors — running
+	// without source info is fine.
+	dbg := *dbgPath
+	if dbg == "" {
+		dbg = symbols.SiblingDbg(*romPath)
+	}
+	var (
+		syms   *symbols.Table
+		srcMap *symbols.SourceMap
+	)
+	if dbg != "" {
+		if t, err := symbols.LoadDbg(dbg); err != nil {
+			fmt.Fprintln(os.Stderr, "nessy: load dbg:", err)
+		} else {
+			syms = t
+		}
+		if sm, err := symbols.LoadSourceMap(dbg); err != nil {
+			fmt.Fprintln(os.Stderr, "nessy: load source map:", err)
+		} else {
+			srcMap = sm
+		}
+	}
+
 	// CPUMu serializes the game loop's per-frame stepping with any DAP
 	// requests that arrive concurrently. Same pattern chippy's `:dap`
 	// command uses.
 	cpuMu := &sync.Mutex{}
 	if *dapPort > 0 {
-		go runDAPListener(*dapPort, bus, cpuMu)
+		go runDAPListener(*dapPort, bus, cpuMu, syms, srcMap)
 		fmt.Fprintf(os.Stderr, "nessy: DAP listener on :%d (attach with `chippy -dap-attach tcp:localhost:%d`)\n",
 			*dapPort, *dapPort)
 	}

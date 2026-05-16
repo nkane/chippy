@@ -20,7 +20,7 @@ The first homemade nessy demo. Renders a static "HELLO NESSY" string centered on
 make -C roms/demos hello-bg
 ```
 
-The built `hello-bg.nes` is committed so toolchain installation isn't required to run or test the demo.
+The built `hello-bg.nes` is committed alongside its `hello-bg.dbg` (ca65 / ld65 source-line map) so toolchain installation isn't required to run or debug the demo. The `.dbg` powers nessy's `-dap-attach` source-view panel.
 
 ## Run
 

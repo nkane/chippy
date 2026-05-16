@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/nkane/chippy/internal/dap"
+	"github.com/nkane/chippy/internal/symbols"
 )
 
 // dapAttached counts active DAP sessions. The game loop checks this
@@ -36,7 +37,7 @@ var dapAttached atomic.Int32
 // up by `continue`) becomes the sole stepper; the game loop yields.
 // When the last client disconnects, the game loop resumes its
 // autonomous run.
-func runDAPListener(port int, bus *nesBus, cpuMu *sync.Mutex) {
+func runDAPListener(port int, bus *nesBus, cpuMu *sync.Mutex, syms *symbols.Table, srcMap *symbols.SourceMap) {
 	addr := fmt.Sprintf(":%d", port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -54,10 +55,12 @@ func runDAPListener(port int, bus *nesBus, cpuMu *sync.Mutex) {
 			defer func() { _ = c.Close() }()
 			s := dap.NewServer(c, c)
 			cfg := dap.AttachConfig{
-				CPU:   bus.cpu,
-				RAM:   bus.ram,
-				MMIO:  bus.mmio,
-				CPUMu: cpuMu,
+				CPU:    bus.cpu,
+				RAM:    bus.ram,
+				MMIO:   bus.mmio,
+				CPUMu:  cpuMu,
+				Syms:   syms,
+				SrcMap: srcMap,
 				OnAttached: func() {
 					dapAttached.Add(1)
 				},
