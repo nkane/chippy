@@ -91,7 +91,21 @@ func runDAPListener(port int, bus *nesBus, cpuMu *sync.Mutex, syms *symbols.Tabl
 					fmt.Fprintln(os.Stderr, "nessy: DAP client attached — debugger has control of CPU execution")
 				},
 				OnDisconnected: func() {
-					dapAttached.Add(-1)
+					// Clamp at zero. The dap.Server promises to
+					// pair OnAttached with OnDisconnected, but we
+					// keep the floor as defensive depth — a stray
+					// disconnect for an un-attached session would
+					// otherwise drop the gate even though the
+					// real session is still running.
+					for {
+						cur := dapAttached.Load()
+						if cur <= 0 {
+							return
+						}
+						if dapAttached.CompareAndSwap(cur, cur-1) {
+							return
+						}
+					}
 				},
 			}
 			if err := s.AttachExisting(cfg); err != nil {
