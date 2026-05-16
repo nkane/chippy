@@ -3,7 +3,10 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/hajimehoshi/ebiten/v2"
 
@@ -49,6 +52,13 @@ func newGame(bus *nesBus, cpuMu *sync.Mutex) *game {
 	return &game{bus: bus, cpuMu: cpuMu}
 }
 
+// loopSteppedBanner is a one-shot diagnostic: prints to stderr the
+// first time the game loop actually advances the CPU (gates released).
+// Catches "gate races" — if this prints with PC=$C000 right after a
+// DAP attach, the wait gate worked. If it prints earlier with no
+// "debugger attached" line printed, the gate failed to engage.
+var loopSteppedBanner atomic.Bool
+
 func (g *game) Update() error {
 	g.pollInput()
 	// Gate the CPU stepping on two flags:
@@ -62,6 +72,11 @@ func (g *game) Update() error {
 	// framebuffer state the PPU has rendered up to now.
 	if waitForAttach.Load() || dapAttached.Load() > 0 {
 		return nil
+	}
+	if !loopSteppedBanner.Swap(true) {
+		fmt.Fprintf(os.Stderr,
+			"nessy: game loop entering autonomous-step mode at PC=$%04X cycles=%d (waitForAttach=%v dapAttached=%d)\n",
+			g.bus.cpu.PC, g.bus.cpu.Cycles, waitForAttach.Load(), dapAttached.Load())
 	}
 	g.cpuMu.Lock()
 	defer g.cpuMu.Unlock()

@@ -88,6 +88,7 @@ func runDAPListener(port int, bus *nesBus, cpuMu *sync.Mutex, syms *symbols.Tabl
 					// then drop the boot wait.
 					dapAttached.Add(1)
 					waitForAttach.Store(false)
+					fmt.Fprintln(os.Stderr, "nessy: DAP client attached — debugger has control of CPU execution")
 				},
 				OnDisconnected: func() {
 					dapAttached.Add(-1)
