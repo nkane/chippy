@@ -241,7 +241,17 @@ func (m *Model) runCommand(line string) string {
 		bp := newBP(addr)
 		bp.HitLimit = -1
 		m.Breakpoints[addr] = bp
+		m.syncSourceBreakpoints()
 		m.Running = true
+		// In attach mode the server owns execution; explicitly tell
+		// it to continue. Local mode steps via tickMsg → m.step() and
+		// doesn't need an extra kick.
+		if m.Source != nil && m.Source.Attached() {
+			if err := m.Source.Continue(); err != nil {
+				m.Running = false
+				return fmt.Sprintf("continue: %v", err)
+			}
+		}
 		return fmt.Sprintf("running to $%04X", addr)
 	case "watch", "w":
 		if len(args) == 0 {
