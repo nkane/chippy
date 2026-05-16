@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -106,6 +107,7 @@ func (s *RemoteSource) Step() int {
 		return 0
 	}
 	_ = s.refreshRegs()
+	_ = s.RefreshMemory()
 	return 0
 }
 
@@ -127,6 +129,7 @@ func (s *RemoteSource) StepBack() bool {
 		return false
 	}
 	_ = s.refreshRegs()
+	_ = s.RefreshMemory()
 	return true
 }
 
@@ -165,6 +168,50 @@ func (s *RemoteSource) SetBreakpoints(pcs []uint16) error {
 // event arrives via Events() so the mirror catches up with the new
 // PC.
 func (s *RemoteSource) RefreshRegs() error { return s.refreshRegs() }
+
+// RefreshMemory pulls the full CPU-bus memory ($0000-$FFFF) via DAP
+// `readMemory` and writes it into the mirror's RAM so display panels
+// (disasm, memory) render correct values. Called once on attach and
+// then on every `stopped` event (CPU may have written RAM between
+// stops).
+//
+// 64 KiB per fetch is small enough to feel instant over localhost
+// (~64 KiB / 100+ MB/s = <1 ms); over a real network the request
+// would benefit from a per-page lazy cache, but that's a v0.x
+// refinement.
+//
+// For NROM cartridges the $8000-$FFFF range never changes after
+// reset; for bank-switching mappers (MMC1+, v0.3+ work) this
+// per-stop refresh keeps the mirror current automatically.
+func (s *RemoteSource) RefreshMemory() error {
+	resp, err := s.client.Request("readMemory", map[string]any{
+		"memoryReference": "$0000",
+		"offset":          0,
+		"count":           0x10000,
+	})
+	if err != nil {
+		return fmt.Errorf("readMemory: %w", err)
+	}
+	if !resp.Success {
+		return fmt.Errorf("readMemory: %s", resp.Message)
+	}
+	var body struct {
+		Address string `json:"address"`
+		Data    string `json:"data"`
+	}
+	if err := remarshal(resp.Body, &body); err != nil {
+		return fmt.Errorf("readMemory body: %w", err)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(body.Data)
+	if err != nil {
+		return fmt.Errorf("readMemory base64 decode: %w", err)
+	}
+	if len(decoded) > 0x10000 {
+		decoded = decoded[:0x10000]
+	}
+	s.ram.Load(0, decoded)
+	return nil
+}
 
 // Attached returns true for RemoteSource.
 func (s *RemoteSource) Attached() bool { return true }

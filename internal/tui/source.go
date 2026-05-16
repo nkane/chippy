@@ -82,6 +82,14 @@ type Source interface {
 	// the DAP requests to pull PC + regs and writes them into the
 	// mirror.
 	RefreshRegs() error
+
+	// RefreshMemory forces a mirror-sync of CPU bus memory.
+	// LocalSource is a no-op (mirror IS live RAM); RemoteSource
+	// issues a DAP `readMemory` request and writes the bytes into
+	// the mirror's RAM so display panels (disasm, memory) render
+	// correct values instead of zero-byte BRK chains. Called on
+	// every `stopped` event + once on attach.
+	RefreshMemory() error
 }
 
 // LocalSource is the in-process Source backing the default TUI mode.
@@ -154,6 +162,9 @@ func (s *LocalSource) Events() <-chan dap.Event { return nil }
 
 // RefreshRegs is a no-op for LocalSource — the mirror IS the live CPU.
 func (s *LocalSource) RefreshRegs() error { return nil }
+
+// RefreshMemory is a no-op for LocalSource — the mirror IS the live RAM.
+func (s *LocalSource) RefreshMemory() error { return nil }
 
 // Compile-time check.
 var _ Source = (*LocalSource)(nil)

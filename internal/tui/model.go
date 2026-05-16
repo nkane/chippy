@@ -648,6 +648,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "stopped":
 			m.Running = false
 			_ = m.Source.RefreshRegs()
+			_ = m.Source.RefreshMemory()
 			m.Status = fmt.Sprintf("stopped at $%04X", m.CPU.PC)
 		case "terminated":
 			return m, tea.Quit

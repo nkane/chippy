@@ -138,6 +138,39 @@ func TestRemoteSource_AttachedAndAddress(t *testing.T) {
 	}
 }
 
+// RefreshMemory pulls the full $0000-$FFFF window from the server
+// and writes it into the mirror's RAM. Without this, the TUI's
+// disasm view in attach mode renders all $00 (BRK) — see #220.
+func TestRemoteSource_RefreshMemory_PopulatesMirror(t *testing.T) {
+	conn, serverCPU := spinUpServerCPU(t)
+	client := initAttachedClient(t, conn)
+
+	mirrorRAM := cpu.NewRAM()
+	mirrorCPU := cpu.New(mirrorRAM)
+	src := NewRemoteSource(client, mirrorCPU, mirrorRAM, "tcp:test")
+	defer func() { _ = src.Close() }()
+
+	// Pre-RefreshMemory: mirror is all zeros even though the server
+	// has a program at $C000.
+	if mirrorRAM.Read(0xC000) != 0x00 {
+		t.Fatalf("pre-refresh mirror $C000 = $%02X; want $00 (uninitialized)", mirrorRAM.Read(0xC000))
+	}
+
+	if err := src.RefreshMemory(); err != nil {
+		t.Fatalf("RefreshMemory: %v", err)
+	}
+
+	// Mirror now reflects the server's program bytes.
+	for i, want := range []byte{0xA9, 0x42, 0x8D, 0x00, 0x02, 0x4C, 0x05, 0xC0} {
+		addr := uint16(0xC000 + i)
+		got := mirrorRAM.Read(addr)
+		serverGot := serverCPU.Bus.Read(addr)
+		if got != want {
+			t.Errorf("mirror $%04X = $%02X; want $%02X (server has $%02X)", addr, got, want, serverGot)
+		}
+	}
+}
+
 // LocalSource is the boring case but worth pinning down: Step should
 // advance the CPU's PC by the instruction size.
 func TestLocalSource_StepAdvancesPC(t *testing.T) {

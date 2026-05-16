@@ -119,6 +119,10 @@ func runAttachedTUI(c attachedTUIConfig) {
 		fmt.Fprintln(os.Stderr, "chippy: initial register sync:", err)
 		// Continue anyway — the next stopped event will refresh.
 	}
+	if err := source.RefreshMemory(); err != nil {
+		fmt.Fprintln(os.Stderr, "chippy: initial memory sync:", err)
+		// Continue anyway — disasm shows zeros until next stop.
+	}
 
 	model := tui.New(mirror, ram).WithSource(source)
 	if c.syms != nil {
