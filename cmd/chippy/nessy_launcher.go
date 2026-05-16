@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strconv"
 	"time"
+
+	"github.com/nkane/chippy/internal/symbols"
 )
 
 // runNessyLauncher spawns a nessy child process, waits for its DAP
@@ -67,10 +69,46 @@ func runNessyLauncher(romPath, nessyBin string) {
 		os.Exit(1)
 	}
 
-	runAttachedTUI(client, addr,
-		fmt.Sprintf("nessy: %s (paused — press r to run, s to step)", filepath.Base(romPath)),
-		func() { _ = killChild(cmd) },
-	)
+	// Source view + symbol resolution. Both processes run on the
+	// same machine and the .dbg references local file paths, so the
+	// cheapest path is to load it ourselves rather than wire DAP
+	// `source` / `loadedSources` requests just yet. nessy already
+	// loaded the same file on its side; the redundancy is fine.
+	syms, srcMap := loadSiblingDbg(romPath)
+
+	runAttachedTUI(attachedTUIConfig{
+		client:     client,
+		addr:       addr,
+		status:     fmt.Sprintf("nessy: %s (paused — press r to run, s to step)", filepath.Base(romPath)),
+		syms:       syms,
+		srcMap:     srcMap,
+		showSource: srcMap != nil, // source-view first if we have line info
+		onExit:     []func(){func() { _ = killChild(cmd) }},
+	})
+}
+
+// loadSiblingDbg auto-detects a `.dbg` next to the ROM and loads the
+// symbol table + source map. Missing or unparseable files surface as
+// warnings, not fatal errors — the launcher still opens the TUI,
+// just without source-view.
+func loadSiblingDbg(romPath string) (*symbols.Table, *symbols.SourceMap) {
+	dbg := symbols.SiblingDbg(romPath)
+	if dbg == "" {
+		return nil, nil
+	}
+	var syms *symbols.Table
+	var srcMap *symbols.SourceMap
+	if t, err := symbols.LoadDbg(dbg); err != nil {
+		fmt.Fprintln(os.Stderr, "chippy -nessy: load dbg:", err)
+	} else {
+		syms = t
+	}
+	if sm, err := symbols.LoadSourceMap(dbg); err != nil {
+		fmt.Fprintln(os.Stderr, "chippy -nessy: load source map:", err)
+	} else {
+		srcMap = sm
+	}
+	return syms, srcMap
 }
 
 // resolveNessyBinary picks the nessy executable. Search order:
