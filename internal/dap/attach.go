@@ -96,6 +96,11 @@ func (s *Server) handleAttach(req Request) {
 		}
 	}
 	s.sendResponse(req, nil)
+	// Record that a paired attach happened so fireDisconnected
+	// later can decide whether to invoke the host's OnDisconnected
+	// callback. Probe connections that never reach this point won't
+	// see OnDisconnected either.
+	s.attachedFired.Store(true)
 	// Notify the host that a client has attached. Hosts use this to
 	// gate their own run loops (e.g. nessy pauses its game loop while
 	// the DAP server owns execution).

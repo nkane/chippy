@@ -17,14 +17,15 @@ import (
 
 func main() {
 	var (
-		romPath = flag.String("rom", "", "iNES ROM path (positional arg also accepted)")
-		dbgPath = flag.String("dbg", "", "cc65/ld65 .dbg symbol file (auto-detected as <rom>.dbg if omitted)")
-		dapPort = flag.Int("dap-port", 14785, "DAP server TCP port; 0 disables the listener")
-		scale   = flag.Int("scale", 3, "integer window scale (3 → 768x720)")
-		mute    = flag.Bool("mute", false, "disable audio (no-op in v0.1, APU lands in v0.2)")
+		romPath   = flag.String("rom", "", "iNES ROM path (positional arg also accepted)")
+		dbgPath   = flag.String("dbg", "", "cc65/ld65 .dbg symbol file (auto-detected as <rom>.dbg if omitted)")
+		dapPort   = flag.Int("dap-port", 14785, "DAP server TCP port; 0 disables the listener")
+		scale     = flag.Int("scale", 3, "integer window scale (3 → 768x720)")
+		mute      = flag.Bool("mute", false, "disable audio (no-op in v0.1, APU lands in v0.2)")
+		waitDbg   = flag.Bool("wait-for-debugger", false, "pause the CPU at boot until a DAP client attaches (set by `chippy -nessy`)")
 	)
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: nessy [-rom PATH | PATH] [-dbg PATH] [-dap-port N] [-scale N] [-mute]\n\n")
+		fmt.Fprintf(os.Stderr, "usage: nessy [-rom PATH | PATH] [-dbg PATH] [-dap-port N] [-scale N] [-mute] [-wait-for-debugger]\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -84,6 +85,19 @@ func main() {
 		} else {
 			srcMap = sm
 		}
+	}
+
+	// If launched under `chippy -nessy …`, the user wants to attach
+	// before the game runs. Set the gate flag BEFORE starting the
+	// DAP listener so we can't race against an instant client
+	// connection.
+	if *waitDbg {
+		if *dapPort <= 0 {
+			fmt.Fprintln(os.Stderr, "nessy: -wait-for-debugger requires -dap-port > 0")
+			os.Exit(2)
+		}
+		waitForAttach.Store(true)
+		fmt.Fprintln(os.Stderr, "nessy: -wait-for-debugger active — CPU paused at boot until a DAP client attaches")
 	}
 
 	// CPUMu serializes the game loop's per-frame stepping with any DAP

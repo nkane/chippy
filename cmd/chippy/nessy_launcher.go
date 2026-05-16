@@ -39,7 +39,12 @@ func runNessyLauncher(romPath, nessyBin string) {
 		os.Exit(1)
 	}
 
-	cmd := exec.Command(bin, "-rom", romPath, "-dap-port", strconv.Itoa(port))
+	// `-wait-for-debugger` keeps nessy's game loop paused at the reset
+	// vector until our attach lands. Without it the launcher's spawn
+	// + dial + handshake takes ~100 ms while the game loop races
+	// ahead, ending up past the reset routine before we can issue
+	// the first stopped event.
+	cmd := exec.Command(bin, "-rom", romPath, "-dap-port", strconv.Itoa(port), "-wait-for-debugger")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -126,14 +131,17 @@ func resolveNessyBinary(override string) (string, error) {
 		}
 		return "", fmt.Errorf("-nessy-binary %q: %w", override, errors.New("not found"))
 	}
-	if p, err := exec.LookPath("nessy"); err == nil {
-		return p, nil
-	}
+	// Prefer a sibling of the running chippy binary before falling back
+	// to $PATH. Stale system-wide nessy installs shouldn't shadow a
+	// fresh local build the user just produced from the same checkout.
 	if self, err := os.Executable(); err == nil {
 		candidate := filepath.Join(filepath.Dir(self), nessyBaseName())
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, nil
 		}
+	}
+	if p, err := exec.LookPath("nessy"); err == nil {
+		return p, nil
 	}
 	return "", errors.New(
 		"nessy binary not found — install via `go install -tags=nessy github.com/nkane/chippy/cmd/nessy@latest`, " +

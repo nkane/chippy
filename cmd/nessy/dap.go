@@ -24,6 +24,17 @@ import (
 // goroutine.
 var dapAttached atomic.Int32
 
+// waitForAttach blocks the game loop's CPU stepping at boot when
+// nessy was launched under `chippy -nessy …`. Set by main from the
+// -wait-for-debugger flag BEFORE the DAP listener starts so a fast
+// client attach can't lose the race. Cleared the first time a DAP
+// client actually attaches (OnAttached fires).
+//
+// Note this is a one-shot gate: once cleared we don't re-arm on
+// disconnect. The user has confirmed they're driving the debugger;
+// closing the TUI shouldn't suddenly restart the game.
+var waitForAttach atomic.Bool
+
 // runDAPListener accepts incoming DAP connections on the given TCP port
 // and serves each one against the live NES bus. The cpuMu is shared
 // with the Ebiten game loop so concurrent requests never observe a
@@ -62,10 +73,39 @@ func runDAPListener(port int, bus *nesBus, cpuMu *sync.Mutex, syms *symbols.Tabl
 				Syms:   syms,
 				SrcMap: srcMap,
 				OnAttached: func() {
+					// Order matters. The game loop checks
+					// `waitForAttach || dapAttached>0`. If we
+					// cleared waitForAttach first and the loop
+					// raced through Update before dapAttached
+					// incremented, both gates would briefly read
+					// "off" — the loop would fall through, block
+					// on cpuMu (held by the dispatch handling
+					// this very attach), and on cpuMu release
+					// step ~30k cycles right past reset.
+					//
+					// Increment dapAttached FIRST so at least one
+					// gate is always "on" during the transition,
+					// then drop the boot wait.
 					dapAttached.Add(1)
+					waitForAttach.Store(false)
+					fmt.Fprintln(os.Stderr, "nessy: DAP client attached — debugger has control of CPU execution")
 				},
 				OnDisconnected: func() {
-					dapAttached.Add(-1)
+					// Clamp at zero. The dap.Server promises to
+					// pair OnAttached with OnDisconnected, but we
+					// keep the floor as defensive depth — a stray
+					// disconnect for an un-attached session would
+					// otherwise drop the gate even though the
+					// real session is still running.
+					for {
+						cur := dapAttached.Load()
+						if cur <= 0 {
+							return
+						}
+						if dapAttached.CompareAndSwap(cur, cur-1) {
+							return
+						}
+					}
 				},
 			}
 			if err := s.AttachExisting(cfg); err != nil {

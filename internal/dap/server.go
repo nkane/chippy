@@ -95,6 +95,17 @@ type Server struct {
 	onAttached     func()
 	onDisconnected func()
 
+	// attachedFired records whether handleAttach completed
+	// successfully. fireDisconnected uses this to guarantee the host
+	// only sees `OnDisconnected` when a paired `OnAttached` actually
+	// happened — a probe TCP connection (e.g. the launcher's
+	// listener-ready check that dials + closes without sending any
+	// DAP traffic) opens a Server, never attaches, and gets EOF.
+	// Without this guard the host would see a stray disconnect for a
+	// session that never started, dropping any counters into negative
+	// territory.
+	attachedFired atomic.Bool
+
 	// disconnectedFired guards onDisconnected against double-fire
 	// when both Serve()'s EOF exit and a client-initiated disconnect
 	// race to invoke it.
@@ -439,11 +450,17 @@ func (s *Server) handleTerminate(req Request) {
 }
 
 // fireDisconnected invokes the host's OnDisconnected callback (if any)
-// exactly once per Server. The `disconnectedFired` guard handles the
+// exactly once per Server, AND only if a paired OnAttached has
+// actually fired. The `disconnectedFired` guard handles the
 // case where Serve()'s EOF path and a client-initiated disconnect
-// request both try to fire it.
+// request both try to fire it; the `attachedFired` guard skips the
+// callback entirely for probe-style connections that never sent an
+// attach request.
 func (s *Server) fireDisconnected() {
 	if s.onDisconnected == nil {
+		return
+	}
+	if !s.attachedFired.Load() {
 		return
 	}
 	if s.disconnectedFired.Swap(true) {

@@ -3,7 +3,10 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/hajimehoshi/ebiten/v2"
 
@@ -49,16 +52,31 @@ func newGame(bus *nesBus, cpuMu *sync.Mutex) *game {
 	return &game{bus: bus, cpuMu: cpuMu}
 }
 
+// loopSteppedBanner is a one-shot diagnostic: prints to stderr the
+// first time the game loop actually advances the CPU (gates released).
+// Catches "gate races" — if this prints with PC=$C000 right after a
+// DAP attach, the wait gate worked. If it prints earlier with no
+// "debugger attached" line printed, the gate failed to engage.
+var loopSteppedBanner atomic.Bool
+
 func (g *game) Update() error {
 	g.pollInput()
-	// When a DAP client is attached, the server's `continue` runLoop
-	// (or its single-step requests) is the sole stepper. The game
-	// loop yields so the user can pause, single-step, set
-	// breakpoints, etc. without the game running away underneath
-	// them. Draw still fires every frame, so the screen reflects
-	// whatever framebuffer state the PPU has rendered up to now.
-	if dapAttached.Load() > 0 {
+	// Gate the CPU stepping on two flags:
+	//   1. waitForAttach — at-boot pause when nessy was launched
+	//      under `chippy -nessy …` (-wait-for-debugger). Cleared on
+	//      first DAP attach.
+	//   2. dapAttached    — one or more DAP clients currently
+	//      attached; the server's `continue` runLoop is the sole
+	//      stepper, the game loop yields.
+	// Draw still fires every frame so the screen reflects whatever
+	// framebuffer state the PPU has rendered up to now.
+	if waitForAttach.Load() || dapAttached.Load() > 0 {
 		return nil
+	}
+	if !loopSteppedBanner.Swap(true) {
+		fmt.Fprintf(os.Stderr,
+			"nessy: game loop entering autonomous-step mode at PC=$%04X cycles=%d (waitForAttach=%v dapAttached=%d)\n",
+			g.bus.cpu.PC, g.bus.cpu.Cycles, waitForAttach.Load(), dapAttached.Load())
 	}
 	g.cpuMu.Lock()
 	defer g.cpuMu.Unlock()
