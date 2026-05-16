@@ -89,10 +89,56 @@ jobs:
       - name: Compile
         run: npm run compile
 
-      - name: Publish to VS Code marketplace
+      - name: Skip if version already on marketplace
+        # vsce show errors when the extension isn't published. Use that
+        # as the "needs publish" signal. If the listed version matches
+        # the tag we want, we're done — idempotent retries don't
+        # re-publish a stale build.
+        id: market_check
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set +e
+          ver="${TAG#v}"
+          installed=$(npx -y -p @vscode/vsce vsce show Hidden-Pixel.vscode-chippy --json 2>/dev/null | jq -r .versions[0].version 2>/dev/null)
+          echo "installed=$installed target=$ver"
+          if [ "$installed" = "$ver" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Hidden-Pixel.vscode-chippy v$ver already on the marketplace; skipping publish"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to VS Code marketplace (with retry / backoff)
+        if: steps.market_check.outputs.skip != 'true'
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx vsce publish --pat "$VSCE_PAT" --no-dependencies
+        run: |
+          # Microsoft's marketplace API returns 'Concurrency'
+          # rate-limit errors that can also mask real account-state
+          # issues (delisted extension, suspended publisher, expired
+          # PAT — see issue #215). Three attempts with 30s / 2min /
+          # 5min backoff absorb transient throttles; anything beyond
+          # that is investigation territory.
+          set +e
+          delays=(30 120 300)
+          for attempt in 1 2 3; do
+            echo "::group::vsce publish attempt $attempt"
+            npx vsce publish --pat "$VSCE_PAT" --no-dependencies
+            rc=$?
+            echo "::endgroup::"
+            if [ "$rc" -eq 0 ]; then
+              echo "::notice::vsce publish succeeded on attempt $attempt"
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::vsce publish exhausted retries. If the error mentions 'Concurrency' / 'RequestBlockedException', see https://github.com/nkane/chippy/issues/215 for the manual-investigation playbook (publisher portal status, PAT validity)."
+              exit "$rc"
+            fi
+            delay=${delays[$((attempt - 1))]}
+            echo "::warning::vsce publish failed (rc=$rc); sleeping ${delay}s before retry"
+            sleep "$delay"
+          done
 
   # ----- nessy release (custom multi-OS build) -----
   # Four parallel build jobs produce native binaries via CGO + each
