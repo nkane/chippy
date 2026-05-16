@@ -27,15 +27,26 @@ func main() {
 		tracePath   = flag.String("trace", "", "write per-instruction execution trace to this file")
 		runOnStart  = flag.Bool("run-on-start", false, "start the CPU running instead of paused (pair with -trace for non-interactive capture)")
 		dapMode     = flag.String("dap", "", "run as a Debug Adapter Protocol server instead of the TUI: 'stdio' or 'tcp:PORT'")
-		dapAttach   = flag.String("dap-attach", "", "connect out to a remote DAP server (tcp:HOST:PORT) — Phase A: handshake-only smoke test, see #180")
+		dapAttach   = flag.String("dap-attach", "", "connect out to a remote DAP server (tcp:HOST:PORT) and open the TUI in attach mode")
+		nessyROM    = flag.String("nessy", "", "spawn nessy with this iNES ROM + attach the TUI to it (paused at reset)")
+		nessyBinary = flag.String("nessy-binary", "", "path to the nessy binary (overrides $PATH lookup + chippy-sibling fallback)")
 		textBufCap  = flag.Int("text-buf-cap", peripheral.DefaultTextOutputCap, "TextOutput ($F001) buffer cap in bytes; 0 = unbounded")
 		theme       = flag.String("theme", "", "color palette: default | mono | protan | tritan. NO_COLOR=1 forces mono regardless.")
 		traceReplay = flag.String("trace-replay", "", "open a prior trace file in replay mode (step keys scroll through recorded frames; CPU stays paused)")
 	)
 	flag.Parse()
 
-	if *dapMode != "" && *dapAttach != "" {
-		fmt.Fprintln(os.Stderr, "chippy: -dap and -dap-attach are mutually exclusive")
+	// Mode-flag mutual-exclusion. The four entry points (TUI / -dap /
+	// -dap-attach / -nessy) each consume the whole process; pairing
+	// any two of them is a configuration error.
+	exclusive := 0
+	for _, set := range []bool{*dapMode != "", *dapAttach != "", *nessyROM != ""} {
+		if set {
+			exclusive++
+		}
+	}
+	if exclusive > 1 {
+		fmt.Fprintln(os.Stderr, "chippy: -dap, -dap-attach, and -nessy are mutually exclusive")
 		os.Exit(2)
 	}
 	if *dapMode != "" {
@@ -48,6 +59,14 @@ func main() {
 			os.Exit(2)
 		}
 		runDAPAttach(*dapAttach)
+		return
+	}
+	if *nessyROM != "" {
+		if *romPath != "" {
+			fmt.Fprintln(os.Stderr, "chippy: -rom and -nessy are mutually exclusive (the nessy ROM is the program)")
+			os.Exit(2)
+		}
+		runNessyLauncher(*nessyROM, *nessyBinary)
 		return
 	}
 
