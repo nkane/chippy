@@ -131,14 +131,17 @@ func resolveNessyBinary(override string) (string, error) {
 		}
 		return "", fmt.Errorf("-nessy-binary %q: %w", override, errors.New("not found"))
 	}
-	if p, err := exec.LookPath("nessy"); err == nil {
-		return p, nil
-	}
+	// Prefer a sibling of the running chippy binary before falling back
+	// to $PATH. Stale system-wide nessy installs shouldn't shadow a
+	// fresh local build the user just produced from the same checkout.
 	if self, err := os.Executable(); err == nil {
 		candidate := filepath.Join(filepath.Dir(self), nessyBaseName())
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, nil
 		}
+	}
+	if p, err := exec.LookPath("nessy"); err == nil {
+		return p, nil
 	}
 	return "", errors.New(
 		"nessy binary not found — install via `go install -tags=nessy github.com/nkane/chippy/cmd/nessy@latest`, " +

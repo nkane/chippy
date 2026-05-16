@@ -73,12 +73,21 @@ func runDAPListener(port int, bus *nesBus, cpuMu *sync.Mutex, syms *symbols.Tabl
 				Syms:   syms,
 				SrcMap: srcMap,
 				OnAttached: func() {
-					// Lift the at-boot pause gate atomically so the
-					// game loop transitions cleanly from "waiting for
-					// debugger" to "debugger attached" without an
-					// instant of autonomous run between the two.
-					waitForAttach.Store(false)
+					// Order matters. The game loop checks
+					// `waitForAttach || dapAttached>0`. If we
+					// cleared waitForAttach first and the loop
+					// raced through Update before dapAttached
+					// incremented, both gates would briefly read
+					// "off" — the loop would fall through, block
+					// on cpuMu (held by the dispatch handling
+					// this very attach), and on cpuMu release
+					// step ~30k cycles right past reset.
+					//
+					// Increment dapAttached FIRST so at least one
+					// gate is always "on" during the transition,
+					// then drop the boot wait.
 					dapAttached.Add(1)
+					waitForAttach.Store(false)
 				},
 				OnDisconnected: func() {
 					dapAttached.Add(-1)

@@ -228,4 +228,45 @@ drainLoop:
 	if pc2 != 0xC001 {
 		t.Errorf("PC after stepIn = $%04X; want $C001 (SEI is 1 byte). Game loop racing the step request", pc2)
 	}
+
+	// Step several more times. The hello-bg reset routine is:
+	//   $C000 78        SEI       → next $C001 (1 byte)
+	//   $C001 D8        CLD       → next $C002
+	//   $C002 A2 FF     LDX #$FF  → next $C004
+	//   $C004 9A        TXS       → next $C005
+	//   $C005 E8        INX       → next $C006
+	// Each stepIn must advance by exactly the instruction width.
+	// If the game loop is racing the dispatch, we'd see PCs leap by
+	// ~30k cycles ($C000 → $C097-ish).
+	wantPCs := []uint16{0xC002, 0xC004, 0xC005, 0xC006}
+	for _, want := range wantPCs {
+		if _, err := client.Request("stepIn", map[string]any{"threadId": 1}); err != nil {
+			t.Fatalf("stepIn: %v", err)
+		}
+		stopTimer := time.NewTimer(2 * time.Second)
+	stepDrain:
+		for {
+			select {
+			case ev, ok := <-client.Events():
+				if !ok {
+					stopTimer.Stop()
+					break stepDrain
+				}
+				if ev.Event == "stopped" {
+					stopTimer.Stop()
+					break stepDrain
+				}
+			case <-stopTimer.C:
+				t.Fatalf("no stopped event 2s after stepIn (target PC $%04X)", want)
+			}
+		}
+		st3Resp, _ := client.Request("stackTrace", map[string]any{"threadId": 1, "startFrame": 0, "levels": 1})
+		st3Body, _ := json.Marshal(st3Resp.Body)
+		_ = json.Unmarshal(st3Body, &st)
+		pcStr3 := strings.TrimPrefix(st.StackFrames[0].InstructionPointerReference, "$")
+		pc3, _ := strconv.ParseUint(pcStr3, 16, 16)
+		if pc3 != uint64(want) {
+			t.Errorf("multi-step regression: PC = $%04X; want $%04X. The game loop is racing the dispatch", pc3, want)
+		}
+	}
 }

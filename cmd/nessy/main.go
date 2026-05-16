@@ -97,6 +97,7 @@ func main() {
 			os.Exit(2)
 		}
 		waitForAttach.Store(true)
+		fmt.Fprintln(os.Stderr, "nessy: -wait-for-debugger active — CPU paused at boot until a DAP client attaches")
 	}
 
 	// CPUMu serializes the game loop's per-frame stepping with any DAP
