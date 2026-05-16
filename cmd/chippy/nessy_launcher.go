@@ -39,7 +39,12 @@ func runNessyLauncher(romPath, nessyBin string) {
 		os.Exit(1)
 	}
 
-	cmd := exec.Command(bin, "-rom", romPath, "-dap-port", strconv.Itoa(port))
+	// `-wait-for-debugger` keeps nessy's game loop paused at the reset
+	// vector until our attach lands. Without it the launcher's spawn
+	// + dial + handshake takes ~100 ms while the game loop races
+	// ahead, ending up past the reset routine before we can issue
+	// the first stopped event.
+	cmd := exec.Command(bin, "-rom", romPath, "-dap-port", strconv.Itoa(port), "-wait-for-debugger")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

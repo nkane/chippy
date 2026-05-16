@@ -24,6 +24,17 @@ import (
 // goroutine.
 var dapAttached atomic.Int32
 
+// waitForAttach blocks the game loop's CPU stepping at boot when
+// nessy was launched under `chippy -nessy …`. Set by main from the
+// -wait-for-debugger flag BEFORE the DAP listener starts so a fast
+// client attach can't lose the race. Cleared the first time a DAP
+// client actually attaches (OnAttached fires).
+//
+// Note this is a one-shot gate: once cleared we don't re-arm on
+// disconnect. The user has confirmed they're driving the debugger;
+// closing the TUI shouldn't suddenly restart the game.
+var waitForAttach atomic.Bool
+
 // runDAPListener accepts incoming DAP connections on the given TCP port
 // and serves each one against the live NES bus. The cpuMu is shared
 // with the Ebiten game loop so concurrent requests never observe a
@@ -62,6 +73,11 @@ func runDAPListener(port int, bus *nesBus, cpuMu *sync.Mutex, syms *symbols.Tabl
 				Syms:   syms,
 				SrcMap: srcMap,
 				OnAttached: func() {
+					// Lift the at-boot pause gate atomically so the
+					// game loop transitions cleanly from "waiting for
+					// debugger" to "debugger attached" without an
+					// instant of autonomous run between the two.
+					waitForAttach.Store(false)
 					dapAttached.Add(1)
 				},
 				OnDisconnected: func() {

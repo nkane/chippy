@@ -51,13 +51,16 @@ func newGame(bus *nesBus, cpuMu *sync.Mutex) *game {
 
 func (g *game) Update() error {
 	g.pollInput()
-	// When a DAP client is attached, the server's `continue` runLoop
-	// (or its single-step requests) is the sole stepper. The game
-	// loop yields so the user can pause, single-step, set
-	// breakpoints, etc. without the game running away underneath
-	// them. Draw still fires every frame, so the screen reflects
-	// whatever framebuffer state the PPU has rendered up to now.
-	if dapAttached.Load() > 0 {
+	// Gate the CPU stepping on two flags:
+	//   1. waitForAttach — at-boot pause when nessy was launched
+	//      under `chippy -nessy …` (-wait-for-debugger). Cleared on
+	//      first DAP attach.
+	//   2. dapAttached    — one or more DAP clients currently
+	//      attached; the server's `continue` runLoop is the sole
+	//      stepper, the game loop yields.
+	// Draw still fires every frame so the screen reflects whatever
+	// framebuffer state the PPU has rendered up to now.
+	if waitForAttach.Load() || dapAttached.Load() > 0 {
 		return nil
 	}
 	g.cpuMu.Lock()
