@@ -87,3 +87,42 @@ func (m *MMIO) Tick(cycles int) {
 		t.Tick(cycles)
 	}
 }
+
+// Peeker is the optional "side-effect-free read" interface a
+// peripheral may implement so memory inspectors (DAP `readMemory`,
+// the TUI memory panel) can sample its state without driving the
+// register's normal Read side effects (e.g. PPU's $2002 clears
+// vblank, joypad's $4016 shifts the register, keyboard's $F004
+// clears the data-ready flag).
+//
+// Peripherals where Read is already side-effect-free should still
+// implement Peek as `return p.Read(addr)` so memory inspection
+// works consistently. Peripherals that DON'T implement Peeker fall
+// back to MMIO.Inner.Read at the requested address — typically
+// zero, which is the "no observable state" answer for an MMIO
+// inspector.
+type Peeker interface {
+	Peek(addr uint16) byte
+}
+
+// Peek is the side-effect-free counterpart to Read. Used by memory
+// inspectors. Falls back to MMIO.Inner.Read for peripherals that
+// don't implement Peeker — that's better than calling Read and
+// triggering side effects the inspector shouldn't.
+func (m *MMIO) Peek(addr uint16) byte {
+	for _, p := range m.peripherals {
+		lo, hi := p.Range()
+		if addr >= lo && addr <= hi {
+			if pk, ok := p.(Peeker); ok {
+				return pk.Peek(addr)
+			}
+			// Peripheral exists at this address but doesn't expose a
+			// side-effect-free read. Returning Inner.Read is the
+			// conservative choice — it's whatever the underlying bus
+			// has there (typically zero for unmapped peripheral
+			// addresses), not the live device state.
+			return m.Inner.Read(addr)
+		}
+	}
+	return m.Inner.Read(addr)
+}

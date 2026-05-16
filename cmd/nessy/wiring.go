@@ -98,5 +98,14 @@ func (w *cartPeripheral) Write(addr uint16, v byte) {
 	w.cart.CPUWrite(addr, v)
 }
 
+// Peek surfaces cart bytes without side effects. NROM's CPURead is
+// already side-effect-free (just a slice index); future bank-switching
+// mappers (MMC1+) should keep this contract — Peek returns whatever
+// the currently-mapped bank shows.
+func (w *cartPeripheral) Peek(addr uint16) byte { return w.cart.CPURead(addr) }
+
 // compile-time check.
-var _ cpu.Peripheral = (*cartPeripheral)(nil)
+var (
+	_ cpu.Peripheral = (*cartPeripheral)(nil)
+	_ cpu.Peeker     = (*cartPeripheral)(nil)
+)

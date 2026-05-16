@@ -96,7 +96,7 @@ func (s *Server) disasmOne(addr uint16) DisassembledInstruction {
 	text, n := cpu.DisasmCPU(s.cpu, addr)
 	bytesHex := make([]string, n)
 	for j := 0; j < n; j++ {
-		bytesHex[j] = fmt.Sprintf("%02X", s.ram.Read(addr+uint16(j)))
+		bytesHex[j] = fmt.Sprintf("%02X", s.peekByte(addr+uint16(j)))
 	}
 	ins := DisassembledInstruction{
 		Address:          fmt.Sprintf("$%04X", addr),
@@ -115,10 +115,27 @@ func (s *Server) disasmOne(addr uint16) DisassembledInstruction {
 	return ins
 }
 
+// peekByte is the side-effect-free byte read used by readMemory and
+// disassemble. When MMIO is wired, we consult it so peripherals (like
+// the NES cart's PRG-ROM at $C000-$FFFF) surface their bytes; the
+// MMIO.Peek path uses each peripheral's Peeker interface if it
+// implements one and falls back to Inner.Read otherwise — which keeps
+// memory inspection side-effect-free even for peripherals (PPU,
+// joypad, keyboard) whose Read mutates state.
+//
+// When MMIO is nil (older test fixtures, headless paths), we read
+// ram directly — same behavior as before.
+func (s *Server) peekByte(addr uint16) byte {
+	if s.mmio != nil {
+		return s.mmio.Peek(addr)
+	}
+	return s.ram.Read(addr)
+}
+
 // handleReadMemory returns a byte window starting at MemoryReference (+
-// Offset). Reads go directly through cpu.RAM, bypassing MMIO peripherals
-// whose Read may have side effects (e.g. clearing keyboard status). This
-// matches DAP's expectation that memory inspection is side-effect-free.
+// Offset). Reads go through MMIO.Peek (or ram directly when no MMIO is
+// wired) so peripherals' state shows up to inspectors without
+// triggering Read side effects.
 func (s *Server) handleReadMemory(req Request) {
 	if s.cpu == nil {
 		s.sendErrorResponse(req, "no debuggee — send launch first")
@@ -149,7 +166,7 @@ func (s *Server) handleReadMemory(req Request) {
 	}
 	raw := make([]byte, n)
 	for i := 0; i < n; i++ {
-		raw[i] = s.ram.Read(uint16(start + i))
+		raw[i] = s.peekByte(uint16(start + i))
 	}
 
 	type body struct {
