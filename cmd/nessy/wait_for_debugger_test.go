@@ -23,6 +23,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -268,5 +269,103 @@ drainLoop:
 		if pc3 != uint64(want) {
 			t.Errorf("multi-step regression: PC = $%04X; want $%04X. The game loop is racing the dispatch", pc3, want)
 		}
+	}
+}
+
+// User-reported regression: `:bp clear_ram` followed by `r` did NOT
+// break at the bp — server ran past it. Root cause was `:bp` not
+// syncing the new breakpoint to the server via
+// setInstructionBreakpoints.
+//
+// This test mirrors the wire-level behavior: setInstructionBreakpoints
+// + continue should yield a `stopped` event at the bp's PC.
+func TestLauncher_BreakpointStopsContinue(t *testing.T) {
+	bin := nessyBinaryPath(t)
+	rom, err := filepath.Abs(filepath.Join("..", "..", "roms", "demos", "hello-bg", "hello-bg.nes"))
+	if err != nil {
+		t.Fatalf("abs rom path: %v", err)
+	}
+	port := pickFreePortForTest(t)
+	spawnNessy(t, bin, rom, port)
+	dialUntilReady(t, port, 5*time.Second)
+
+	conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	client := dap.NewClient(conn, conn)
+	defer func() { _ = client.Close() }()
+
+	if _, err := client.Initialize(dap.InitializeArguments{}); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	if _, err := client.Request("attach", map[string]any{"stopOnEntry": true}); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	// Drain the initial stopped(entry) event so the bp-stopped event
+	// is the only one we care about below.
+	deadline := time.After(2 * time.Second)
+initialDrain:
+	for {
+		select {
+		case ev, ok := <-client.Events():
+			if !ok {
+				break initialDrain
+			}
+			if ev.Event == "stopped" {
+				break initialDrain
+			}
+		case <-deadline:
+			t.Fatalf("no initial stopped event")
+		}
+	}
+
+	// $C014 lies somewhere inside the `bit $2002 / bpl :-` vblank
+	// wait. After continue, the CPU loops there constantly; the bp
+	// must trip within microseconds.
+	const bpPC = 0xC014
+	resp, err := client.Request("setInstructionBreakpoints", map[string]any{
+		"breakpoints": []map[string]string{
+			{"instructionReference": fmt.Sprintf("$%04X", bpPC)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("setInstructionBreakpoints: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("setInstructionBreakpoints refused: %s", resp.Message)
+	}
+
+	if _, err := client.Request("continue", map[string]any{"threadId": 1}); err != nil {
+		t.Fatalf("continue: %v", err)
+	}
+	stopT := time.NewTimer(5 * time.Second)
+	defer stopT.Stop()
+	for {
+		select {
+		case ev, ok := <-client.Events():
+			if !ok {
+				t.Fatalf("client events closed before bp-stopped event")
+			}
+			if ev.Event == "stopped" {
+				goto stopped
+			}
+		case <-stopT.C:
+			t.Fatalf("continue ran 5s without stopping at bp $%04X — breakpoint sync regressed", bpPC)
+		}
+	}
+stopped:
+	stResp, _ := client.Request("stackTrace", map[string]any{"threadId": 1, "startFrame": 0, "levels": 1})
+	stBody, _ := json.Marshal(stResp.Body)
+	var st struct {
+		StackFrames []struct {
+			InstructionPointerReference string `json:"instructionPointerReference"`
+		} `json:"stackFrames"`
+	}
+	_ = json.Unmarshal(stBody, &st)
+	pcStr := strings.TrimPrefix(st.StackFrames[0].InstructionPointerReference, "$")
+	pc, _ := strconv.ParseUint(pcStr, 16, 16)
+	if pc != uint64(bpPC) {
+		t.Errorf("after continue, PC = $%04X; want $%04X (server should stop at bp)", pc, bpPC)
 	}
 }

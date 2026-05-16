@@ -202,12 +202,14 @@ func (m *Model) cmdBP(args []string) string {
 		if _, ok := m.Breakpoints[addr]; ok {
 			delete(m.Breakpoints, addr)
 			m.saveState()
+			m.syncSourceBreakpoints()
 			return fmt.Sprintf("bp -$%04X", addr)
 		}
 		bp := newBP(addr)
 		bp.Source = src
 		m.Breakpoints[addr] = bp
 		m.saveState()
+		m.syncSourceBreakpoints()
 		return fmt.Sprintf("bp +$%04X", addr)
 	}
 
@@ -227,6 +229,7 @@ func (m *Model) cmdBP(args []string) string {
 	}
 	m.Breakpoints[addr] = bp
 	m.saveState()
+	m.syncSourceBreakpoints()
 	return fmt.Sprintf("%s bp +$%04X", bp.marker(), addr)
 }
 

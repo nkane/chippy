@@ -646,10 +646,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dapEventMsg:
 		switch msg.ev.Event {
 		case "stopped":
+			wasRunning := m.Running
 			m.Running = false
 			_ = m.Source.RefreshRegs()
 			_ = m.Source.RefreshMemory()
-			m.Status = fmt.Sprintf("stopped at $%04X", m.CPU.PC)
+			// Only overwrite Status when we were running — single
+			// step paths have their own "stepped" / "hit bp"
+			// messages and don't want this generic one stomping
+			// theirs. The Running→false transition is what marks
+			// "the server actually halted on its own".
+			if wasRunning {
+				m.Status = fmt.Sprintf("stopped at $%04X", m.CPU.PC)
+			}
 		case "terminated":
 			return m, tea.Quit
 		}
