@@ -144,6 +144,22 @@ the v0.2+ roadmap.
 
 Controls: Arrows = D-pad, Z = A, X = B, Enter = Start, Right Shift = Select.
 
+#### One-shell debug launch
+
+Skip the two-terminal dance. `chippy -nessy ROM` spawns nessy in the
+background, dials its DAP listener, and opens the TUI in attach mode
+paused at the reset vector:
+
+```sh
+chippy -nessy roms/demos/hello-bg/hello-bg.nes
+```
+
+Press `r` to run, `s` to step, `b` to toggle a breakpoint at the
+current PC, `q` to quit (also shuts down the nessy game window).
+
+If the chippy binary can't find `nessy` on `$PATH` or as a sibling,
+pass `-nessy-binary PATH`. Build a local nessy with `go build -tags=nessy -o nessy ./cmd/nessy`.
+
 #### Demos
 
 Three homemade demos ship under [`roms/demos/`](roms/demos/) — hand-rolled
