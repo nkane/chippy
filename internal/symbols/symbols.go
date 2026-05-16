@@ -280,6 +280,22 @@ func (sm *SourceMap) IsData(addr uint16) bool {
 	return false
 }
 
+// sourceFileCandidates lists the on-disk paths to try when locating
+// a source file recorded in a `.dbg`. Order is intentional: absolute
+// path → dbg-relative → basename-in-dbgdir → parent-of-dbgdir-relative.
+// First existing readable file wins; missing ones fall through.
+func sourceFileCandidates(dbgDir, recorded string) []string {
+	if filepath.IsAbs(recorded) {
+		return []string{recorded}
+	}
+	parent := filepath.Dir(dbgDir)
+	return []string{
+		filepath.Join(dbgDir, recorded),
+		filepath.Join(dbgDir, filepath.Base(recorded)),
+		filepath.Join(parent, recorded),
+	}
+}
+
 // LoadSourceMap parses a cc65 .dbg file and returns a SourceMap.
 //
 // cc65 emits records like:
@@ -432,7 +448,17 @@ func LoadSourceMap(dbgPath string) (*SourceMap, error) {
 		}
 	}
 
-	// Read source files (relative to the .dbg's directory if not absolute).
+	// Read source files. ca65 / ld65 records the path it was invoked
+	// with, so the on-disk location depends on the build's working
+	// directory. Try a few candidates to be robust to common build
+	// layouts:
+	//   1. Absolute path as recorded.
+	//   2. Relative to the .dbg's directory.
+	//   3. Just the basename, in the .dbg's directory (fixes the
+	//      "ld65 invoked from one-up dir" pattern where the .dbg ends
+	//      up with `subdir/file.s` and the loader's caller looked one
+	//      level too deep).
+	//   4. Walking up one directory from the .dbg.
 	dbgDir := filepath.Dir(dbgPath)
 	sources := map[string][]string{}
 	seen := map[string]bool{}
@@ -441,11 +467,14 @@ func LoadSourceMap(dbgPath string) (*SourceMap, error) {
 			continue
 		}
 		seen[fr.name] = true
-		path := fr.name
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(dbgDir, fr.name)
+		var data []byte
+		var err error
+		for _, candidate := range sourceFileCandidates(dbgDir, fr.name) {
+			data, err = os.ReadFile(candidate)
+			if err == nil {
+				break
+			}
 		}
-		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}

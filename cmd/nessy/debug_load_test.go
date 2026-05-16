@@ -53,6 +53,17 @@ func TestDebug_AutoDetectAndLoadHelloBG(t *testing.T) {
 	if loc.Line == 0 {
 		t.Errorf("source mapping has line=0; expected a real line number")
 	}
+	// The Files map must contain the loaded source — `(file
+	// unavailable: hello-bg.s)` in the TUI source-view came from
+	// this map being empty because the resolver couldn't find the
+	// file on disk.
+	lines, ok := sm.Files[loc.File]
+	if !ok {
+		t.Fatalf("sm.Files[%q] missing — source resolver couldn't load the file from disk", loc.File)
+	}
+	if len(lines) < 10 {
+		t.Errorf("sm.Files[%q] has %d lines; expected the full source", loc.File, len(lines))
+	}
 	// `reset` is a documented exported symbol via ca65's `-g` debug
 	// output; the symbol table should resolve it.
 	if pc, ok := tbl.LookupName("reset"); !ok || pc != 0xC000 {
