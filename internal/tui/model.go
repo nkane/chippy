@@ -115,6 +115,15 @@ type Model struct {
 	ShowBPs  bool
 	BPCursor int // selected row in BP manager
 
+	// Symbols modal — paginated browser over the loaded `.dbg`
+	// label table. Opened via `:syms` (optionally `:syms PREFIX`
+	// for a pre-filter). Enter on a row toggles a breakpoint at
+	// that symbol. Esc / q closes.
+	ShowSyms   bool
+	SymsCursor int    // selected row
+	SymsFilter string // optional substring filter
+	SymsOffset int    // scroll offset within the filtered list
+
 	// Source view
 	ShowSource  bool                      // toggle source panel vs disassembly
 	SourceFiles map[string][]string       // filename -> lines (1-indexed via [i-1])
@@ -442,6 +451,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// BP manager modal.
 		if m.ShowBPs {
 			return m.updateBPManager(msg)
+		}
+		if m.ShowSyms {
+			return m.updateSymsManager(msg)
 		}
 		// Input mode: route most keys to the keyboard peripheral instead
 		// of debugger bindings. Ctrl+C always quits; Esc exits the mode.
@@ -1162,6 +1174,8 @@ func (m Model) View() string {
 		bodyBlock = lipgloss.Place(m.W, bodyHeight, lipgloss.Center, lipgloss.Center, m.helpModal())
 	case m.ShowBPs:
 		bodyBlock = lipgloss.Place(m.W, bodyHeight, lipgloss.Center, lipgloss.Center, m.bpModal())
+	case m.ShowSyms:
+		bodyBlock = lipgloss.Place(m.W, bodyHeight, lipgloss.Center, lipgloss.Center, m.symsModal())
 	case m.ImmediateActive:
 		bodyBlock = lipgloss.Place(m.W, bodyHeight, lipgloss.Center, lipgloss.Center, m.immediateModal())
 	default:
@@ -1222,6 +1236,7 @@ func helpPages() [][]helpSection {
 				{"R", "reset CPU"},
 				{"b", "toggle breakpoint at PC"},
 				{"B", "breakpoint manager"},
+				{":syms", "browse labels from the loaded .dbg (enter toggles bp)"},
 			}},
 			{"Speed", [][2]string{
 				{"+", "faster"},

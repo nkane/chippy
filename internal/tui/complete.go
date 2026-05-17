@@ -20,6 +20,7 @@ var defaultVerbs = func() []string {
 		"speed",
 		"bp", "bpr", "bpw", "bprw",
 		"rmbpr", "rmbpw", "rmbprw",
+		"syms", "symbols",
 		"trace",
 		"textsave",
 		"theme",
