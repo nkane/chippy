@@ -86,6 +86,24 @@ type CPU struct {
 	//     again (matching real silicon's edge sensitivity).
 	irqLine    bool
 	nmiPending bool
+
+	// pendingStall is a cycle debt owed to a peripheral that took over
+	// the bus (e.g. $4014 OAMDMA). The next Step() drains the whole
+	// counter as one block — bus ticks fire, c.Cycles advances, no
+	// opcode executes. See Stall().
+	pendingStall int
+}
+
+// Stall queues N cycles of CPU stall. The very next Step() consumes
+// the whole queue as a single non-opcode unit: the bus ticker (PPU /
+// APU) sees the cycle delta, Cycles advances, no opcode fetches.
+//
+// Designed for bus-stealing peripherals — OAMDMA writes 256 bytes and
+// reports its 513-cycle stall via this hook. Multiple calls accumulate.
+func (c *CPU) Stall(cycles int) {
+	if cycles > 0 {
+		c.pendingStall += cycles
+	}
 }
 
 func New(bus Bus) *CPU {

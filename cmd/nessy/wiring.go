@@ -10,6 +10,7 @@ import (
 	"github.com/nkane/chippy/internal/cpu"
 	"github.com/nkane/chippy/internal/nes"
 	"github.com/nkane/chippy/internal/nes/cart"
+	"github.com/nkane/chippy/internal/nes/dma"
 	"github.com/nkane/chippy/internal/nes/joypad"
 	"github.com/nkane/chippy/internal/nes/ppu"
 )
@@ -22,6 +23,7 @@ type nesBus struct {
 	cpu  *cpu.CPU
 	ppu  *ppu.PPU
 	joy  *joypad.Port
+	dma  *dma.OAMDMA
 	mmio *cpu.MMIO
 	ram  *cpu.RAM
 	cart cart.Cartridge
@@ -66,6 +68,17 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 	if err := mmio.Register(pp); err != nil {
 		return nil, err
 	}
+
+	// $4014 OAMDMA. Reads bytes from the CPU bus (via MMIO) and pushes
+	// them into the PPU's OAM cursor. Must register AFTER the PPU so
+	// the source-byte reads for $2000-$3FFF cases land on the live
+	// PPU. The 513-cycle bus-steal stall flows through cpu.Stall →
+	// Step()'s drain on the next instruction boundary.
+	oam := dma.New(mmio, pp, processor)
+	if err := mmio.Register(oam); err != nil {
+		return nil, err
+	}
+
 	// Re-run reset now that the PPU is registered. Some ROMs touch PPU
 	// registers in their very first instructions, so we want those to
 	// hit the PPU rather than fall through to RAM during the moments
@@ -76,6 +89,7 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 		cpu:  processor,
 		ppu:  pp,
 		joy:  jp,
+		dma:  oam,
 		mmio: mmio,
 		ram:  ram,
 		cart: c,

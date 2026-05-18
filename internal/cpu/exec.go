@@ -49,6 +49,23 @@ func (c *CPU) Step() int {
 		return int(c.Cycles - before)
 	}
 
+	// Drain any pending bus-stealing stall (e.g. $4014 OAMDMA) before
+	// fetching the next opcode. The whole counter is consumed as one
+	// block — the PPU / APU sees its cycle delta via the ticker but
+	// no opcode runs this Step. Interrupts handled above intentionally
+	// pre-empt the drain: a peripheral that asserts NMI mid-DMA gets
+	// serviced first, matching the "next instruction boundary" model
+	// the rest of the interrupt path already uses.
+	if c.pendingStall > 0 {
+		stalled := c.pendingStall
+		c.pendingStall = 0
+		c.Cycles += uint64(stalled)
+		if c.busTicker != nil {
+			c.busTicker.Tick(stalled)
+		}
+		return stalled
+	}
+
 	if c.Halted {
 		return 0
 	}
