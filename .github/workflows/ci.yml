@@ -222,13 +222,22 @@ jobs:
     # VHS-driven smoke tests under test/smoke/. Each .tape script runs
     # chippy end-to-end through a real TTY (via ttyd) and renders a
     # GIF. CI only checks that vhs exited 0 — i.e. the tape didn't
-    # crash mid-render. Reviewers scrub the artifact GIFs in PRs.
+    # crash mid-render. On PRs, the rendered GIFs are pushed to a
+    # `smoke-gifs` orphan branch under `pr-<num>/` and embedded into a
+    # sticky PR comment, so reviewers see the latest renders inline
+    # without downloading artifacts. Each subsequent run for the same
+    # PR overwrites that directory (keep_files: false) and updates
+    # the comment in place.
+    #
     # Skips nessy-* tapes here because the nessy build pulls in
     # X11 / GL dev headers (handled in the release workflow); chippy
     # tapes alone exercise the TUI and DAP-attach surfaces this job
     # exists to protect.
     name: vhs smoke (chippy)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write       # push to smoke-gifs branch
+      pull-requests: write  # post/update sticky comment
     steps:
       - uses: actions/checkout@v6
 
@@ -259,13 +268,48 @@ jobs:
       - name: Render smoke tapes
         run: make -C test/smoke chippy
 
-      - name: Upload rendered GIFs
+      - name: Upload rendered GIFs (workflow artifact)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: chippy-smoke-gifs
           path: test/smoke/out/*.gif
           if-no-files-found: error
+
+      # ---- PR-only: publish GIFs + post sticky comment ----
+      # Forks can't push back; skip publishing for them. The artifact
+      # upload above still works on fork PRs as a fallback.
+      - name: Publish GIFs to smoke-gifs branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: smoke-gifs
+          publish_dir: ./test/smoke/out
+          destination_dir: pr-${{ github.event.pull_request.number }}
+          keep_files: false  # overwrite this PR's dir on every run; other PRs untouched
+          commit_message: "smoke: render pr-${{ github.event.pull_request.number }} (${{ github.sha }})"
+          user_name: github-actions[bot]
+          user_email: 41898282+github-actions[bot]@users.noreply.github.com
+
+      - name: Post / update sticky PR comment with GIFs
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: smoke-gifs
+          message: |
+            ## TUI smoke renders
+
+            Rendered from ${{ github.sha }} by the `smoke` CI job. Replaced on every push to this PR.
+
+            ### chippy-source-scroll (#227)
+            ![chippy-source-scroll](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/chippy-source-scroll.gif)
+
+            ### chippy-syms (#226)
+            ![chippy-syms](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/chippy-syms.gif)
+
+            ### chippy-bp-and-run (#225)
+            ![chippy-bp-and-run](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/chippy-bp-and-run.gif)
 
   cmos-e2e:
     name: cmos e2e demo
