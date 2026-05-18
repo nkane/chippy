@@ -218,6 +218,52 @@ jobs:
           GOARCH: wasm
         run: go build -o /tmp/chippy.wasm ./cmd/chippy-wasm
 
+  smoke:
+    # VHS-driven smoke tests under test/smoke/. Each .tape script runs
+    # chippy end-to-end through a real TTY (via ttyd) and renders a
+    # GIF. CI only checks that vhs exited 0 — i.e. the tape didn't
+    # crash mid-render. Reviewers scrub the artifact GIFs in PRs.
+    # Skips nessy-* tapes here because the nessy build pulls in
+    # X11 / GL dev headers (handled in the release workflow); chippy
+    # tapes alone exercise the TUI and DAP-attach surfaces this job
+    # exists to protect.
+    name: vhs smoke (chippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          cache: true
+
+      - name: Install ttyd + ffmpeg (vhs deps)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          # ttyd ships a static binary; apt's package is stale.
+          curl -sSL -o /tmp/ttyd https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
+          sudo install -m 0755 /tmp/ttyd /usr/local/bin/ttyd
+          ttyd --version
+
+      - name: Install vhs
+        run: go install github.com/charmbracelet/vhs@v0.11.0
+
+      - name: Build chippy
+        run: go build -o chippy ./cmd/chippy
+
+      - name: Render smoke tapes
+        run: make -C test/smoke chippy
+
+      - name: Upload rendered GIFs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chippy-smoke-gifs
+          path: test/smoke/out/*.gif
+          if-no-files-found: error
+
   cmos-e2e:
     name: cmos e2e demo
     runs-on: ubuntu-latest

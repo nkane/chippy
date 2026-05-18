@@ -1,5 +1,6 @@
 # Build artifacts (binary at repo root only, not the cmd/chippy package)
 /chippy
+/nessy
 *.bin
 *.o
 *.dbg
@@ -16,6 +17,9 @@
 # nessy-side source-view (-dap-attach) work without rebuilding from ca65.
 !roms/demos/*/*.nes
 !roms/demos/*/*.dbg
+
+# VHS smoke-test renders (generated on demand, never committed).
+test/smoke/out/
 
 # MkDocs build output
 site/

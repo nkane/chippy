@@ -572,6 +572,22 @@ The TUI package has headless tests for the memory watchpoint data plane
 (`internal/tui/membp_test.go`) that exercise `WBus` + `processMemHits`
 without the bubble-tea runtime.
 
+### TUI smoke tests (VHS)
+
+End-to-end TUI behavior is recorded by [VHS](https://github.com/charmbracelet/vhs)
+tapes under `test/smoke/`. Each `.tape` drives chippy through a real
+TTY and renders a `.gif`; reviewers scrub the artifacts on PRs and CI
+checks that the render didn't crash.
+
+```sh
+make smoke         # render chippy tapes only
+make smoke-all     # render every tape, incl. nessy-attach
+make smoke-clean   # remove rendered output
+```
+
+Requires `vhs`, `ttyd`, and `ffmpeg` on `$PATH`. Output lands in
+`test/smoke/out/` (gitignored).
+
 ---
 
 ## Project layout
@@ -584,6 +600,7 @@ internal/symbols/   cc65 .dbg parser, symbol + source-line tables
 internal/tui/       Bubble Tea model, panels, modals, commands
 example/            Bundled ca65 demo programs (source + shared linker cfg + Makefile)
 example/c/          Same idea, but the source is C — cc65 → ca65 → ld65 pipeline
+test/smoke/         VHS tape scripts + Makefile for TUI smoke tests
 ```
 
 ---
