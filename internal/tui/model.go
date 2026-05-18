@@ -209,6 +209,14 @@ type Model struct {
 	DisasmFollow bool
 	DisasmAnchor uint16
 
+	// Source viewport: same pattern as disasm. SourceFollow=true (default)
+	// re-centers on the current PC's source line every frame. User scroll
+	// keys flip it off and pin SourceAnchorFile + SourceAnchorLine as the
+	// centered row. ' restores follow mode.
+	SourceFollow     bool
+	SourceAnchorFile string
+	SourceAnchorLine int
+
 	// Theme: the active color palette name. Empty/unknown resolves to
 	// default. NO_COLOR env always forces mono regardless. Persisted
 	// alongside the rest of the savedState fields.
@@ -263,6 +271,7 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 		Status:        "ready",
 		TargetHz:      0,
 		DisasmFollow:  true,
+		SourceFollow:  true,
 		StackAnnotate: true,
 		HistIdx:       -1,
 		RIMatchIdx:    -1,
@@ -635,16 +644,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.MemEditBuf = ""
 			m.Status = fmt.Sprintf("edit $%04X (hex; enter=commit esc=cancel)", m.MemCursor)
 		case "[":
-			m.disasmScroll(-1)
+			if m.ShowSource {
+				m.sourceScroll(-1)
+			} else {
+				m.disasmScroll(-1)
+			}
 		case "]":
-			m.disasmScroll(+1)
+			if m.ShowSource {
+				m.sourceScroll(+1)
+			} else {
+				m.disasmScroll(+1)
+			}
 		case "{":
-			m.disasmScroll(-8)
+			if m.ShowSource {
+				m.sourceScroll(-8)
+			} else {
+				m.disasmScroll(-8)
+			}
 		case "}":
-			m.disasmScroll(+8)
+			if m.ShowSource {
+				m.sourceScroll(+8)
+			} else {
+				m.disasmScroll(+8)
+			}
 		case "'":
-			m.DisasmFollow = true
-			m.Status = "disasm: follow PC"
+			if m.ShowSource {
+				m.SourceFollow = true
+				m.Status = "source: follow PC"
+			} else {
+				m.DisasmFollow = true
+				m.Status = "disasm: follow PC"
+			}
 		case "T":
 			m.StackAnnotate = !m.StackAnnotate
 			if m.StackAnnotate {
@@ -1271,10 +1301,10 @@ func helpPages() [][]helpSection {
 				{"↑ ↓", "move byte cursor ±$10 (auto-scrolls)"},
 				{"e", "edit byte at cursor (hex; enter=commit esc=cancel)"},
 			}},
-			{"Disassembly", [][2]string{
-				{"[ / ]", "scroll one instruction up / down"},
-				{"{ / }", "scroll eight instructions up / down"},
-				{"'", "follow PC again"},
+			{"Disassembly / Source", [][2]string{
+				{"[ / ]", "scroll one line/instruction up/down (active panel)"},
+				{"{ / }", "scroll eight lines/instructions up/down"},
+				{"'", "re-follow PC (drops pinned-anchor mode)"},
 			}},
 			{"Stack panel", [][2]string{
 				{"T", "toggle JSR-frame annotation / raw bytes"},
@@ -1745,6 +1775,43 @@ func (m *Model) disasmScroll(delta int) {
 	m.Status = fmt.Sprintf("disasm @ $%04X (' to follow PC)", a)
 }
 
+// sourceScroll moves the source anchor by `delta` lines (sign matters).
+// Switches the panel into pinned mode so it stops following PC. On the
+// first scroll we bootstrap the anchor from the current PC's source
+// location so the user starts from where they were looking.
+func (m *Model) sourceScroll(delta int) {
+	if m.SourceFollow {
+		loc, ok := m.PCToSrc[m.CPU.PC]
+		if !ok {
+			if near, nok := m.nearestSrcLocBelow(m.CPU.PC); nok {
+				loc = near
+				ok = true
+			}
+		}
+		if !ok {
+			m.Status = "source: no mapping for current PC"
+			return
+		}
+		m.SourceAnchorFile = loc.File
+		m.SourceAnchorLine = loc.Line
+		m.SourceFollow = false
+	}
+	lines, ok := m.SourceFiles[m.SourceAnchorFile]
+	if !ok || len(lines) == 0 {
+		m.Status = fmt.Sprintf("source: %s unavailable", m.SourceAnchorFile)
+		return
+	}
+	n := m.SourceAnchorLine + delta
+	if n < 1 {
+		n = 1
+	}
+	if n > len(lines) {
+		n = len(lines)
+	}
+	m.SourceAnchorLine = n
+	m.Status = fmt.Sprintf("source @ %s:%d (' to follow PC)", m.SourceAnchorFile, n)
+}
+
 // sourceView shows the .s file with the current PC's line highlighted.
 // nearestSrcLocBelow finds the highest mapped PC that is ≤ target and
 // returns its SrcLoc. Used by sourceView to fall back to "the last C
@@ -1784,29 +1851,50 @@ func (m Model) sourceView(w, h int) string {
 		rows = 1
 	}
 
-	loc, ok := m.PCToSrc[m.CPU.PC]
+	// pcLoc: where the CPU's PC maps in source (may differ from the
+	// centered file/line when the user has scrolled away). Used to draw
+	// the 👉 marker even in pinned mode.
+	pcLoc, pcOk := m.PCToSrc[m.CPU.PC]
 	// Fallback: cc65 runtime stubs (pusha, copydata, etc.) have no
 	// source mapping in the .dbg. Rather than blanking the panel mid-
 	// step, find the nearest mapped PC at or below the current one and
 	// show its source — with a hint that we're inside generated code.
 	inGenerated := false
-	if !ok {
+	if !pcOk {
 		if near, nok := m.nearestSrcLocBelow(m.CPU.PC); nok {
-			loc = near
-			ok = true
+			pcLoc = near
+			pcOk = true
 			inGenerated = true
 		}
 	}
-	if !ok {
-		return fitPanel("Source", help.Render("  (no source mapping for current PC)"), w, h)
-	}
-	lines, ok := m.SourceFiles[loc.File]
-	if !ok || len(lines) == 0 {
-		return fitPanel("Source", help.Render(fmt.Sprintf("  (file unavailable: %s)", loc.File)), w, h)
+
+	// Pick what to center on. Follow mode = wherever PC is now. Pinned
+	// mode = the user's anchor.
+	var centerFile string
+	var centerLine int
+	if m.SourceFollow {
+		if !pcOk {
+			return fitPanel("Source", help.Render("  (no source mapping for current PC)"), w, h)
+		}
+		centerFile = pcLoc.File
+		centerLine = pcLoc.Line
+	} else {
+		centerFile = m.SourceAnchorFile
+		centerLine = m.SourceAnchorLine
 	}
 
-	// Center current line in the viewport.
-	cur := loc.Line - 1 // 0-indexed
+	lines, lok := m.SourceFiles[centerFile]
+	if !lok || len(lines) == 0 {
+		return fitPanel("Source", help.Render(fmt.Sprintf("  (file unavailable: %s)", centerFile)), w, h)
+	}
+
+	if centerLine < 1 {
+		centerLine = 1
+	}
+	if centerLine > len(lines) {
+		centerLine = len(lines)
+	}
+	cur := centerLine - 1 // 0-indexed
 	half := rows / 2
 	start := cur - half
 	if start < 0 {
@@ -1824,23 +1912,30 @@ func (m Model) sourceView(w, h int) string {
 	// Per-line breakpoint lookup: first matching bp wins for marker selection.
 	bpLines := map[int]*Breakpoint{}
 	for pc, bp := range m.Breakpoints {
-		if l, ok := m.PCToSrc[pc]; ok && l.File == loc.File {
+		if l, ok := m.PCToSrc[pc]; ok && l.File == centerFile {
 			if _, dup := bpLines[l.Line]; !dup {
 				bpLines[l.Line] = bp
 			}
 		}
 	}
 
+	pcLineInView := pcOk && pcLoc.File == centerFile
+
 	var b strings.Builder
-	title := fmt.Sprintf("Source — %s:%d", loc.File, loc.Line)
-	if inGenerated {
-		title = fmt.Sprintf("Source — %s:%d  (PC $%04X in generated code)", loc.File, loc.Line, m.CPU.PC)
+	var title string
+	switch {
+	case !m.SourceFollow:
+		title = fmt.Sprintf("Source — %s:%d  [pinned · ' follows PC]", centerFile, centerLine)
+	case inGenerated:
+		title = fmt.Sprintf("Source — %s:%d  (PC $%04X in generated code)", centerFile, centerLine, m.CPU.PC)
+	default:
+		title = fmt.Sprintf("Source — %s:%d", centerFile, centerLine)
 	}
 	for i := start; i < end; i++ {
 		lineNum := i + 1
 		var marker string
-		switch lineNum {
-		case loc.Line:
+		switch {
+		case pcLineInView && lineNum == pcLoc.Line:
 			marker = "\U0001F449"
 		default:
 			if bp, ok := bpLines[lineNum]; ok {
@@ -1850,7 +1945,13 @@ func (m Model) sourceView(w, h int) string {
 			}
 		}
 		text := fmt.Sprintf("%s %s  %s", marker, dimAddr.Render(fmt.Sprintf("%4d", lineNum)), lines[i])
-		if lineNum == loc.Line {
+		// Highlight: in follow mode highlight the PC line (which is the
+		// center). In pinned mode highlight the cursor / anchor line so
+		// the user can see where they've scrolled to.
+		switch {
+		case m.SourceFollow && pcLineInView && lineNum == pcLoc.Line:
+			text = curLine.Render(text)
+		case !m.SourceFollow && lineNum == centerLine:
 			text = curLine.Render(text)
 		}
 		b.WriteString(text + "\n")
