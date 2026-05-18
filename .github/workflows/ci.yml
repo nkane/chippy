@@ -238,10 +238,10 @@ jobs:
           go-version: 'stable'
           cache: true
 
-      - name: Install ttyd + ffmpeg (vhs deps)
+      - name: Install ttyd + ffmpeg + cc65 (vhs deps + ROM builder)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg cc65
           # ttyd ships a static binary; apt's package is stale.
           curl -sSL -o /tmp/ttyd https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
           sudo install -m 0755 /tmp/ttyd /usr/local/bin/ttyd
@@ -252,6 +252,9 @@ jobs:
 
       - name: Build chippy
         run: go build -o chippy ./cmd/chippy
+
+      - name: Build example ROMs (gitignored — tapes load count_to_ten.bin)
+        run: make -C example count_to_ten.bin
 
       - name: Render smoke tapes
         run: make -C test/smoke chippy
