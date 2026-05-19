@@ -51,9 +51,56 @@ func TestBuildNES_ResetVectorWiredThroughCart(t *testing.T) {
 	if bus.cpu.PC != 0x8000 {
 		t.Errorf("PC after reset = $%04X; want $8000 (cart $FFFC vector)", bus.cpu.PC)
 	}
-	// MMIO must have three peripherals: cart + joypad + PPU.
-	if len(bus.mmio.Peripherals()) != 3 {
-		t.Errorf("expected 3 peripherals (cart, joypad, PPU); got %d", len(bus.mmio.Peripherals()))
+	// MMIO must have four peripherals: cart + joypad + PPU + OAMDMA.
+	if len(bus.mmio.Peripherals()) != 4 {
+		t.Errorf("expected 4 peripherals (cart, joypad, PPU, OAMDMA); got %d", len(bus.mmio.Peripherals()))
+	}
+}
+
+// $4014 OAMDMA wiring end-to-end: seed CPU RAM page $02 with a known
+// pattern, execute STA $4014 with A=$02 through the real CPU, then
+// verify the PPU's OAM is populated and the next Step drains the 513
+// bus-steal cycles. Covers cmd/nessy/wiring.go's dma registration
+// alongside cart + joypad + PPU.
+func TestBuildNES_OAMDMA_RoundTripsThroughCPU(t *testing.T) {
+	prog := []byte{
+		0xA9, 0x02, // LDA #$02     ; source page = $02XX
+		0x8D, 0x14, 0x40, // STA $4014    ; trigger DMA
+	}
+	rom, err := nes.ParseBytes(buildiNES(prog))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	bus, err := buildNES(rom)
+	if err != nil {
+		t.Fatalf("buildNES: %v", err)
+	}
+
+	// Seed RAM page $02 with values that double as their own index so
+	// off-by-one bugs surface immediately.
+	for i := range 256 {
+		bus.ram.Write(0x0200+uint16(i), byte(i))
+	}
+
+	bus.cpu.Step() // LDA #$02
+	bus.cpu.Step() // STA $4014 → fires DMA, queues 513 stall
+
+	// OAM should now contain the seeded pattern from $0200-$02FF.
+	for i := range 256 {
+		got := bus.ppu.OAM(byte(i))
+		if got != byte(i) {
+			t.Fatalf("OAM[$%02X] = $%02X; want $%02X", i, got, i)
+		}
+	}
+
+	// Next Step drains the bus-steal stall.
+	preCycles := bus.cpu.Cycles
+	stalled := bus.cpu.Step()
+	if stalled != 513 {
+		t.Errorf("post-DMA Step cycles = %d; want 513", stalled)
+	}
+	if delta := bus.cpu.Cycles - preCycles; delta != 513 {
+		t.Errorf("CPU.Cycles delta = %d; want 513", delta)
 	}
 }
 

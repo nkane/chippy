@@ -284,5 +284,11 @@ func (p *PPU) WriteOAM(v byte) {
 	p.oamAddr++
 }
 
+// OAM peeks the sprite memory byte at index i. Side-effect-free —
+// safe for tests and debugger introspection. Reads through the
+// register window ($2004) bump oamAddr and serve open-bus quirks
+// during rendering; OAM is the bypass.
+func (p *PPU) OAM(i byte) byte { return p.oam[i] }
+
 // compile-time check: PPU satisfies cpu.Peripheral.
 var _ cpu.Peripheral = (*PPU)(nil)
