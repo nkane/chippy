@@ -89,6 +89,14 @@ type PPU struct {
 	// Framebuffer: 256 × 240 RGBA. Rendered at vblank entry; presented
 	// to the host via Frame().
 	frame [ScreenWidth * ScreenHeight * 4]byte
+
+	// bgOpaque mirrors `frame` at 1 bool per pixel and records whether
+	// the BG plane wrote a non-zero (i.e. opaque) palette index there.
+	// renderSprites consults this for sprite-0 hit detection and for
+	// the priority-bit "sprite behind BG" composite rule. Populated
+	// by renderFrame; consumed by renderSprites within the same vblank
+	// pass.
+	bgOpaque [ScreenWidth * ScreenHeight]bool
 }
 
 // New constructs a PPU wired to a cartridge (for PPU-bus pattern-table
@@ -240,8 +248,11 @@ func (p *PPU) stepDot() {
 	switch {
 	case p.scanline == vblankScanline && p.dot == 1:
 		// Render the visible frame using state captured at vblank
-		// entry, then raise vblank + NMI.
+		// entry, then raise vblank + NMI. BG layer first so the
+		// sprite compositor can read bgOpaque for sprite-0 hit + the
+		// priority-behind-BG rule.
 		p.renderFrame()
+		p.renderSprites()
 		p.status |= 0x80
 		if p.ctrl&0x80 != 0 && p.nmi != nil {
 			p.nmi.TriggerNMI()
