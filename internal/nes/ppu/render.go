@@ -22,10 +22,17 @@ package ppu
 //  4. Map the 6-bit palette-RAM byte through the 64-color NES palette
 //     to an RGB triple and write (R, G, B, 0xFF) into the framebuffer.
 func (p *PPU) renderFrame() {
+	// Reset bgOpaque before drawing. renderSprites reads it and
+	// every frame starts from a clean slate — sprites composited
+	// against last frame's BG mask would leak over scroll changes.
+	for i := range p.bgOpaque {
+		p.bgOpaque[i] = false
+	}
 	if p.mask&0x08 == 0 {
 		// PPUMASK bit 3 = "show background". When off, the screen is
 		// the universal background color (clipped to the same NES
-		// palette).
+		// palette). bgOpaque stays all-false so sprites win every
+		// per-pixel composite.
 		r, g, b := paletteRGB(p.palette[0])
 		for i := 0; i < len(p.frame); i += 4 {
 			p.frame[i+0] = r
@@ -86,6 +93,7 @@ func (p *PPU) renderFrame() {
 					p.frame[off+1] = g
 					p.frame[off+2] = b
 					p.frame[off+3] = 0xFF
+					p.bgOpaque[py*ScreenWidth+px] = val != 0
 				}
 			}
 		}
