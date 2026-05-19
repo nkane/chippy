@@ -97,6 +97,28 @@ type PPU struct {
 	// by renderFrame; consumed by renderSprites within the same vblank
 	// pass.
 	bgOpaque [ScreenWidth * ScreenHeight]bool
+
+	// Scroll capture for mid-frame splits (issue #206). frameStartScroll
+	// is snapshotted at the end of vblank (when scanline rolls back to
+	// 0) so renderFrame knows what scroll values were active for the
+	// scanlines BEFORE any mid-frame $2005 / $2006 / $2000 writes.
+	// scrollEvents records every such write that occurs during visible
+	// scanlines 0..239; renderFrame walks them in order to derive the
+	// active snapshot per scanline. Reset after renderFrame consumes
+	// them. SMB1's status-bar split uses exactly this surface.
+	frameStartScroll scrollSnapshot
+	scrollEvents     []scrollSnapshot
+}
+
+// scrollSnapshot bundles the scroll-relevant state captured at a
+// specific scanline. baseNametable holds PPUCTRL bits 0-1; scrollX /
+// scrollY are the most recent $2005 writes (or $2006 dervied
+// equivalents — game-of-life scroll updates).
+type scrollSnapshot struct {
+	scanline      int
+	scrollX       byte
+	scrollY       byte
+	baseNametable byte // PPUCTRL bits 0-1
 }
 
 // New constructs a PPU wired to a cartridge (for PPU-bus pattern-table
@@ -183,6 +205,13 @@ func (p *PPU) Write(addr uint16, v byte) {
 		if prev&0x80 == 0 && v&0x80 != 0 && p.status&0x80 != 0 && p.nmi != nil {
 			p.nmi.TriggerNMI()
 		}
+		// Mid-frame nametable swap (bits 0-1) — log so renderFrame can
+		// honor split-screen tricks that change the base nametable
+		// mid-render. v0.1 captured these per-frame; v0.2 events drive
+		// the per-scanline path.
+		if prev&0x03 != v&0x03 {
+			p.recordScrollChange()
+		}
 	case 0x2001:
 		p.mask = v
 	case 0x2003:
@@ -198,6 +227,7 @@ func (p *PPU) Write(addr uint16, v byte) {
 			p.scrollY = v
 			p.scrollHi = false
 		}
+		p.recordScrollChange()
 	case 0x2006:
 		if !p.w {
 			// First write: high byte of 15-bit address. Real silicon
@@ -208,11 +238,60 @@ func (p *PPU) Write(addr uint16, v byte) {
 		} else {
 			p.v = (p.v & 0xFF00) | uint16(v)
 			p.w = false
+			// $2006's second write commits a fresh VRAM address that
+			// the rendering pipeline reads coarse-X / coarse-Y /
+			// nametable bits out of. SMB1 uses $2006 mid-frame to
+			// reset scroll for its status-bar split.
+			p.scrollFromV()
+			p.recordScrollChange()
 		}
 	case 0x2007:
 		p.busWrite(p.v&0x3FFF, v)
 		p.incVRAMAddr()
 	}
+}
+
+// recordScrollChange appends a snapshot of the current scroll state
+// to the per-frame events log — but only when the change happens
+// during a visible scanline (0..239). Writes during vblank
+// (240..261) become the next frame's starting scroll instead and
+// are captured by stepDot's frame-start snapshot path. Same goes
+// for the initial pre-scanline boot: no event log spam before the
+// first frame starts.
+func (p *PPU) recordScrollChange() {
+	if p.scanline < 0 || p.scanline >= ScreenHeight {
+		return
+	}
+	p.scrollEvents = append(p.scrollEvents, scrollSnapshot{
+		scanline:      p.scanline,
+		scrollX:       p.scrollX,
+		scrollY:       p.scrollY,
+		baseNametable: p.ctrl & 0x03,
+	})
+}
+
+// scrollFromV synthesizes scrollX / scrollY / baseNametable from the
+// current 15-bit `v` latch. SMB1 sets scroll mid-frame via $2006
+// pairs (not $2005), so we have to derive the effective scroll from
+// `v`'s coarse + fine bits per the nesdev "loopy" layout:
+//
+//	yyy NN YYYYY XXXXX
+//	||| || ||||| +++++-- coarse X (5 bits)
+//	||| || +++++-------- coarse Y (5 bits)
+//	||| ++-------------- nametable select (2 bits)
+//	+++----------------- fine Y (3 bits)
+//
+// fine X is NOT stored in v (it lives in the separate `x` latch);
+// v0.2 doesn't model fine-X yet, so scrollX is whatever coarse-X*8
+// $2006 implicitly latched.
+func (p *PPU) scrollFromV() {
+	coarseX := byte(p.v & 0x1F)
+	coarseY := byte((p.v >> 5) & 0x1F)
+	fineY := byte((p.v >> 12) & 0x07)
+	nametable := byte((p.v >> 10) & 0x03)
+	p.scrollX = coarseX * 8
+	p.scrollY = coarseY*8 + fineY
+	p.ctrl = (p.ctrl &^ 0x03) | nametable
 }
 
 // incVRAMAddr advances v after a $2007 access. PPUCTRL bit 2 selects
@@ -243,6 +322,16 @@ func (p *PPU) stepDot() {
 		if p.scanline >= scanlinesPerFrame {
 			p.scanline = 0
 			p.frameCount++
+			// New frame begins. Snapshot the current scroll values so
+			// renderFrame at this frame's eventual vblank entry knows
+			// what was active for the scanlines that precede any
+			// mid-frame $2005 / $2006 / $2000 writes.
+			p.frameStartScroll = scrollSnapshot{
+				scanline:      0,
+				scrollX:       p.scrollX,
+				scrollY:       p.scrollY,
+				baseNametable: p.ctrl & 0x03,
+			}
 		}
 	}
 	switch {
