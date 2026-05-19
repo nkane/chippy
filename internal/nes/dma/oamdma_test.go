@@ -69,6 +69,31 @@ func TestOAMDMA_Range(t *testing.T) {
 	}
 }
 
+// OAMDMA reads exactly $XX00-$XXFF — never overruns into the
+// following page. Seeds page $02 with one value and page $03 with a
+// different value; after a DMA from $02, OAM must contain only the
+// $02 values. Catches off-by-one bus.Read addressing.
+func TestOAMDMA_ReadsExactly256BytesNoOverrun(t *testing.T) {
+	ram := cpu.NewRAM()
+	for i := range 256 {
+		ram.Write(0x0200+uint16(i), 0x11)
+		ram.Write(0x0300+uint16(i), 0x22)
+	}
+	pp := &fakePPU{}
+	d := New(ram, pp, &fakeStaller{})
+
+	d.Write(0x4014, 0x02)
+
+	if len(pp.oam) != 256 {
+		t.Fatalf("oam writes = %d; want exactly 256", len(pp.oam))
+	}
+	for i, b := range pp.oam {
+		if b != 0x11 {
+			t.Fatalf("oam[%d] = $%02X; want $11 (no over-read into page $03)", i, b)
+		}
+	}
+}
+
 // End-to-end through MMIO: register the peripheral, write through
 // the bus, observe both side effects (OAM populated + stall queued).
 // Catches register-order bugs in cmd/nessy/wiring.go.
