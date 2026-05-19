@@ -71,8 +71,9 @@ func (c *Controller) State() uint8 { return c.state }
 // $4016 bit 0 latches both controllers at once. Reads from $4016 shift
 // out P1; reads from $4017 shift out P2.
 type Port struct {
-	P1, P2 Controller
-	strobe bool
+	P1, P2           Controller
+	strobe           bool
+	frameCounterSink FrameCounterSink
 }
 
 // New returns a fresh Port with both controllers cleared.
@@ -111,11 +112,32 @@ func (p *Port) read(c *Controller) byte {
 	return bit
 }
 
-// Write handles the strobe line on $4016. Bit 0 controls the latch; the
-// other bits drive expansion-port outputs that chippy does not model.
-// $4017 writes belong to the APU frame counter — accepted here as a no-op
-// until the APU peripheral overlaps this range.
+// FrameCounterSink is the slice of the APU's surface the joypad
+// forwards $4017 writes into. Real silicon maps that address to the
+// APU's frame-counter register (bit 7 = mode, bit 6 = IRQ inhibit).
+// The joypad owns the $4016-$4017 *Range* on the CPU bus so we
+// can't easily split MMIO dispatch; forwarding here keeps both
+// peripherals decoupled.
+type FrameCounterSink interface {
+	SetFrameCounter(v byte)
+}
+
+// AttachFrameCounter wires the APU's frame-counter setter so $4017
+// writes flow there. Optional — when nil, $4017 writes drop on the
+// floor (legacy v0.1 behavior).
+func (p *Port) AttachFrameCounter(s FrameCounterSink) {
+	p.frameCounterSink = s
+}
+
+// Write handles the strobe line on $4016 and forwards $4017 writes
+// to the attached APU (if any).
 func (p *Port) Write(addr uint16, v byte) {
+	if addr == 0x4017 {
+		if p.frameCounterSink != nil {
+			p.frameCounterSink.SetFrameCounter(v)
+		}
+		return
+	}
 	if addr != 0x4016 {
 		return
 	}

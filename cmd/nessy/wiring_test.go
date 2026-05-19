@@ -51,9 +51,10 @@ func TestBuildNES_ResetVectorWiredThroughCart(t *testing.T) {
 	if bus.cpu.PC != 0x8000 {
 		t.Errorf("PC after reset = $%04X; want $8000 (cart $FFFC vector)", bus.cpu.PC)
 	}
-	// MMIO must have four peripherals: cart + joypad + PPU + OAMDMA.
-	if len(bus.mmio.Peripherals()) != 4 {
-		t.Errorf("expected 4 peripherals (cart, joypad, PPU, OAMDMA); got %d", len(bus.mmio.Peripherals()))
+	// MMIO must have six peripherals: cart + joypad + APU + APU
+	// status + PPU + OAMDMA.
+	if len(bus.mmio.Peripherals()) != 6 {
+		t.Errorf("expected 6 peripherals (cart, joypad, APU, APU-status, PPU, OAMDMA); got %d", len(bus.mmio.Peripherals()))
 	}
 }
 
