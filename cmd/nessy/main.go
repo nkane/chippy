@@ -21,7 +21,7 @@ func main() {
 		dbgPath   = flag.String("dbg", "", "cc65/ld65 .dbg symbol file (auto-detected as <rom>.dbg if omitted)")
 		dapPort   = flag.Int("dap-port", 14785, "DAP server TCP port; 0 disables the listener")
 		scale     = flag.Int("scale", 3, "integer window scale (3 → 768x720)")
-		mute      = flag.Bool("mute", false, "disable audio (no-op in v0.1, APU lands in v0.2)")
+		mute      = flag.Bool("mute", false, "disable audio output (APU still runs; samples are dropped)")
 		waitDbg   = flag.Bool("wait-for-debugger", false, "pause the CPU at boot until a DAP client attaches (set by `chippy -nessy`)")
 	)
 	flag.Usage = func() {
@@ -29,7 +29,6 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
-	_ = mute
 
 	// Accept the positional form: `nessy game.nes`.
 	if *romPath == "" && flag.NArg() == 1 {
@@ -111,6 +110,13 @@ func main() {
 	}
 
 	g := newGame(bus, cpuMu)
+	sink, err := newAudioSink(bus.apu, cpuMu, *mute)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "nessy: audio init failed (continuing muted):", err)
+	}
+	g.audio = sink
+	sink.start()
+	defer sink.close()
 	ebiten.SetWindowSize(256*(*scale), 240*(*scale))
 	ebiten.SetWindowTitle(fmt.Sprintf("nessy — %s", filepath.Base(*romPath)))
 	ebiten.SetTPS(60)

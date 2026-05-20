@@ -46,6 +46,7 @@ var keyMap = []struct {
 type game struct {
 	bus   *nesBus
 	cpuMu *sync.Mutex
+	audio *audioSink // optional; nil when -mute set or audio init failed
 }
 
 func newGame(bus *nesBus, cpuMu *sync.Mutex) *game {
