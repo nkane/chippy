@@ -9,6 +9,7 @@ package main
 import (
 	"github.com/nkane/chippy/internal/cpu"
 	"github.com/nkane/chippy/internal/nes"
+	"github.com/nkane/chippy/internal/nes/apu"
 	"github.com/nkane/chippy/internal/nes/cart"
 	"github.com/nkane/chippy/internal/nes/dma"
 	"github.com/nkane/chippy/internal/nes/joypad"
@@ -24,6 +25,7 @@ type nesBus struct {
 	ppu  *ppu.PPU
 	joy  *joypad.Port
 	dma  *dma.OAMDMA
+	apu  *apu.APU
 	mmio *cpu.MMIO
 	ram  *cpu.RAM
 	cart cart.Cartridge
@@ -59,6 +61,21 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 		return nil, err
 	}
 
+	// APU first — joypad's $4017 forwarder needs the sink ready
+	// before the CPU starts touching either peripheral. The APU
+	// claims $4000-$4013 (channel registers). $4015 (status /
+	// channel enables) registers separately via apu.StatusPeripheral
+	// so it doesn't collide with $4014 OAMDMA. $4017 writes flow
+	// in through jp.AttachFrameCounter below.
+	ap := apu.New()
+	if err := mmio.Register(ap); err != nil {
+		return nil, err
+	}
+	if err := mmio.Register(apu.NewStatus(ap)); err != nil {
+		return nil, err
+	}
+	jp.AttachFrameCounter(ap)
+
 	processor := cpu.NewVariant(mmio, cpu.VariantNES)
 	// NewVariant called Reset() before MMIO had the cart's $FFFC vector
 	// visible? No — we registered the cart above, so Reset's vector
@@ -90,6 +107,7 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 		ppu:  pp,
 		joy:  jp,
 		dma:  oam,
+		apu:  ap,
 		mmio: mmio,
 		ram:  ram,
 		cart: c,
