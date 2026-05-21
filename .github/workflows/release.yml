@@ -263,13 +263,27 @@ jobs:
         run: |
           ver="${GITHUB_REF_NAME#nessy-v}"
           archive="nessy_${ver}_${{ matrix.goos }}_${{ matrix.goarch }}.${{ matrix.archive_ext }}"
-          # First runner here creates the release; subsequent runners
-          # fall through to upload. `gh release view` exits non-zero
-          # only when the release doesn't exist, so we `|| true` the
-          # create when the view succeeds.
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+          # All four matrix runners start in parallel. The original
+          # "view || create" idiom races: if none see the release yet
+          # they all race to create, the API hands one a 200 and the
+          # rest a 422 ("Release.tag_name already exists"). #251.
+          #
+          # Race-safe version: tolerate create-failure when the
+          # release already exists, then poll until visible so the
+          # subsequent upload is guaranteed a target.
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release create "$GITHUB_REF_NAME" \
               --title "$GITHUB_REF_NAME" \
-              --notes "nessy alpha release. NROM-only, background-only PPU, no audio. Source-build is the supported path on every platform; the attached binaries are convenience artifacts." \
-              --prerelease
+              --notes "nessy alpha release. See the docs at https://github.com/nkane/chippy for build + run instructions. Source-build is the supported path on every platform; the attached binaries are convenience artifacts." \
+              --prerelease 2>/dev/null || true
+          fi
+          # Up to ~30 s of poll for the winning runner's release to
+          # become visible to this runner. Real-world propagation is
+          # usually sub-second; the headroom absorbs API hiccups.
+          for i in 1 2 3 4 5 6; do
+            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 5
+          done
           gh release upload "$GITHUB_REF_NAME" "$archive" "$archive.sha256" --clobber
