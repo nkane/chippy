@@ -137,7 +137,7 @@ func main() {
 	}
 
 	g := newGame(bus, cpuMu)
-	sink, err := newAudioSink(bus.apu, cpuMu, *mute)
+	sink, err := newAudioSink(*mute)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "nessy: audio init failed (continuing muted):", err)
 	}

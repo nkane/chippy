@@ -11,50 +11,39 @@ import (
 	"github.com/nkane/chippy/internal/nes/apu"
 )
 
-// apuStream is an io.Reader that pulls samples from the APU's ring
-// buffer and reshapes them into Ebiten's expected PCM layout:
-// 16-bit signed little-endian *stereo* (the APU emits mono, so each
-// sample duplicates across L/R). On a read shortfall — the CPU
-// hasn't generated enough samples yet for the audio thread's
-// hunger — apuStream pads with silence so the audio context never
-// stalls.
+// apuStream is an io.Reader Ebiten's audio Player pulls PCM from on
+// its own goroutine. Decoupled from cpuMu (issue / pprof: the audio
+// thread used to drain APU.Samples() under cpuMu and spent ~38% of
+// runtime in pthread_cond_signal contending with the game loop's
+// 16ms Update). Now the game loop pushes ready stereo bytes into a
+// per-stream queue under a dedicated mutex; the audio thread only
+// touches that queue.
 //
-// Ebiten calls Read on its own goroutine; cpuMu is shared with the
-// game-loop and DAP-server goroutines so APU.Samples() observes a
-// consistent view of the channel state.
+// Format: 16-bit signed little-endian *stereo* (mono APU output
+// duplicated across L/R). Pads short reads with silence so the
+// player keeps polling instead of stalling.
 type apuStream struct {
-	apu     *apu.APU
-	cpuMu   *sync.Mutex
-	pending []byte // unflushed bytes left over from the previous Read
+	mu      sync.Mutex
+	pending []byte
 }
 
-// Read fills p with stereo PCM bytes. Pads with silence if the APU
-// ring hasn't produced enough samples to satisfy the request — keeps
-// the audio thread from blocking on an under-fed CPU.
+// Push appends new stereo PCM bytes. Called from the game-loop
+// goroutine after it drains APU.Samples() under cpuMu — we copy /
+// reshape outside the cpuMu critical section so the audio thread
+// never races against the game's per-frame Step batch.
+func (s *apuStream) Push(stereo []byte) {
+	s.mu.Lock()
+	s.pending = append(s.pending, stereo...)
+	s.mu.Unlock()
+}
+
+// Read fills p with whatever's queued; silence-pads any shortfall.
+// Never blocks waiting for the producer.
 func (s *apuStream) Read(p []byte) (int, error) {
-	for len(s.pending) < len(p) {
-		s.cpuMu.Lock()
-		mono := s.apu.Samples()
-		s.cpuMu.Unlock()
-		if len(mono) == 0 {
-			break
-		}
-		// Each mono int16 becomes 4 bytes of stereo PCM (L+R little-
-		// endian). Grow pending in one allocation per drain pass.
-		s.pending = append(s.pending, make([]byte, len(mono)*4)...)
-		dst := s.pending[len(s.pending)-len(mono)*4:]
-		for i, sample := range mono {
-			lo, hi := byte(sample), byte(sample>>8)
-			off := i * 4
-			dst[off+0] = lo
-			dst[off+1] = hi
-			dst[off+2] = lo
-			dst[off+3] = hi
-		}
-	}
+	s.mu.Lock()
 	n := copy(p, s.pending)
 	s.pending = s.pending[n:]
-	// Pad shortfall with silence so the audio context keeps polling.
+	s.mu.Unlock()
 	if n < len(p) {
 		for i := n; i < len(p); i++ {
 			p[i] = 0
@@ -71,6 +60,7 @@ func (s *apuStream) Read(p []byte) (int, error) {
 type audioSink struct {
 	ctx    *audio.Context
 	player *audio.Player
+	stream *apuStream
 }
 
 // newAudioSink wires the APU's sample ring into Ebiten's audio
@@ -78,17 +68,17 @@ type audioSink struct {
 // cleanly. The Context follows Ebiten's process-singleton rule —
 // at most one per process — so any future audio source (e.g. UI
 // chimes) must reuse this one.
-func newAudioSink(a *apu.APU, cpuMu *sync.Mutex, mute bool) (*audioSink, error) {
+func newAudioSink(mute bool) (*audioSink, error) {
 	if mute {
 		return nil, nil
 	}
 	ctx := audio.NewContext(apu.SampleRate)
-	stream := &apuStream{apu: a, cpuMu: cpuMu}
+	stream := &apuStream{}
 	player, err := ctx.NewPlayer(io.Reader(stream))
 	if err != nil {
 		return nil, err
 	}
-	return &audioSink{ctx: ctx, player: player}, nil
+	return &audioSink{ctx: ctx, player: player, stream: stream}, nil
 }
 
 // start kicks off playback. Called once after newGame so the
@@ -98,6 +88,27 @@ func (s *audioSink) start() {
 		return
 	}
 	s.player.Play()
+}
+
+// push reshapes APU mono samples into stereo PCM + enqueues them
+// for the audio thread. Called from the game loop right after each
+// per-frame CPU step batch (inside the cpuMu critical section, but
+// the queue mutation itself drops cpuMu and grabs the stream's own
+// mu — no cross-thread contention).
+func (s *audioSink) push(mono []int16) {
+	if s == nil || len(mono) == 0 {
+		return
+	}
+	stereo := make([]byte, len(mono)*4)
+	for i, sample := range mono {
+		lo, hi := byte(sample), byte(sample>>8)
+		off := i * 4
+		stereo[off+0] = lo
+		stereo[off+1] = hi
+		stereo[off+2] = lo
+		stereo[off+3] = hi
+	}
+	s.stream.Push(stereo)
 }
 
 // close stops + releases the player. Best-effort; errors during
