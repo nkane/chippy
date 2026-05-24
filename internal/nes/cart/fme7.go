@@ -60,9 +60,21 @@ type FME7 struct {
 	irqPending     bool
 
 	irqSink IRQSink
+
+	// audioSink (optional) is the Sunsoft 5B audio chip. nil leaves
+	// $C000 / $E000 writes as no-ops (the cart side of mapper 69
+	// without the audio half). cmd/nessy/wiring.go installs this
+	// after constructing the APU's 5B chip.
+	audioSink Sunsoft5BSink
 }
 
 const fme7IRQSource = "fme7"
+
+// Sunsoft5BSink is what the FME-7 cart forwards $C000 / $E000
+// writes to. apu.Sunsoft5B satisfies it directly.
+type Sunsoft5BSink interface {
+	Write(addr uint16, v byte)
+}
 
 // NewFME7 constructs an FME-7 cart from a parsed iNES ROM.
 func NewFME7(rom *nes.ROM) (*FME7, error) {
@@ -89,6 +101,11 @@ func NewFME7(rom *nes.ROM) (*FME7, error) {
 // SetIRQSink wires the CPU's IRQ surface. Optional; without a sink
 // the IRQ flag still tracks but nothing asserts on the CPU line.
 func (c *FME7) SetIRQSink(s IRQSink) { c.irqSink = s }
+
+// SetAudioSink wires the Sunsoft 5B audio half. Optional; without
+// a sink the cart silently drops $C000 / $E000 writes (matches the
+// behaviour of the FME-7-without-audio variant of the package).
+func (c *FME7) SetAudioSink(s Sunsoft5BSink) { c.audioSink = s }
 
 // CPURead handles $6000-$FFFF.
 func (c *FME7) CPURead(addr uint16) byte {
@@ -139,9 +156,14 @@ func (c *FME7) CPUWrite(addr uint16, v byte) {
 		c.applyParameter(v)
 		return
 	default:
-		// $C000-$FFFF would address the Sunsoft 5B audio register pair
-		// on the audio variant of the chip. v0.5 ships FME-7 without
-		// the audio expansion; treat as no-op.
+		// $C000-$FFFF addresses the Sunsoft 5B audio register pair
+		// on the audio variant of the chip ($C000 = address latch,
+		// $E000 = data write). Forwarded to the audio sink when one
+		// is wired (cmd/nessy installs apu.Sunsoft5B); otherwise
+		// silently dropped to match the non-audio FME-7 variant.
+		if c.audioSink != nil {
+			c.audioSink.Write(addr, v)
+		}
 		return
 	}
 }
