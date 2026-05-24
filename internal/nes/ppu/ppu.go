@@ -534,7 +534,17 @@ func (p *PPU) Tick(cpuCycles int) {
 
 func (p *PPU) stepDot() {
 	p.dot++
-	if p.dot >= dotsPerScanline {
+	// Odd-frame dot-skip: on NTSC, with rendering enabled, the
+	// pre-render scanline (261) is one dot shorter on odd frames —
+	// the PPU jumps from dot 339 straight to (0,0) of the next
+	// frame, skipping dot 340. Games like SMB1 are timing-sensitive
+	// to this: the missing dot keeps the 240-line visible scroll in
+	// phase with the audio frame rate over the long horizon.
+	boundary := dotsPerScanline
+	if p.scanline == preRenderScanline && p.renderingEnabled() && p.frameCount&1 == 1 {
+		boundary = dotsPerScanline - 1
+	}
+	if p.dot >= boundary {
 		p.dot = 0
 		p.scanline++
 		if p.scanline >= scanlinesPerFrame {
