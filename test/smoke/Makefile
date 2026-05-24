@@ -23,7 +23,8 @@ NESSY     := $(REPO_ROOT)/nessy
 CHIPPY_TAPES := \
 	$(REPO_ROOT)/test/smoke/chippy-source-scroll.tape \
 	$(REPO_ROOT)/test/smoke/chippy-syms.tape \
-	$(REPO_ROOT)/test/smoke/chippy-bp-and-run.tape
+	$(REPO_ROOT)/test/smoke/chippy-bp-and-run.tape \
+	$(REPO_ROOT)/test/smoke/chippy-console.tape
 
 NESSY_TAPES := \
 	$(REPO_ROOT)/test/smoke/nessy-attach.tape
