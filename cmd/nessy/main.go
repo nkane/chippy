@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -23,12 +24,38 @@ func main() {
 		scale     = flag.Int("scale", 3, "integer window scale (3 → 768x720)")
 		mute      = flag.Bool("mute", false, "disable audio output (APU still runs; samples are dropped)")
 		waitDbg   = flag.Bool("wait-for-debugger", false, "pause the CPU at boot until a DAP client attaches (set by `chippy -nessy`)")
+		pprofPath = flag.String("pprof", "", "write a CPU profile to FILE for the lifetime of the run; analyze with `go tool pprof FILE`")
 	)
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: nessy [-rom PATH | PATH] [-dbg PATH] [-dap-port N] [-scale N] [-mute] [-wait-for-debugger]\n\n")
+		fmt.Fprintf(os.Stderr, "usage: nessy [-rom PATH | PATH] [-dbg PATH] [-dap-port N] [-scale N] [-mute] [-wait-for-debugger] [-pprof FILE]\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	// CPU profile (optional). Starts before any heavy work so the
+	// Ebiten game loop's per-frame Update + Draw show up in the
+	// sample stream. Stopped via deferred close — quitting the
+	// nessy window or hitting Ctrl+C from the launching terminal
+	// flushes the file.
+	if *pprofPath != "" {
+		f, err := os.Create(*pprofPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "nessy: pprof create:", err)
+			os.Exit(1)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			fmt.Fprintln(os.Stderr, "nessy: pprof start:", err)
+			os.Exit(1)
+		}
+		fmt.Fprintln(os.Stderr, "nessy: CPU profile recording to", *pprofPath)
+		defer func() {
+			pprof.StopCPUProfile()
+			if err := f.Close(); err != nil {
+				fmt.Fprintln(os.Stderr, "nessy: pprof close:", err)
+			}
+			fmt.Fprintln(os.Stderr, "nessy: profile written. Analyze with `go tool pprof", *pprofPath+"`")
+		}()
+	}
 
 	// Accept the positional form: `nessy game.nes`.
 	if *romPath == "" && flag.NArg() == 1 {
