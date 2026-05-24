@@ -9,9 +9,18 @@ import (
 	"sync/atomic"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
 	"github.com/nkane/chippy/internal/nes/joypad"
 )
+
+// fastForwardMultiplier is the cycle-budget multiplier applied while
+// Tab is held. 4× advances ~240 NES frames per real second — fast
+// enough to skim past intros + grinding without overshooting
+// human-reactable scenes. Audio is muted-ish (samples still drain but
+// at 4× rate the pitch is unintelligible; user's expectation under
+// fast-forward).
+const fastForwardMultiplier = 4
 
 // cpuCyclesPerFrame is the integer floor of the NES 2A03's master clock
 // (1.789773 MHz) divided by the 60 Hz frame cadence: ~29830 cycles per
@@ -82,8 +91,12 @@ func (g *game) Update() error {
 			"nessy: game loop entering autonomous-step mode at PC=$%04X cycles=%d (waitForAttach=%v dapAttached=%d)\n",
 			g.bus.cpu.PC, g.bus.cpu.Cycles, waitForAttach.Load(), dapAttached.Load())
 	}
+	budget := uint64(cpuCyclesPerFrame)
+	if ebiten.IsKeyPressed(ebiten.KeyTab) {
+		budget *= fastForwardMultiplier
+	}
 	g.cpuMu.Lock()
-	target := g.bus.cpu.Cycles + cpuCyclesPerFrame
+	target := g.bus.cpu.Cycles + budget
 	for g.bus.cpu.Cycles < target && !g.bus.cpu.Halted {
 		g.bus.cpu.Step()
 	}
@@ -123,5 +136,12 @@ func (g *game) Layout(outsideWidth, outsideHeight int) (int, int) {
 func (g *game) pollInput() {
 	for _, m := range keyMap {
 		g.bus.joy.P1.Set(m.btn, ebiten.IsKeyPressed(m.key))
+	}
+	// Player-UX hotkeys (edge-triggered; held keys don't re-fire).
+	if inpututil.IsKeyJustPressed(ebiten.KeyF11) {
+		ebiten.SetFullscreen(!ebiten.IsFullscreen())
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyF12) {
+		g.takeScreenshot()
 	}
 }

@@ -144,6 +144,9 @@ the v0.2+ roadmap.
 
 Controls: Arrows = D-pad, Z = A, X = B, Enter = Start, Right Shift = Select.
 
+Player hotkeys: Tab (hold) = 4× fast-forward, F11 = fullscreen toggle,
+F12 = save a PNG of the current frame to `~/.nessy/screenshots/`.
+
 #### One-shell debug launch
 
 Skip the two-terminal dance. `chippy -nessy ROM` spawns nessy in the
