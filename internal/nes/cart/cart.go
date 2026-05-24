@@ -33,6 +33,19 @@ type Cartridge interface {
 	// Most carts pin this at construction; MMC1+ later mappers can
 	// flip it dynamically (defer to v0.2+).
 	Mirroring() nes.Mirroring
+
+	// BatteryBacked reports whether the cart's PRG-RAM ($6000-$7FFF)
+	// is supposed to persist across power-off (iNES flag6 bit 1).
+	// nessy uses this to decide whether to read/write a sibling
+	// .sav file. NROM / UxROM / CNROM all return false (no PRG-RAM
+	// slot or non-battery). MMC1 / MMC3 honor the header bit.
+	BatteryBacked() bool
+
+	// PRGRAM exposes the 8 KiB PRG-RAM region for save / restore.
+	// Returns nil when the cart has no PRG-RAM (NROM / UxROM /
+	// CNROM). The returned slice aliases internal storage —
+	// callers must copy if they need to detach.
+	PRGRAM() []byte
 }
 
 // Open dispatches on the parsed ROM's Mapper byte and returns the

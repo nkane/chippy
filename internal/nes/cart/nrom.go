@@ -82,3 +82,7 @@ func (c *NROM) PPUWrite(addr uint16, v byte) {
 }
 
 func (c *NROM) Mirroring() nes.Mirroring { return c.mirroring }
+
+// NROM has no PRG-RAM slot — never battery-backed.
+func (c *NROM) BatteryBacked() bool { return false }
+func (c *NROM) PRGRAM() []byte      { return nil }
