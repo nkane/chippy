@@ -13,7 +13,7 @@ import (
 // the ROM file at load time. CHR is persisted only for CHR-RAM carts
 // (CHR-ROM is immutable + part of the ROM).
 type CartState struct {
-	Kind  string // "NROM" | "UxROM" | "CNROM" | "MMC1" | "MMC3" | "FME7" | "VRC" | "VRC6"
+	Kind  string // "NROM" | "UxROM" | "CNROM" | "MMC1" | "MMC3" | "FME7" | "VRC" | "VRC6" | "VRC7"
 	NROM  *NROMState
 	UxROM *UxROMState
 	CNROM *CNROMState
@@ -22,6 +22,27 @@ type CartState struct {
 	FME7  *FME7State
 	VRC   *VRCState
 	VRC6  *VRC6State
+	VRC7  *VRC7State
+}
+
+// VRC7State — banking + IRQ + PRG-RAM + CHR-RAM (rare). Audio
+// chip state lives in apu.VRC7Audio (not persisted — same
+// rationale as Sunsoft 5B + VRC6: chips restored cold are silent
+// until the game writes their registers).
+type VRC7State struct {
+	PrgBanks          [3]byte
+	ChrBanks          [8]byte
+	Mirroring         nes.Mirroring
+	WRAMOn            bool
+	IRQLatch          byte
+	IRQCounter        byte
+	IRQEnable         bool
+	IRQEnableAfterAck bool
+	IRQMode           byte
+	IRQPrescaler      int
+	IRQPending        bool
+	PRGRAM            [0x2000]byte
+	CHRRAM            []byte
 }
 
 // VRC6State — banking + IRQ + PRG-RAM + CHR-RAM (rare). VRC6 audio
@@ -143,6 +164,8 @@ func SaveCart(c Cartridge) (CartState, error) {
 		return CartState{Kind: "VRC", VRC: m.saveState()}, nil
 	case *VRC6:
 		return CartState{Kind: "VRC6", VRC6: m.saveState()}, nil
+	case *VRC7:
+		return CartState{Kind: "VRC7", VRC7: m.saveState()}, nil
 	default:
 		return CartState{}, fmt.Errorf("cart: unsupported type for save-state %T", c)
 	}
@@ -193,6 +216,11 @@ func LoadCart(c Cartridge, s CartState) error {
 			return fmt.Errorf("cart: state kind %q doesn't match VRC6 cart", s.Kind)
 		}
 		return m.loadState(*s.VRC6)
+	case *VRC7:
+		if s.Kind != "VRC7" || s.VRC7 == nil {
+			return fmt.Errorf("cart: state kind %q doesn't match VRC7 cart", s.Kind)
+		}
+		return m.loadState(*s.VRC7)
 	default:
 		return fmt.Errorf("cart: unsupported type for load-state %T", c)
 	}
@@ -379,6 +407,51 @@ func (c *VRC6) loadState(s VRC6State) error {
 	if c.chrIsRAM {
 		if len(s.CHRRAM) != len(c.chr) {
 			return fmt.Errorf("vrc6: CHR-RAM length mismatch (have %d, got %d)", len(c.chr), len(s.CHRRAM))
+		}
+		copy(c.chr, s.CHRRAM)
+	}
+	return nil
+}
+
+// --- VRC7 ---
+
+func (c *VRC7) saveState() *VRC7State {
+	s := &VRC7State{
+		PrgBanks:          c.prgBanks,
+		ChrBanks:          c.chrBanks,
+		Mirroring:         c.mirroring,
+		WRAMOn:            c.wramOn,
+		IRQLatch:          c.irqLatch,
+		IRQCounter:        c.irqCounter,
+		IRQEnable:         c.irqEnable,
+		IRQEnableAfterAck: c.irqEnableAfterAck,
+		IRQMode:           c.irqMode,
+		IRQPrescaler:      c.irqPrescaler,
+		IRQPending:        c.irqPending,
+		PRGRAM:            c.prgRAM,
+	}
+	if c.chrIsRAM {
+		s.CHRRAM = append(s.CHRRAM, c.chr...)
+	}
+	return s
+}
+
+func (c *VRC7) loadState(s VRC7State) error {
+	c.prgBanks = s.PrgBanks
+	c.chrBanks = s.ChrBanks
+	c.mirroring = s.Mirroring
+	c.wramOn = s.WRAMOn
+	c.irqLatch = s.IRQLatch
+	c.irqCounter = s.IRQCounter
+	c.irqEnable = s.IRQEnable
+	c.irqEnableAfterAck = s.IRQEnableAfterAck
+	c.irqMode = s.IRQMode
+	c.irqPrescaler = s.IRQPrescaler
+	c.irqPending = s.IRQPending
+	c.prgRAM = s.PRGRAM
+	if c.chrIsRAM {
+		if len(s.CHRRAM) != len(c.chr) {
+			return fmt.Errorf("vrc7: CHR-RAM length mismatch (have %d, got %d)", len(c.chr), len(s.CHRRAM))
 		}
 		copy(c.chr, s.CHRRAM)
 	}

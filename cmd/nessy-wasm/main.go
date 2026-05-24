@@ -117,6 +117,11 @@ func buildBus(rom *nes.ROM) (*bus, error) {
 		ap.SetVRC6Audio(v6)
 		m.SetAudioSink(v6)
 	}
+	if m, ok := c.(interface{ SetAudioSink(cart.VRC7AudioSink) }); ok {
+		v7 := apu.NewVRC7Audio()
+		ap.SetVRC7Audio(v7)
+		m.SetAudioSink(v7)
+	}
 
 	pp := ppu.New(c, processor)
 	if err := mmio.Register(pp); err != nil {
