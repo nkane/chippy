@@ -63,17 +63,28 @@ type PPU struct {
 	status  byte // $2002 PPUSTATUS (bit 7 = vblank)
 	oamAddr byte // $2003 OAMADDR
 
-	// VRAM addressing latches. The 2C02 has a 15-bit "v" current
-	// address used by $2007 access (and rendering, on real silicon).
-	// $2005 / $2006 share a single write-toggle "w" — first write sets
-	// the high half, second write sets the low half. v0.1 ignores the
-	// fine X / scroll subtleties since we don't model mid-frame
-	// scrolling; only "v" matters for $2007 r/w.
-	v        uint16
-	w        bool
-	readBuf  byte // $2007 read returns the previously-buffered byte
-	scrollX  byte // most-recent $2005 X (snapshotted at frame render)
-	scrollY  byte // most-recent $2005 Y
+	// VRAM addressing latches per the nesdev "loopy" register layout
+	// (issue #268). Both v and t are 15-bit; their layout is:
+	//
+	//   yyy NN YYYYY XXXXX
+	//   ||| || ||||| +++++-- coarse X scroll (5 bits)
+	//   ||| || +++++-------- coarse Y scroll (5 bits)
+	//   ||| ++-------------- nametable select (2 bits)
+	//   +++----------------- fine Y scroll (3 bits)
+	//
+	// fineX (x) is a separate 3-bit latch that picks the leftmost
+	// rendered bit of the prefetched pattern row. w is the shared
+	// write-toggle for $2005 + $2006 (cleared by $2002 reads).
+	v       uint16 // current VRAM address — drives $2007 + per-dot fetches
+	t       uint16 // temp VRAM address — staged for the next render
+	x       byte   // fine X scroll (3 bits)
+	w       bool   // $2005 / $2006 write toggle
+	readBuf byte   // $2007 read returns the previously-buffered byte
+	// scrollX / scrollY are the legacy per-frame snapshot path —
+	// kept alongside the loopy latches until renderScanline migrates
+	// to per-dot v reads (later commit in this branch).
+	scrollX  byte
+	scrollY  byte
 	scrollHi bool // tracks $2005 toggle state alongside $2006
 
 	// Memory the PPU owns directly.
@@ -146,7 +157,7 @@ func New(cart Cart, nmi NMI) *PPU {
 // on.
 func (p *PPU) Reset() {
 	p.ctrl, p.mask, p.status, p.oamAddr = 0, 0, 0, 0
-	p.v, p.w, p.readBuf = 0, false, 0
+	p.v, p.t, p.x, p.w, p.readBuf = 0, 0, 0, false, 0
 	p.scrollX, p.scrollY, p.scrollHi = 0, 0, false
 	p.scanline, p.dot, p.frameCount = preRenderScanline, 0, 0
 	for i := range p.vram {
@@ -216,10 +227,11 @@ func (p *PPU) Write(addr uint16, v byte) {
 		if prev&0x80 == 0 && v&0x80 != 0 && p.status&0x80 != 0 && p.nmi != nil {
 			p.nmi.TriggerNMI()
 		}
-		// Mid-frame nametable swap (bits 0-1) — log so renderFrame can
-		// honor split-screen tricks that change the base nametable
-		// mid-render. v0.1 captured these per-frame; v0.2 events drive
-		// the per-scanline path.
+		// Per nesdev: $2000 writes update t's nametable-select bits
+		// (10-11) from data bits 0-1.
+		p.t = (p.t & 0xF3FF) | (uint16(v&0x03) << 10)
+		// Mid-frame nametable swap also logs a scroll event so the
+		// legacy per-scanline snapshot path captures the change.
 		if prev&0x03 != v&0x03 {
 			p.recordScrollChange()
 		}
@@ -231,23 +243,37 @@ func (p *PPU) Write(addr uint16, v byte) {
 		p.oam[p.oamAddr] = v
 		p.oamAddr++
 	case 0x2005:
-		if !p.scrollHi {
+		if !p.w {
+			// First write: t coarseX = data >> 3; x = data & 7.
+			p.t = (p.t & 0xFFE0) | uint16(v>>3)
+			p.x = v & 0x07
 			p.scrollX = v
-			p.scrollHi = true
+			p.w = true
 		} else {
+			// Second write: t fineY (bits 12-14) = data & 7;
+			// t coarseY (bits 5-9) = data >> 3.
+			p.t = (p.t & 0x8C1F) |
+				(uint16(v&0x07) << 12) |
+				(uint16(v&0xF8) << 2)
 			p.scrollY = v
-			p.scrollHi = false
+			p.w = false
 		}
+		// Keep the legacy scrollHi toggle in sync until the snapshot
+		// path is fully retired by the per-dot v reads.
+		p.scrollHi = p.w
 		p.recordScrollChange()
 	case 0x2006:
 		if !p.w {
-			// First write: high byte of 15-bit address. Real silicon
-			// stores in the "t" temp latch; v0.1 just builds v
-			// directly since we don't model mid-frame fine-scroll.
-			p.v = (p.v & 0x00FF) | (uint16(v&0x3F) << 8)
+			// First write: t high byte = data & $3F (bit 14 cleared
+			// per nesdev). Don't touch v yet.
+			p.t = (p.t & 0x00FF) | (uint16(v&0x3F) << 8)
+			p.t &= 0x7FFF  // ensure bit 15 stays 0 (15-bit register)
+			p.t &^= 0x4000 // bit 14 cleared by $2006 first write
 			p.w = true
 		} else {
-			p.v = (p.v & 0xFF00) | uint16(v)
+			// Second write: t low byte = data; then v ← t.
+			p.t = (p.t & 0xFF00) | uint16(v)
+			p.v = p.t
 			p.w = false
 			// $2006's second write commits a fresh VRAM address that
 			// the rendering pipeline reads coarse-X / coarse-Y /
@@ -305,6 +331,125 @@ func (p *PPU) scrollFromV() {
 	p.ctrl = (p.ctrl &^ 0x03) | nametable
 }
 
+// checkSprite0HitForScanline scans sprite 0's row intersecting y
+// and sets $2002 bit 6 the moment an opaque sprite-0 pixel
+// overlaps an opaque BG pixel. Called from stepDot at each visible
+// scanline so the flag latches at the actual hit scanline, not a
+// per-frame post-hoc pass. Idempotent — once set, the flag stays
+// latched until end-of-vblank's status clear.
+func (p *PPU) checkSprite0HitForScanline(y int) {
+	if p.status&0x40 != 0 {
+		return
+	}
+	if p.mask&0x18 != 0x18 {
+		return
+	}
+	spriteY := int(p.oam[0]) + 1
+	spriteH := 8
+	if p.ctrl&0x20 != 0 {
+		spriteH = 16
+	}
+	if y < spriteY || y >= spriteY+spriteH {
+		return
+	}
+	tileIdx := p.oam[1]
+	attr := p.oam[2]
+	spriteX := int(p.oam[3])
+	hflip := attr&0x40 != 0
+	vflip := attr&0x80 != 0
+	sprPatternBase := uint16(0)
+	if p.ctrl&0x08 != 0 && p.ctrl&0x20 == 0 {
+		sprPatternBase = 0x1000
+	}
+	bgPatternBase := uint16(0)
+	if p.ctrl&0x10 != 0 {
+		bgPatternBase = 0x1000
+	}
+	row := y - spriteY
+	fineY := row
+	if vflip {
+		fineY = spriteH - 1 - row
+	}
+	var tileAddr uint16
+	if spriteH == 16 {
+		base := uint16(0)
+		if tileIdx&1 != 0 {
+			base = 0x1000
+		}
+		tileNum := uint16(tileIdx & 0xFE)
+		if fineY >= 8 {
+			tileNum |= 1
+		}
+		tileAddr = base + tileNum*16 + uint16(fineY&7)
+	} else {
+		tileAddr = sprPatternBase + uint16(tileIdx)*16 + uint16(fineY)
+	}
+	spLo := p.busRead(tileAddr)
+	spHi := p.busRead(tileAddr + 8)
+
+	// Resolve the active scroll snapshot at THIS scanline (walks
+	// the scrollEvents list — sprite-0 hits typically fire near the
+	// top of the frame so the cursor stays close to index 0).
+	snap := p.activeScrollFor(y)
+
+	for col := 0; col < 8; col++ {
+		px := spriteX + col
+		if px < 0 || px >= ScreenWidth {
+			continue
+		}
+		bitCol := col
+		if !hflip {
+			bitCol = 7 - col
+		}
+		b := uint(bitCol)
+		if ((spLo>>b)&1)|((spHi>>b)&1) == 0 {
+			continue
+		}
+		effX := px + int(snap.scrollX)
+		effY := y + int(snap.scrollY)
+		ntX := snap.baseNametable & 1
+		ntY := (snap.baseNametable >> 1) & 1
+		if effX >= 256 {
+			effX -= 256
+			ntX ^= 1
+		}
+		if effY >= 240 {
+			effY -= 240
+			ntY ^= 1
+		}
+		coarseX := effX / 8
+		coarseY := effY / 8
+		fineX := effX % 8
+		fineYbg := effY % 8
+		ntBase := uint16(0x2000) +
+			uint16(ntY)*0x0800 +
+			uint16(ntX)*0x0400
+		bgTileIdx := p.busRead(ntBase + uint16(coarseY)*32 + uint16(coarseX))
+		bgAddr := bgPatternBase + uint16(bgTileIdx)*16 + uint16(fineYbg)
+		bgLo := p.busRead(bgAddr)
+		bgHi := p.busRead(bgAddr + 8)
+		bgB := uint(7 - fineX)
+		if ((bgLo>>bgB)&1)|((bgHi>>bgB)&1) != 0 {
+			p.status |= 0x40
+			return
+		}
+	}
+}
+
+// activeScrollFor returns the scrollSnapshot in effect at the
+// given visible scanline — the latest event with scanline <= y,
+// or frameStartScroll if no events come before y.
+func (p *PPU) activeScrollFor(y int) scrollSnapshot {
+	active := p.frameStartScroll
+	for _, ev := range p.scrollEvents {
+		if ev.scanline > y {
+			break
+		}
+		active = ev
+	}
+	return active
+}
+
 // predictSprite0Hit computes the visible scanline at which the
 // $2002 bit-6 flag should fire this frame by walking sprite 0's
 // 8×8 (or 8×16) bounding box against the current frame's BG state
@@ -312,16 +457,11 @@ func (p *PPU) scrollFromV() {
 // Stores -1 when no hit will occur (either gating disabled or no
 // opaque-over-opaque overlap exists).
 //
-// Called once per frame at the scanline 0 dot 0 transition, before
-// the game's NMI handler has finished any post-vblank work but
-// after any prior-frame nametable writes have settled. Uses
-// frameStartScroll for the BG-pixel resolution so the prediction
-// matches what the playfield will look like at scanlines BEFORE
-// the mid-frame split.
-//
-// Per-dot accuracy (the full v0.4 #268 path) eventually replaces
-// this; for v0.3 the prediction is sufficient for SMB1-class
-// titles where sprite-0 sits in the static status bar.
+// LEGACY — kept while the per-scanline detector
+// (checkSprite0HitForScanline) phases in. Once the per-scanline
+// path proves out on SMB1 + nestest sub-suites, this gets ripped
+// along with the sprite0HitScanline field + the stepDot fire
+// branch.
 func (p *PPU) predictSprite0Hit() {
 	p.sprite0HitScanline = -1
 	if p.mask&0x18 != 0x18 {
@@ -470,14 +610,16 @@ func (p *PPU) stepDot() {
 			p.predictSprite0Hit()
 		}
 	}
-	// Mid-frame sprite-0 hit predictor — see sprite0HitScanline.
-	// Fires once per frame at the predicted scanline so games that
-	// poll $2002 bit 6 in a tight loop (SMB1 status-bar split) see
-	// the flag set mid-render instead of post-frame.
-	if p.dot == 1 && p.scanline >= 0 && p.scanline < ScreenHeight &&
-		p.scanline == p.sprite0HitScanline &&
-		p.mask&0x18 == 0x18 && p.status&0x40 == 0 {
-		p.status |= 0x40
+	// Per-scanline sprite-0 hit detector (issue #268). At each
+	// visible scanline we live-check whether sprite 0's row at y
+	// overlaps an opaque BG pixel; first overlap latches $2002 bit
+	// 6 at the actual scanline of the hit, no frame-start
+	// prediction needed. Fires at dot 1 so the game's poll loop
+	// (which runs from the just-emitted vblank/end-of-prev-scanline
+	// NMI / opcodes) sees the flag in time for the mid-frame scroll
+	// write.
+	if p.dot == 1 && p.scanline >= 0 && p.scanline < ScreenHeight {
+		p.checkSprite0HitForScanline(p.scanline)
 	}
 	switch {
 	case p.scanline == vblankScanline && p.dot == 1:
