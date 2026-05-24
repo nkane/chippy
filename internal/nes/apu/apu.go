@@ -89,6 +89,10 @@ type APU struct {
 	// mix.
 	sunsoft5b *Sunsoft5B
 
+	// vrc6Audio (optional) is the 3-channel expansion on Konami's
+	// VRC6 cart (mappers 24/26). Same pattern as sunsoft5b.
+	vrc6Audio *VRC6Audio
+
 	// irqSink (optional) is the CPU's IRQ line. nil means
 	// "headless" — registers still track the IRQ flag but nothing
 	// is asserted on the CPU. cmd/nessy wires this via SetIRQSink
@@ -168,6 +172,12 @@ func (a *APU) SetSunsoft5B(s *Sunsoft5B) { a.sunsoft5b = s }
 // Sunsoft5B returns the active 5B chip pointer (or nil). Used by
 // the cart wiring to expose the chip for FME-7's port forwarding.
 func (a *APU) Sunsoft5B() *Sunsoft5B { return a.sunsoft5b }
+
+// SetVRC6Audio wires the VRC6 audio expansion (3-channel).
+func (a *APU) SetVRC6Audio(v *VRC6Audio) { a.vrc6Audio = v }
+
+// VRC6Audio returns the active chip pointer (or nil).
+func (a *APU) VRC6Audio() *VRC6Audio { return a.vrc6Audio }
 
 // Per-channel length-counter accessors. Headless test code uses
 // these to assert "channel still active" without grabbing internal
@@ -345,6 +355,11 @@ func (a *APU) stepCPU() {
 	if a.sunsoft5b != nil {
 		a.sunsoft5b.Step()
 	}
+	// VRC6 audio expansion (#302) — only present when the cart is
+	// VRC6 (mappers 24/26).
+	if a.vrc6Audio != nil {
+		a.vrc6Audio.Step()
+	}
 
 	// Sample emission. cyclesPerSample is fractional (40.585...);
 	// accumulate in units of 1e6 to avoid drift over long horizons.
@@ -462,6 +477,10 @@ func (a *APU) emitSample() {
 	// addend so it sits alongside the 2A03 mix without clipping.
 	if a.sunsoft5b != nil {
 		sample += int16(a.sunsoft5b.Output() * 200)
+	}
+	// VRC6 expansion mix-in. Output range 0..61; scale similarly.
+	if a.vrc6Audio != nil {
+		sample += int16(a.vrc6Audio.Output() * 150)
 	}
 	a.samples = append(a.samples, sample)
 }
