@@ -595,12 +595,16 @@ func (p *PPU) stepDot() {
 	}
 	switch {
 	case p.scanline == vblankScanline && p.dot == 1:
-		// Render the visible frame using state captured at vblank
-		// entry, then raise vblank + NMI. BG layer first so the
-		// sprite compositor can read bgOpaque for sprite-0 hit + the
-		// priority-behind-BG rule.
-		p.renderFrame()
-		p.renderSprites()
+		// Per-scanline render already painted every visible scanline
+		// at its dot 256 (BG + sprite composite). At vblank entry we
+		// only flush the per-frame scrollEvents log + raise vblank +
+		// fire NMI. The old renderFrame()+renderSprites() pair here
+		// caused a single-cycle "BG-only" window — renderFrame
+		// overwrote per-scanline sprite composites with fresh BG, and
+		// renderSprites then re-painted them. Ebiten Draw catching
+		// that window showed BG without sprites for ~1 frame ⇒ user-
+		// visible flicker.
+		p.scrollEvents = p.scrollEvents[:0]
 		p.status |= 0x80
 		if p.ctrl&0x80 != 0 && p.nmi != nil {
 			p.nmi.TriggerNMI()
