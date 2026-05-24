@@ -3,6 +3,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
@@ -146,6 +148,11 @@ func main() {
 	titleBase := fmt.Sprintf("nessy — %s", filepath.Base(*romPath))
 	g := newGame(bus, cpuMu, titleBase)
 	g.frameDumpEvery = *frameDump
+	// Save-state hotkey manager. ROM hash tags each .state file so a
+	// slot saved against one game can't accidentally restore into a
+	// different ROM with a half-matching state shape.
+	romHash := hex.EncodeToString((func() []byte { h := sha256.Sum256(romBytes); return h[:] })())
+	g.states = newSaveStateMgr(bus, cpuMu, romHash)
 	sink, err := newAudioSink(*mute)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "nessy: audio init failed (continuing muted):", err)

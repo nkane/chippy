@@ -147,6 +147,11 @@ Controls: Arrows = D-pad, Z = A, X = B, Enter = Start, Right Shift = Select.
 Player hotkeys: Tab (hold) = 4× fast-forward, F11 = fullscreen toggle,
 F12 = save a PNG of the current frame to `~/.nessy/screenshots/`.
 
+Save states: F1–F4 save into slots 1–4, F5–F8 load the matching slot.
+Saves live in `~/.nessy/states/<rom-hash>-slot<N>.state` (gzip-compressed
+gob). Slots are keyed by ROM SHA-256 — a save from one game can't
+accidentally restore into another.
+
 #### One-shell debug launch
 
 Skip the two-terminal dance. `chippy -nessy ROM` spawns nessy in the

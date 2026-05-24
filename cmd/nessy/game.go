@@ -58,7 +58,8 @@ type game struct {
 	audio          *audioSink // optional; nil when -mute set or audio init failed
 	titleBase      string     // window title prefix; FPS appended every ~0.5 s
 	frameNum       uint64
-	frameDumpEvery int // 0 = off; N = write framebuffer PNG every N frames
+	frameDumpEvery int           // 0 = off; N = write framebuffer PNG every N frames
+	states         *saveStateMgr // F1-F4 = save slots 1-4; F5-F8 = load slots 1-4
 }
 
 func newGame(bus *nesBus, cpuMu *sync.Mutex, titleBase string) *game {
@@ -96,6 +97,11 @@ func (g *game) Update() error {
 		budget *= fastForwardMultiplier
 	}
 	g.cpuMu.Lock()
+	// Drain any queued save / load before stepping. Keeps state
+	// capture aligned to an instruction boundary instead of mid-Step.
+	if g.states != nil {
+		g.states.serviceRequests()
+	}
 	target := g.bus.cpu.Cycles + budget
 	for g.bus.cpu.Cycles < target && !g.bus.cpu.Halted {
 		g.bus.cpu.Step()
@@ -143,5 +149,21 @@ func (g *game) pollInput() {
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyF12) {
 		g.takeScreenshot()
+	}
+	// Save-state hotkeys: F1-F4 save into slots 1-4; F5-F8 load from
+	// the matching slot. The actual save / restore work is deferred
+	// to the game loop's pre-step service tick so capture sees an
+	// instruction boundary.
+	if g.states != nil {
+		for i, k := range []ebiten.Key{ebiten.KeyF1, ebiten.KeyF2, ebiten.KeyF3, ebiten.KeyF4} {
+			if inpututil.IsKeyJustPressed(k) {
+				g.states.requestSave(i + 1)
+			}
+		}
+		for i, k := range []ebiten.Key{ebiten.KeyF5, ebiten.KeyF6, ebiten.KeyF7, ebiten.KeyF8} {
+			if inpututil.IsKeyJustPressed(k) {
+				g.states.requestLoad(i + 1)
+			}
+		}
 	}
 }
