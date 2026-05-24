@@ -25,6 +25,7 @@ func main() {
 		mute      = flag.Bool("mute", false, "disable audio output (APU still runs; samples are dropped)")
 		waitDbg   = flag.Bool("wait-for-debugger", false, "pause the CPU at boot until a DAP client attaches (set by `chippy -nessy`)")
 		pprofPath = flag.String("pprof", "", "write a CPU profile to FILE for the lifetime of the run; analyze with `go tool pprof FILE`")
+		frameDump = flag.Int("frame-dump-every", 0, "dump the framebuffer as PNG to ~/.nessy/dumps/F<N>.png every N frames (0 = off); expensive — diagnostic only")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: nessy [-rom PATH | PATH] [-dbg PATH] [-dap-port N] [-scale N] [-mute] [-wait-for-debugger] [-pprof FILE]\n\n")
@@ -144,6 +145,7 @@ func main() {
 
 	titleBase := fmt.Sprintf("nessy — %s", filepath.Base(*romPath))
 	g := newGame(bus, cpuMu, titleBase)
+	g.frameDumpEvery = *frameDump
 	sink, err := newAudioSink(*mute)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "nessy: audio init failed (continuing muted):", err)
