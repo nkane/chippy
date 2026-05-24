@@ -12,6 +12,9 @@ this repo ships, compiled to WebAssembly. Pick a canned demo (or drop
 in your own `.bin` / `.prg` / `.hex`) and step through it — no install
 required.
 
+Trying NES emulation? See [**nessy**](nessy/index.md) — the NES
+emulator built on chippy's CPU + DAP. [Play it in the browser](/chippy/playground/nessy/).
+
 ## Install on your machine
 
 | Platform | Install |
