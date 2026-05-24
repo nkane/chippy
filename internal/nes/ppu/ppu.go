@@ -267,7 +267,7 @@ func (p *PPU) Write(addr uint16, v byte) {
 			// First write: t high byte = data & $3F (bit 14 cleared
 			// per nesdev). Don't touch v yet.
 			p.t = (p.t & 0x00FF) | (uint16(v&0x3F) << 8)
-			p.t &= 0x7FFF // ensure bit 15 stays 0 (15-bit register)
+			p.t &= 0x7FFF  // ensure bit 15 stays 0 (15-bit register)
 			p.t &^= 0x4000 // bit 14 cleared by $2006 first write
 			p.w = true
 		} else {
