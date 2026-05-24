@@ -107,6 +107,13 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 		ap.SetVRC6Audio(v6)
 		vrc6.SetAudioSink(v6)
 	}
+	// VRC7 (mapper 85) ships an OPLL FM-synth audio expansion. v0.6
+	// captures register writes; full synth is v0.7 work (#315).
+	if vrc7, ok := c.(interface{ SetAudioSink(cart.VRC7AudioSink) }); ok {
+		v7 := apu.NewVRC7Audio()
+		ap.SetVRC7Audio(v7)
+		vrc7.SetAudioSink(v7)
+	}
 	// NewVariant called Reset() before MMIO had the cart's $FFFC vector
 	// visible? No — we registered the cart above, so Reset's vector
 	// fetch returns the right bytes via the MMIO → cart-peripheral path.

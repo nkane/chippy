@@ -93,6 +93,11 @@ type APU struct {
 	// VRC6 cart (mappers 24/26). Same pattern as sunsoft5b.
 	vrc6Audio *VRC6Audio
 
+	// vrc7Audio (optional) is the YM2413 / OPLL stub on Konami's
+	// VRC7 cart (mapper 85). v0.6 captures register writes but
+	// outputs silence — full FM synth is v0.7 work.
+	vrc7Audio *VRC7Audio
+
 	// irqSink (optional) is the CPU's IRQ line. nil means
 	// "headless" — registers still track the IRQ flag but nothing
 	// is asserted on the CPU. cmd/nessy wires this via SetIRQSink
@@ -178,6 +183,12 @@ func (a *APU) SetVRC6Audio(v *VRC6Audio) { a.vrc6Audio = v }
 
 // VRC6Audio returns the active chip pointer (or nil).
 func (a *APU) VRC6Audio() *VRC6Audio { return a.vrc6Audio }
+
+// SetVRC7Audio wires the VRC7 OPLL stub.
+func (a *APU) SetVRC7Audio(v *VRC7Audio) { a.vrc7Audio = v }
+
+// VRC7Audio returns the active chip pointer (or nil).
+func (a *APU) VRC7Audio() *VRC7Audio { return a.vrc7Audio }
 
 // Per-channel length-counter accessors. Headless test code uses
 // these to assert "channel still active" without grabbing internal
