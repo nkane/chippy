@@ -18,9 +18,13 @@ func (b *fakeDMCBus) Read(addr uint16) byte {
 	return b.bytes[int(addr)%len(b.bytes)]
 }
 
-type fakeDMCStaller struct{ stalled int }
+type fakeDMCStaller struct {
+	stalled int
+	pending int // simulated OAMDMA debt for contention tests
+}
 
-func (s *fakeDMCStaller) Stall(c int) { s.stalled += c }
+func (s *fakeDMCStaller) Stall(c int)       { s.stalled += c }
+func (s *fakeDMCStaller) PendingStall() int { return s.pending }
 
 // helper: configures DMC with a tiny sample (one byte) starting at
 // $C000, rate idx 0 (fastest), no loop / no IRQ.
@@ -92,6 +96,48 @@ func TestDMC_FetchReadsBaseAddressAndStalls(t *testing.T) {
 	}
 	if staller.stalled < 4 {
 		t.Errorf("DMC didn't charge stall cycles; got %d, want >= 4", staller.stalled)
+	}
+}
+
+// DMC/OAMDMA contention (#300): when the staller already has
+// pending OAMDMA debt, each DMC fetch pays 2 extra cycles for the
+// bus-alignment penalty. With no pending debt the standard 4-cycle
+// stall stands.
+func TestDMC_OAMDMAContentionAdds2Cycles(t *testing.T) {
+	// Baseline: fetch with no OAMDMA pending → 4-cycle stall per fetch.
+	a := New()
+	s := NewStatus(a)
+	bus := &fakeDMCBus{bytes: []byte{0x00}}
+	staller := &fakeDMCStaller{}
+	setupDMC(a, bus, staller, nil)
+	a.Write(0x4013, 0x00) // 1-byte sample
+	s.Write(0x4015, 0x10)
+	a.Tick(5000) // ≥1 fetch
+	baseline := staller.stalled
+	if baseline%4 != 0 {
+		t.Fatalf("baseline stall %d not a multiple of 4 — fetch path drifted", baseline)
+	}
+
+	// Contention: same setup but staller reports pending OAMDMA
+	// debt at fetch time → each fetch charges 6 instead of 4.
+	a2 := New()
+	s2 := NewStatus(a2)
+	bus2 := &fakeDMCBus{bytes: []byte{0x00}}
+	staller2 := &fakeDMCStaller{pending: 100} // any non-zero
+	setupDMC(a2, bus2, staller2, nil)
+	a2.Write(0x4013, 0x00)
+	s2.Write(0x4015, 0x10)
+	a2.Tick(5000)
+	contended := staller2.stalled
+	if baseline == 0 || contended == 0 {
+		t.Fatalf("no fetches happened (baseline=%d contended=%d)", baseline, contended)
+	}
+	// Same number of fetches between the two runs → contended
+	// stall should be baseline + 2*fetches.
+	fetches := baseline / 4
+	want := contended
+	if got := baseline + 2*fetches; got != want {
+		t.Errorf("contended stall = %d; baseline=%d fetches=%d want %d", contended, baseline, fetches, got)
 	}
 }
 

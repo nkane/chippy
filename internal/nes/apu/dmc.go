@@ -55,10 +55,15 @@ type DMCBus interface {
 	Read(addr uint16) byte
 }
 
-// DMCStaller is the cpu.Stall(int) hook from #204. *cpu.CPU
+// DMCStaller is the cpu.Stall(int) + cpu.PendingStall() hook. *cpu.CPU
 // satisfies it directly.
 type DMCStaller interface {
 	Stall(cycles int)
+	// PendingStall returns the un-drained stall debt queued by an
+	// earlier peripheral (typically OAMDMA). Non-zero means the
+	// DMC fetch is colliding with an in-flight OAMDMA window and
+	// needs the 2-cycle alignment penalty per nesdev (#300).
+	PendingStall() int
 }
 
 const dmcIRQSource = "apu-dmc"
@@ -164,7 +169,15 @@ func (d *dmcChannel) maybeRefill(bus DMCBus, staller DMCStaller, irqSink IRQSink
 	// Now refill the sample buffer from CPU memory if possible.
 	if d.bytesRemaining > 0 && bus != nil {
 		if staller != nil {
-			staller.Stall(4)
+			// DMC fetch normally charges 4 CPU cycles. When OAMDMA is
+			// already mid-window (staller has pending debt), the DMC
+			// fetch has to wait for an OAMDMA byte slot and pays a
+			// 2-cycle alignment penalty (#300). Net is 6.
+			stall := 4
+			if staller.PendingStall() > 0 {
+				stall += 2
+			}
+			staller.Stall(stall)
 		}
 		d.sampleBuffer = bus.Read(d.currentAddr)
 		d.bufferEmpty = false
