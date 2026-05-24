@@ -23,3 +23,12 @@ var dutyWaveforms = [4][8]byte{
 	{0, 1, 1, 1, 1, 0, 0, 0},
 	{1, 0, 0, 1, 1, 1, 1, 1},
 }
+
+// triangleSequence is the 32-step waveform the triangle channel
+// emits: a descending ramp 15..0 followed by an ascending ramp
+// 0..15. Position advances on every period-timer underflow when the
+// channel is gated on by both linear + length counters.
+var triangleSequence = [32]byte{
+	15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
+	0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+}
