@@ -552,12 +552,17 @@ func (p *PPU) stepDot() {
 	if p.dot == 1 && p.scanline >= 0 && p.scanline < ScreenHeight {
 		p.checkSprite0HitForScanline(p.scanline)
 	}
-	// Per-scanline BG render (issue #268). Each visible scanline
-	// rasterizes at dot 256 (end of the visible portion of that
-	// scanline) so subsequent $2005 / $2006 writes from the game's
-	// poll loop reach the NEXT scanline's scroll snapshot.
+	// Per-scanline BG render + sprite composite (issue #268). Each
+	// visible scanline rasterizes at dot 256: BG first, then
+	// sprites composited over it. Combining the passes here means
+	// Ebiten's Draw can sample the framebuffer at any moment and
+	// always sees a "complete" scanline (BG + sprites for that y)
+	// — the previous per-frame-only sprite composite left a window
+	// during which scanlines had BG but no sprites yet, causing
+	// visible flicker / "sprites erased by scanline" reports.
 	if p.dot == 256 && p.scanline >= 0 && p.scanline < ScreenHeight {
 		p.renderScanlineEnabled(p.scanline)
+		p.compositeScanlineSprites(p.scanline)
 	}
 	// Loopy v register increments per nesdev's PPU timing diagram
 	// (issue #268 stage 3). Only fire when rendering is on. Visible
