@@ -66,6 +66,13 @@ type MMC3 struct {
 	irqEnabled bool
 	irqPending bool
 	prevA12    bool
+	// revA flips clockA12 to the NEC MMC3A behaviour: the reload
+	// flag forces reload; counter==0 reloads then decrements before
+	// firing. RevB (default, Sharp silicon) reloads to latch THEN
+	// re-checks the new counter for IRQ. Klax depends on RevA's
+	// "fires every A12 edge when latch=1" timing. iNES 2.0 sub-
+	// mapper 3 selects RevA; default is RevB.
+	revA bool
 
 	irqSink IRQSink
 }
@@ -93,6 +100,7 @@ func NewMMC3(rom *nes.ROM) (*MMC3, error) {
 		prg:        rom.PRG,
 		battery:    rom.Battery,
 		fourScreen: rom.Mirroring == nes.MirrorFourScreen,
+		revA:       rom.SubMapper == 3,
 	}
 	switch {
 	case len(rom.CHR) == 0:
@@ -259,14 +267,26 @@ func (c *MMC3) chrOffset(addr uint16) int {
 //
 // Real silicon's filter is ~16 CPU cycles; we approximate by
 // gating on whether A12 was low last time PPURead/PPUWrite ran.
-// This is the "Sharp" MMC3 variant (the more common one); the
-// "ALT" / NEC revision differs slightly in reload semantics and
-// is a v0.5+ follow-up.
+//
+// Two revisions:
+//
+//	RevB (Sharp, default) — counter==0 OR reload flag → reload to
+//	  latch; then if new counter is 0 + IRQ enabled, fire. Behaviour
+//	  most games (SMB3, Mega Man 3-6) assume.
+//
+//	RevA (NEC, sub-mapper 3) — reload flag → reload only; counter==0
+//	  reloads but ALSO immediately fires if enabled. The functional
+//	  difference: with latch=1, RevB fires every other A12 edge,
+//	  RevA fires every edge. Klax depends on RevA.
 func (c *MMC3) clockA12(addr uint16) {
 	a12 := addr&0x1000 != 0
 	rising := a12 && !c.prevA12
 	c.prevA12 = a12
 	if !rising {
+		return
+	}
+	if c.revA {
+		c.clockA12RevA()
 		return
 	}
 	if c.irqCounter == 0 || c.irqReload {
@@ -276,6 +296,28 @@ func (c *MMC3) clockA12(addr uint16) {
 		c.irqCounter--
 	}
 	if c.irqCounter == 0 && c.irqEnabled {
+		c.irqPending = true
+		if c.irqSink != nil {
+			c.irqSink.AssertIRQSource(mmc3IRQSource)
+		}
+	}
+}
+
+// clockA12RevA implements the NEC MMC3A variant. The only
+// functional difference vs RevB: an explicit reload through $C001
+// (the irqReload flag) silently loads the counter from the latch
+// and skips the post-reload IRQ check. The natural counter==0 →
+// reload path still fires (when enabled). Klax wrote $C001 with
+// latch=0 expecting NO IRQ; under RevB that would fire.
+func (c *MMC3) clockA12RevA() {
+	preReload := c.irqReload
+	if c.irqCounter == 0 || c.irqReload {
+		c.irqCounter = c.irqLatch
+		c.irqReload = false
+	} else {
+		c.irqCounter--
+	}
+	if c.irqCounter == 0 && c.irqEnabled && !preReload {
 		c.irqPending = true
 		if c.irqSink != nil {
 			c.irqSink.AssertIRQSource(mmc3IRQSource)

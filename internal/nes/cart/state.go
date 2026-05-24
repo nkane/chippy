@@ -96,6 +96,7 @@ type MMC3State struct {
 	IRQEnabled bool
 	IRQPending bool
 	PrevA12    bool
+	RevA       bool
 	PRGRAM     [0x2000]byte
 	CHRRAM     []byte
 }
@@ -363,6 +364,7 @@ func (c *MMC3) saveState() *MMC3State {
 		IRQEnabled: c.irqEnabled,
 		IRQPending: c.irqPending,
 		PrevA12:    c.prevA12,
+		RevA:       c.revA,
 		PRGRAM:     c.prgRAM,
 	}
 	if c.chrIsRAM {
@@ -382,6 +384,7 @@ func (c *MMC3) loadState(s MMC3State) error {
 	c.irqEnabled = s.IRQEnabled
 	c.irqPending = s.IRQPending
 	c.prevA12 = s.PrevA12
+	c.revA = s.RevA
 	c.prgRAM = s.PRGRAM
 	if c.chrIsRAM {
 		if len(s.CHRRAM) != len(c.chr) {
