@@ -44,11 +44,12 @@ var keyMap = []struct {
 // a concurrent DAP request can't observe a mid-instruction register
 // snapshot.
 type game struct {
-	bus       *nesBus
-	cpuMu     *sync.Mutex
-	audio     *audioSink // optional; nil when -mute set or audio init failed
-	titleBase string     // window title prefix; FPS appended every ~0.5 s
-	frameNum  uint64
+	bus            *nesBus
+	cpuMu          *sync.Mutex
+	audio          *audioSink // optional; nil when -mute set or audio init failed
+	titleBase      string     // window title prefix; FPS appended every ~0.5 s
+	frameNum       uint64
+	frameDumpEvery int // 0 = off; N = write framebuffer PNG every N frames
 }
 
 func newGame(bus *nesBus, cpuMu *sync.Mutex, titleBase string) *game {
@@ -101,6 +102,9 @@ func (g *game) Update() error {
 	if g.titleBase != "" && g.frameNum%30 == 0 {
 		ebiten.SetWindowTitle(fmt.Sprintf("%s — TPS %.1f FPS %.1f",
 			g.titleBase, ebiten.ActualTPS(), ebiten.ActualFPS()))
+	}
+	if g.frameDumpEvery > 0 && g.frameNum%uint64(g.frameDumpEvery) == 0 {
+		g.dumpFrame()
 	}
 	return nil
 }
