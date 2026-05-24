@@ -87,6 +87,12 @@ type CPU struct {
 	irqLine    bool
 	nmiPending bool
 
+	// irqSources holds the set of named IRQ sources currently asserting
+	// the line. The CPU sees a wired-OR — irqLine is true iff the set
+	// is non-empty. Populated lazily by AssertIRQSource so a CPU that
+	// never receives a tagged-source call has no map overhead.
+	irqSources map[string]struct{}
+
 	// pendingStall is a cycle debt owed to a peripheral that took over
 	// the bus (e.g. $4014 OAMDMA). The next Step() drains the whole
 	// counter as one block — bus ticks fire, c.Cycles advances, no
@@ -191,13 +197,41 @@ func (c *CPU) pop16() uint16 {
 
 // IRQ / NMI
 
-// AssertIRQ raises the IRQ line. While asserted and FlagI is clear, the
-// interrupt is taken at the end of every instruction. Peripherals call
-// AssertIRQ when their condition is active and ReleaseIRQ when cleared.
-func (c *CPU) AssertIRQ()  { c.irqLine = true }
-func (c *CPU) ReleaseIRQ() { c.irqLine = false }
+// AssertIRQ raises the anonymous IRQ source. Equivalent to
+// AssertIRQSource("") — kept for backward compat with single-source
+// tests that predate the named-source surface (#247).
+func (c *CPU) AssertIRQ() { c.AssertIRQSource("") }
 
-// IRQAsserted reports whether the IRQ line is currently held.
+// ReleaseIRQ clears the anonymous IRQ source. Equivalent to
+// ClearIRQSource("").
+func (c *CPU) ReleaseIRQ() { c.ClearIRQSource("") }
+
+// AssertIRQSource raises the named IRQ source. Real NES silicon has
+// up to three concurrent sources (APU frame counter, APU DMC,
+// MMC3-style scanline IRQ); the CPU sees a wired-OR of every active
+// source. While *any* source is asserted and FlagI is clear, the
+// interrupt is taken at the next instruction boundary.
+//
+// Peripherals call AssertIRQSource when their condition becomes
+// active and ClearIRQSource when it goes away — symmetry matters,
+// since the line is level-sensitive (asserted-until-cleared).
+func (c *CPU) AssertIRQSource(src string) {
+	if c.irqSources == nil {
+		c.irqSources = map[string]struct{}{}
+	}
+	c.irqSources[src] = struct{}{}
+	c.irqLine = true
+}
+
+// ClearIRQSource removes the named source. The IRQ line goes low
+// only when every asserted source has been cleared.
+func (c *CPU) ClearIRQSource(src string) {
+	delete(c.irqSources, src)
+	c.irqLine = len(c.irqSources) > 0
+}
+
+// IRQAsserted reports whether the IRQ line is currently held by any
+// source.
 func (c *CPU) IRQAsserted() bool { return c.irqLine }
 
 // TriggerNMI latches a non-maskable interrupt. Edge-triggered: the
