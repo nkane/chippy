@@ -98,6 +98,16 @@ type PPU struct {
 	// pass.
 	bgOpaque [ScreenWidth * ScreenHeight]bool
 
+	// sprite0HitScanline (-1 = no hit predicted) is the visible
+	// scanline at which the next frame's sprite-0 hit will land,
+	// computed from THIS frame's renderSprites pass. stepDot fires
+	// the $2002 bit-6 flag when scanline reaches this value so
+	// games that poll $2002 for the hit (SMB1 status-bar split)
+	// see the flag mid-frame instead of waiting until the per-
+	// frame compositor runs at vblank entry. Per-dot accuracy is
+	// the v0.4 #268 issue; this is the v0.3 stopgap.
+	sprite0HitScanline int
+
 	// Scroll capture for mid-frame splits (issue #206). frameStartScroll
 	// is snapshotted at the end of vblank (when scanline rolls back to
 	// 0) so renderFrame knows what scroll values were active for the
@@ -125,7 +135,7 @@ type scrollSnapshot struct {
 // access + nametable mirroring) and an NMI sink (the CPU). Both may be
 // nil for register-level tests that don't exercise rendering or NMI.
 func New(cart Cart, nmi NMI) *PPU {
-	p := &PPU{cart: cart, nmi: nmi}
+	p := &PPU{cart: cart, nmi: nmi, sprite0HitScanline: -1}
 	p.Reset()
 	return p
 }
@@ -151,6 +161,7 @@ func (p *PPU) Reset() {
 	for i := range p.frame {
 		p.frame[i] = 0
 	}
+	p.sprite0HitScanline = -1
 }
 
 // Range claims $2000-$3FFF (the mirrored register window). $4014
@@ -333,6 +344,15 @@ func (p *PPU) stepDot() {
 				baseNametable: p.ctrl & 0x03,
 			}
 		}
+	}
+	// Mid-frame sprite-0 hit predictor — see sprite0HitScanline.
+	// Fires once per frame at the predicted scanline so games that
+	// poll $2002 bit 6 in a tight loop (SMB1 status-bar split) see
+	// the flag set mid-render instead of post-frame.
+	if p.dot == 1 && p.scanline >= 0 && p.scanline < ScreenHeight &&
+		p.scanline == p.sprite0HitScanline &&
+		p.mask&0x18 == 0x18 && p.status&0x40 == 0 {
+		p.status |= 0x40
 	}
 	switch {
 	case p.scanline == vblankScanline && p.dot == 1:

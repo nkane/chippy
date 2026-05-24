@@ -44,13 +44,15 @@ var keyMap = []struct {
 // a concurrent DAP request can't observe a mid-instruction register
 // snapshot.
 type game struct {
-	bus   *nesBus
-	cpuMu *sync.Mutex
-	audio *audioSink // optional; nil when -mute set or audio init failed
+	bus       *nesBus
+	cpuMu     *sync.Mutex
+	audio     *audioSink // optional; nil when -mute set or audio init failed
+	titleBase string     // window title prefix; FPS appended every ~0.5 s
+	frameNum  uint64
 }
 
-func newGame(bus *nesBus, cpuMu *sync.Mutex) *game {
-	return &game{bus: bus, cpuMu: cpuMu}
+func newGame(bus *nesBus, cpuMu *sync.Mutex, titleBase string) *game {
+	return &game{bus: bus, cpuMu: cpuMu, titleBase: titleBase}
 }
 
 // loopSteppedBanner is a one-shot diagnostic: prints to stderr the
@@ -92,6 +94,14 @@ func (g *game) Update() error {
 	mono := g.bus.apu.Samples()
 	g.cpuMu.Unlock()
 	g.audio.push(mono)
+	// Refresh the window title with the actual TPS / FPS every ~0.5 s
+	// (30 frames at 60 TPS). Cheap surface for the "is Update running
+	// at 60Hz?" question.
+	g.frameNum++
+	if g.titleBase != "" && g.frameNum%30 == 0 {
+		ebiten.SetWindowTitle(fmt.Sprintf("%s — TPS %.1f FPS %.1f",
+			g.titleBase, ebiten.ActualTPS(), ebiten.ActualFPS()))
+	}
 	return nil
 }
 

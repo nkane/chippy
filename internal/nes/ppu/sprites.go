@@ -75,6 +75,13 @@ func (p *PPU) renderSprites() {
 	// by later sprites.
 	var spritePainted [ScreenWidth * ScreenHeight]bool
 
+	// sprite0HitY records the FIRST visible scanline at which an
+	// opaque sprite-0 pixel overlaps an opaque BG pixel. Used to
+	// prime sprite0HitScanline for next frame so stepDot can fire
+	// $2002 bit 6 at the right scanline — SMB1's status-bar split
+	// polls for the flag and writes scroll mid-render.
+	sprite0HitY := -1
+
 	// Sprite-0 hit gating: requires both BG show + sprite show. The
 	// real silicon has a stricter set of conditions (x != 255, not in
 	// the left-8-px clipping windows, etc.); v0.2 honors the two
@@ -164,6 +171,9 @@ func (p *PPU) renderSprites() {
 				// not the visible result.
 				if i == 0 && canHitSprite0 && p.bgOpaque[pxIdx] {
 					p.status |= 0x40
+					if sprite0HitY < 0 {
+						sprite0HitY = py
+					}
 				}
 
 				// Skip drawing where an earlier sprite already painted
@@ -190,4 +200,8 @@ func (p *PPU) renderSprites() {
 			}
 		}
 	}
+
+	// Prime next frame's predicted sprite-0 hit scanline. -1 means
+	// "no hit this frame" → stepDot skips the fire path.
+	p.sprite0HitScanline = sprite0HitY
 }
