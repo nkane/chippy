@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -59,6 +60,7 @@ type game struct {
 	titleBase      string     // window title prefix; FPS appended every ~0.5 s
 	frameNum       uint64
 	frameDumpEvery int           // 0 = off; N = write framebuffer PNG every N frames
+	oamTrace       bool          // -oam-trace: dump visible-sprite OAM every frame
 	states         *saveStateMgr // F1-F4 = save slots 1-4; F5-F8 = load slots 1-4
 }
 
@@ -125,7 +127,30 @@ func (g *game) Update() error {
 	if g.frameDumpEvery > 0 && g.frameNum%uint64(g.frameDumpEvery) == 0 {
 		g.dumpFrame()
 	}
+	if g.oamTrace {
+		g.dumpOAM()
+	}
 	return nil
+}
+
+// dumpOAM prints visible-sprite OAM rows to stderr, one frame per
+// line. Format: "F<frame> i=<idx>:t=$<tile>@(<x>,<y>) ...".
+// Sprites with y >= 240 (off-screen per silicon) are skipped so
+// the line stays scannable. Diagnostic only; flag is opt-in.
+func (g *game) dumpOAM() {
+	var b strings.Builder
+	fmt.Fprintf(&b, "F%d", g.frameNum)
+	for i := 0; i < 64; i++ {
+		base := byte(i * 4)
+		y := g.bus.ppu.OAM(base + 0)
+		if y >= 240 {
+			continue
+		}
+		tile := g.bus.ppu.OAM(base + 1)
+		x := g.bus.ppu.OAM(base + 3)
+		fmt.Fprintf(&b, " %d:t=$%02X@(%d,%d)", i, tile, x, y)
+	}
+	fmt.Fprintln(os.Stderr, b.String())
 }
 
 func (g *game) Draw(screen *ebiten.Image) {
