@@ -64,9 +64,11 @@ func Open(rom *nes.ROM) (Cartridge, error) {
 		return NewCNROM(rom)
 	case 4:
 		return NewMMC3(rom)
+	case 21, 22, 23, 25:
+		return NewVRC(rom)
 	case 69:
 		return NewFME7(rom)
 	default:
-		return nil, fmt.Errorf("cart: unsupported mapper %d (NROM/0, MMC1/1, UxROM/2, CNROM/3, MMC3/4, FME-7/69)", rom.Mapper)
+		return nil, fmt.Errorf("cart: unsupported mapper %d (NROM/0, MMC1/1, UxROM/2, CNROM/3, MMC3/4, VRC2/4/21,22,23,25, FME-7/69)", rom.Mapper)
 	}
 }

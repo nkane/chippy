@@ -58,7 +58,7 @@ func (p *PPU) SaveFullState() FullState {
 		V: p.v, T: p.t, X: p.x, W: p.w, ReadBuf: p.readBuf,
 		ScrollX: p.scrollX, ScrollY: p.scrollY, ScrollHi: p.scrollHi,
 		OpenBus: p.openBus,
-		VRAM: p.vram, OAM: p.oam, Palette: p.palette,
+		VRAM:    p.vram, OAM: p.oam, Palette: p.palette,
 		Scanline: p.scanline, Dot: p.dot, FrameCount: p.frameCount,
 		FrameStartScroll: exportScroll(p.frameStartScroll),
 	}
