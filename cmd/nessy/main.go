@@ -28,6 +28,7 @@ func main() {
 		waitDbg   = flag.Bool("wait-for-debugger", false, "pause the CPU at boot until a DAP client attaches (set by `chippy -nessy`)")
 		pprofPath = flag.String("pprof", "", "write a CPU profile to FILE for the lifetime of the run; analyze with `go tool pprof FILE`")
 		frameDump = flag.Int("frame-dump-every", 0, "dump the framebuffer as PNG to ~/.nessy/dumps/F<N>.png every N frames (0 = off); expensive — diagnostic only")
+		oamTrace  = flag.Bool("oam-trace", false, "print visible sprite OAM (idx:tile@x,y) to stderr every frame; expensive — diagnostic only")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: nessy [-rom PATH | PATH] [-dbg PATH] [-dap-port N] [-scale N] [-mute] [-wait-for-debugger] [-pprof FILE]\n\n")
@@ -148,6 +149,7 @@ func main() {
 	titleBase := fmt.Sprintf("nessy — %s", filepath.Base(*romPath))
 	g := newGame(bus, cpuMu, titleBase)
 	g.frameDumpEvery = *frameDump
+	g.oamTrace = *oamTrace
 	// Save-state hotkey manager. ROM hash tags each .state file so a
 	// slot saved against one game can't accidentally restore into a
 	// different ROM with a half-matching state shape.
