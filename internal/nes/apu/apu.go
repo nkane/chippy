@@ -62,8 +62,9 @@ const frameIRQSource = "apu-frame"
 // forwarder so the two peripherals don't fight over the same
 // register.
 type APU struct {
-	pulse1 pulseChannel
-	pulse2 pulseChannel
+	pulse1   pulseChannel
+	pulse2   pulseChannel
+	triangle triangleChannel
 
 	// Frame counter state. mode4Step true = 4-step (the default,
 	// 240 Hz IRQ ticks); false = 5-step (no IRQ). irqInhibit gates
@@ -158,9 +159,11 @@ func (a *APU) Read(addr uint16) byte {
 	if a.pulse2.lengthCounter > 0 {
 		v |= 0x02
 	}
-	// Triangle (bit 2), noise (bit 3), DMC (bit 4) bits land with
-	// the channels themselves (v0.3 follow-ups). DMC IRQ at bit 7
-	// also waits on the DMC channel.
+	if a.triangle.lengthCounter > 0 {
+		v |= 0x04
+	}
+	// Noise (bit 3), DMC (bit 4) bits land with their channels
+	// (#245 / #246). DMC IRQ at bit 7 also waits on #246.
 	if a.frameIRQFlag {
 		v |= 0x40
 	}
@@ -194,11 +197,18 @@ func (a *APU) Write(addr uint16, v byte) {
 		a.pulse2.writeReg2(v)
 	case 0x4007:
 		a.pulse2.writeReg3(v)
+	case 0x4008:
+		a.triangle.writeReg0(v)
+	case 0x400A:
+		a.triangle.writeReg2(v)
+	case 0x400B:
+		a.triangle.writeReg3(v)
 	case 0x4015:
 		a.pulse1.setEnabled(v&0x01 != 0)
 		a.pulse2.setEnabled(v&0x02 != 0)
-		// Triangle (bit 2), noise (bit 3), DMC (bit 4) enables are
-		// accepted but no-op until v0.3.
+		a.triangle.setEnabled(v&0x04 != 0)
+		// Noise (bit 3), DMC (bit 4) enables accepted but no-op
+		// until #245 / #246 land.
 	}
 }
 
@@ -245,6 +255,10 @@ func (a *APU) stepCPU() {
 		a.pulse2.tickTimer()
 	}
 	a.alternateTick = !a.alternateTick
+	// Triangle period timer ticks every CPU cycle — its 32-step
+	// sequencer needs the higher rate to reach audible
+	// frequencies.
+	a.triangle.tickTimer()
 
 	// Sample emission. cyclesPerSample is fractional (40.585...);
 	// accumulate in units of 1e6 to avoid drift over long horizons.
@@ -314,6 +328,7 @@ func (a *APU) advanceFrameStep() {
 func (a *APU) tickQuarterFrame() {
 	a.pulse1.tickEnvelope()
 	a.pulse2.tickEnvelope()
+	a.triangle.tickLinear()
 }
 
 func (a *APU) tickHalfFrame() {
@@ -321,6 +336,7 @@ func (a *APU) tickHalfFrame() {
 	a.pulse2.tickLength()
 	a.pulse1.tickSweep()
 	a.pulse2.tickSweep()
+	a.triangle.tickLength()
 }
 
 // emitSample pushes one int16 sample into the ring buffer using a
@@ -335,13 +351,17 @@ func (a *APU) emitSample() {
 		copy(a.samples, a.samples[1:])
 		a.samples = a.samples[:len(a.samples)-1]
 	}
-	// Linear approximation: out = (p1 + p2) * scale.
-	// Real silicon's pulse_table is non-linear, but linear is
-	// audible-correct for v0.2 and avoids a 31-entry LUT.
-	out := int32(a.pulse1.output()) + int32(a.pulse2.output())
-	// Scale: each pulse is 0..15, so sum is 0..30. Map to ~0..15000
-	// so int16 headroom remains for triangle + noise mixing later.
-	sample := int16(out * 500)
+	// Linear approximation: out = pulse1 + pulse2 + triangle.
+	// Real silicon's mixer is non-linear (separate pulse_table +
+	// tnd_table); #249 swaps in the LUT once noise + DMC land.
+	// Triangle's amplitude (0-15) sits in the tnd group and on
+	// real silicon mixes at a different coefficient; the linear
+	// stand-in undercounts triangle slightly — fine for v0.3.
+	pulses := int32(a.pulse1.output()) + int32(a.pulse2.output())
+	tri := int32(a.triangle.output())
+	// Pulse sum is 0..30 → scale 500 (matches v0.2 levels). Triangle
+	// is 0..15 → scale 333 so peak triangle ≈ peak pulse pair.
+	sample := int16(pulses*500 + tri*333)
 	a.samples = append(a.samples, sample)
 }
 
