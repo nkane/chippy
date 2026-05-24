@@ -27,6 +27,17 @@ type apuStream struct {
 	pending []byte
 }
 
+// maxQueueBytes caps the pending queue at ~100ms of stereo PCM
+// (44100 samples/sec × 4 bytes × 0.1 s ≈ 17.6 KB). Without the
+// cap, any frame where game.Update runs slightly faster than
+// wallclock — Ebiten's catch-up scheduling occasionally fires two
+// Updates back-to-back when the previous frame ran long —
+// accumulates samples the audio thread can't drain fast enough
+// and the playback latency keeps growing. Audio drifts behind the
+// visible game state. Capping bounds latency at ~100ms; the
+// dropped-oldest policy prefers fresh audio over a smooth tail.
+const maxQueueBytes = 4 * 44100 / 10
+
 // Push appends new stereo PCM bytes. Called from the game-loop
 // goroutine after it drains APU.Samples() under cpuMu — we copy /
 // reshape outside the cpuMu critical section so the audio thread
@@ -34,6 +45,14 @@ type apuStream struct {
 func (s *apuStream) Push(stereo []byte) {
 	s.mu.Lock()
 	s.pending = append(s.pending, stereo...)
+	if over := len(s.pending) - maxQueueBytes; over > 0 {
+		// Drop oldest bytes, keep latest. Aligned drop on 4-byte
+		// stereo-sample boundary to avoid mid-sample garbage.
+		over -= over % 4
+		if over > 0 {
+			s.pending = s.pending[over:]
+		}
+	}
 	s.mu.Unlock()
 }
 
