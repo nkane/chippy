@@ -75,7 +75,7 @@ func TestParse_MapperByteAssembly(t *testing.T) {
 	cases := []struct {
 		name         string
 		flag6, flag7 byte
-		want         uint8
+		want         uint16
 	}{
 		{"mapper 0 (NROM)", 0x00, 0x00, 0},
 		{"mapper 1 (MMC1)", 0x10, 0x00, 1},
