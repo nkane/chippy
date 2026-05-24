@@ -66,6 +66,13 @@ type APU struct {
 	pulse2   pulseChannel
 	triangle triangleChannel
 	noise    noiseChannel
+	dmc      dmcChannel
+
+	// DMC needs CPU-bus access (sample fetch) + the stall hook.
+	// Late-bound via SetDMCBus so the APU can be constructed
+	// before the CPU exists.
+	dmcBus     DMCBus
+	dmcStaller DMCStaller
 
 	// Frame counter state. mode4Step true = 4-step (the default,
 	// 240 Hz IRQ ticks); false = 5-step (no IRQ). irqInhibit gates
@@ -147,6 +154,16 @@ func (s *StatusPeripheral) Write(addr uint16, v byte) { s.apu.Write(addr, v) }
 // before SetIRQSink lands harmlessly on the flag-only path.
 func (a *APU) SetIRQSink(s IRQSink) { a.irqSink = s }
 
+// SetDMCBus wires the CPU bus the DMC reads sample bytes from and
+// the cpu.Stall hook the DMA byte-fetch charges. Optional — when
+// either argument is nil the DMC channel still tracks state but
+// stops fetching new sample bytes (its current buffer drains
+// silently and the channel goes mute).
+func (a *APU) SetDMCBus(bus DMCBus, staller DMCStaller) {
+	a.dmcBus = bus
+	a.dmcStaller = staller
+}
+
 // Read services CPU reads. $4015 returns the per-channel status +
 // IRQ flags; reading also clears the frame-IRQ flag (per nesdev).
 // Other register addresses return open-bus 0.
@@ -169,15 +186,23 @@ func (a *APU) Read(addr uint16) byte {
 	}
 	// DMC (bit 4) bit lands with #246. DMC IRQ at bit 7 also waits
 	// on #246.
+	if a.dmc.bytesRemaining > 0 {
+		v |= 0x10
+	}
 	if a.frameIRQFlag {
 		v |= 0x40
 	}
-	// Reading $4015 clears the frame-IRQ flag (NOT the DMC IRQ —
-	// that has its own ack path).
+	if a.dmc.irqPending {
+		v |= 0x80
+	}
+	// Reading $4015 clears the frame-IRQ flag. DMC IRQ has its own
+	// ack path via dmc.clearIRQ — also fired here per nesdev (one
+	// $4015 read acks both).
 	a.frameIRQFlag = false
 	if a.irqSink != nil {
 		a.irqSink.ClearIRQSource(frameIRQSource)
 	}
+	a.dmc.clearIRQ(a.irqSink)
 	return v
 }
 
@@ -214,12 +239,28 @@ func (a *APU) Write(addr uint16, v byte) {
 		a.noise.writeReg2(v)
 	case 0x400F:
 		a.noise.writeReg3(v)
+	case 0x4010:
+		a.dmc.writeReg0(v)
+		// Bit 7 clear in writeReg0 already clears DMC IRQ flag in
+		// the channel; also drop the sink-side assertion so the
+		// CPU line goes low.
+		if v&0x80 == 0 && a.irqSink != nil {
+			a.irqSink.ClearIRQSource(dmcIRQSource)
+		}
+	case 0x4011:
+		a.dmc.writeReg1(v)
+	case 0x4012:
+		a.dmc.writeReg2(v)
+	case 0x4013:
+		a.dmc.writeReg3(v)
 	case 0x4015:
 		a.pulse1.setEnabled(v&0x01 != 0)
 		a.pulse2.setEnabled(v&0x02 != 0)
 		a.triangle.setEnabled(v&0x04 != 0)
 		a.noise.setEnabled(v&0x08 != 0)
-		// DMC (bit 4) enable accepted but no-op until #246.
+		a.dmc.setEnabled(v&0x10 != 0)
+		// Writing $4015 also clears the DMC IRQ flag (per nesdev).
+		a.dmc.clearIRQ(a.irqSink)
 	}
 }
 
@@ -271,6 +312,9 @@ func (a *APU) stepCPU() {
 	// sequencer needs the higher rate to reach audible
 	// frequencies.
 	a.triangle.tickTimer()
+	// DMC period timer ticks every CPU cycle. The fetch path may
+	// charge cpu.Stall cycles + assert IRQ at sample exhaustion.
+	a.dmc.tickTimer(a.dmcBus, a.dmcStaller, a.irqSink)
 
 	// Sample emission. cyclesPerSample is fractional (40.585...);
 	// accumulate in units of 1e6 to avoid drift over long horizons.
@@ -374,11 +418,14 @@ func (a *APU) emitSample() {
 	pulses := int32(a.pulse1.output()) + int32(a.pulse2.output())
 	tri := int32(a.triangle.output())
 	noi := int32(a.noise.output())
+	dmc := int32(a.dmc.mixerOutput())
 	// Pulse sum 0..30 → scale 500 (v0.2 levels). Triangle / noise
-	// each 0..15 → scale 333 so peak each ≈ peak pulse pair. Real
-	// silicon's pulse_table + tnd_table are non-linear; #249
-	// installs the proper LUT once all four channel groups land.
-	sample := int16(pulses*500 + tri*333 + noi*333)
+	// each 0..15 → scale 333 so peak each ≈ peak pulse pair. DMC
+	// is 0..127 → scale 40 so peak (127*40 ≈ 5080) sits in the
+	// same ballpark. Real silicon's pulse_table + tnd_table are
+	// non-linear; #249 installs the proper LUT once all channels
+	// land.
+	sample := int16(pulses*500 + tri*333 + noi*333 + dmc*40)
 	a.samples = append(a.samples, sample)
 }
 

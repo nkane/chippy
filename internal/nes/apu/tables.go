@@ -40,3 +40,12 @@ var triangleSequence = [32]byte{
 var noisePeriodLUT = [16]uint16{
 	4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
 }
+
+// dmcRateLUT maps the 4-bit rate index ($4010 bits 0-3) to the
+// CPU-cycle period between DMC sample-bit shifts. NTSC values per
+// nesdev wiki — covers everything from ~33 kHz sample rate (idx 0,
+// the fast end) down to ~4 kHz (idx 15).
+var dmcRateLUT = [16]uint16{
+	428, 380, 340, 320, 286, 254, 226, 214,
+	190, 160, 142, 128, 106, 84, 72, 54,
+}

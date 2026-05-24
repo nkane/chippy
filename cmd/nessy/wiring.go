@@ -78,9 +78,12 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 
 	processor := cpu.NewVariant(mmio, cpu.VariantNES)
 	// CPU exists now — wire the APU's named-source IRQ sink so
-	// frame-counter IRQ (and DMC IRQ in a follow-up) actually reach
-	// the processor's interrupt path.
+	// frame-counter IRQ + DMC IRQ reach the processor's interrupt
+	// path. Also wire the DMC's CPU-bus access + stall hook so
+	// sample-byte DMA can fetch through MMIO and charge the
+	// 4-cycle bus-steal stall.
 	ap.SetIRQSink(processor)
+	ap.SetDMCBus(mmio, processor)
 	// NewVariant called Reset() before MMIO had the cart's $FFFC vector
 	// visible? No — we registered the cart above, so Reset's vector
 	// fetch returns the right bytes via the MMIO → cart-peripheral path.
