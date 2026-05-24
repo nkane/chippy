@@ -21,6 +21,8 @@
 package ppu
 
 import (
+	"sync"
+
 	"github.com/nkane/chippy/internal/cpu"
 	"github.com/nkane/chippy/internal/nes"
 )
@@ -97,9 +99,18 @@ type PPU struct {
 	dot        int
 	frameCount uint64
 
-	// Framebuffer: 256 × 240 RGBA. Rendered at vblank entry; presented
-	// to the host via Frame().
-	frame [ScreenWidth * ScreenHeight * 4]byte
+	// Framebuffer pair. `frame` is the back / work buffer that
+	// per-scanline render writes to. `displayFrame` is the
+	// presentation buffer Ebiten's Draw goroutine reads from via
+	// FrameBuffer(). At vblank entry the back buffer copies into
+	// displayFrame so Draw always sees a fully-rendered frame
+	// regardless of where the emulator's per-dot stepping is.
+	// Without the split, Ebiten's multi-thread mode could sample
+	// `frame` while only the top N scanlines had rendered this
+	// frame → visible horizontal tear.
+	frame        [ScreenWidth * ScreenHeight * 4]byte
+	displayFrame [ScreenWidth * ScreenHeight * 4]byte
+	displayMu    sync.Mutex
 
 	// bgOpaque mirrors `frame` at 1 bool per pixel and records whether
 	// the BG plane wrote a non-zero (i.e. opaque) palette index there.
@@ -596,14 +607,11 @@ func (p *PPU) stepDot() {
 	switch {
 	case p.scanline == vblankScanline && p.dot == 1:
 		// Per-scanline render already painted every visible scanline
-		// at its dot 256 (BG + sprite composite). At vblank entry we
-		// only flush the per-frame scrollEvents log + raise vblank +
-		// fire NMI. The old renderFrame()+renderSprites() pair here
-		// caused a single-cycle "BG-only" window — renderFrame
-		// overwrote per-scanline sprite composites with fresh BG, and
-		// renderSprites then re-painted them. Ebiten Draw catching
-		// that window showed BG without sprites for ~1 frame ⇒ user-
-		// visible flicker.
+		// at its dot 256. At vblank entry we publish the back buffer
+		// to the presentation buffer (atomic copy under displayMu)
+		// so Ebiten's Draw goroutine always sees a complete frame,
+		// then flush per-frame state + raise vblank + fire NMI.
+		p.PresentFrame()
 		p.scrollEvents = p.scrollEvents[:0]
 		p.status |= 0x80
 		if p.ctrl&0x80 != 0 && p.nmi != nil {
@@ -618,12 +626,32 @@ func (p *PPU) stepDot() {
 	}
 }
 
-// FrameBuffer returns a 256 × 240 RGBA byte slice. Indexed row-major,
-// 4 bytes per pixel (R, G, B, A). The returned slice aliases the PPU's
-// internal frame; callers must not mutate it. A fresh copy is rendered
-// at vblank entry — calling FrameBuffer at any other time returns the
-// most-recent frame.
-func (p *PPU) FrameBuffer() []byte { return p.frame[:] }
+// FrameBuffer returns a 256 × 240 RGBA byte slice. Indexed row-
+// major, 4 bytes per pixel (R, G, B, A). Returns the presentation
+// buffer — atomically swapped at vblank entry from the back buffer
+// the per-scanline render writes to. Safe to read from any
+// goroutine without coordinating with stepDot.
+//
+// Tests that call renderFrame() directly (bypassing the emulator
+// step loop) need to call PresentFrame() explicitly afterwards to
+// publish the back buffer; otherwise FrameBuffer returns whatever
+// was last published.
+func (p *PPU) FrameBuffer() []byte {
+	p.displayMu.Lock()
+	defer p.displayMu.Unlock()
+	out := make([]byte, len(p.displayFrame))
+	copy(out, p.displayFrame[:])
+	return out
+}
+
+// PresentFrame copies the back framebuffer into the presentation
+// buffer. Called from stepDot at vblank entry; also exposed so
+// tests calling renderFrame() directly can flush the result.
+func (p *PPU) PresentFrame() {
+	p.displayMu.Lock()
+	copy(p.displayFrame[:], p.frame[:])
+	p.displayMu.Unlock()
+}
 
 // FrameCount is the number of frames rendered since reset. Tests use
 // this to detect "we crossed a frame boundary".
