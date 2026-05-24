@@ -73,6 +73,12 @@ func (p *PPU) nametableIndex(addr uint16) uint16 {
 		// does — incorrect for those titles, but no NROM cart uses
 		// four-screen, so v0.1 doesn't hit it.
 		phys = bank >> 1
+	case nes.MirrorSingleLower:
+		// All four logical nametables map to physical bank 0.
+		phys = 0
+	case nes.MirrorSingleUpper:
+		// All four logical nametables map to physical bank 1.
+		phys = 1
 	default:
 		phys = bank >> 1
 	}
