@@ -13,12 +13,13 @@ import (
 // the ROM file at load time. CHR is persisted only for CHR-RAM carts
 // (CHR-ROM is immutable + part of the ROM).
 type CartState struct {
-	Kind  string // "NROM" | "UxROM" | "CNROM" | "MMC1" | "MMC3"
+	Kind  string // "NROM" | "UxROM" | "CNROM" | "MMC1" | "MMC3" | "FME7"
 	NROM  *NROMState
 	UxROM *UxROMState
 	CNROM *CNROMState
 	MMC1  *MMC1State
 	MMC3  *MMC3State
+	FME7  *FME7State
 }
 
 // NROMState — only CHR-RAM (when present) is mutable.
@@ -47,6 +48,21 @@ type MMC1State struct {
 	Mirroring          nes.Mirroring
 	PRGRAM             [0x2000]byte
 	CHRRAM             []byte // nil if CHR-ROM
+}
+
+// FME7State — command latch + bank regs + IRQ + PRG-RAM + CHR-RAM (rare).
+type FME7State struct {
+	Command        byte
+	ChrBanks       [8]byte
+	PrgRAMBk       byte
+	PrgBanks       [3]byte
+	Mirroring      nes.Mirroring
+	IRQCountEnable bool
+	IRQEnable      bool
+	IRQCounter     uint16
+	IRQPending     bool
+	PRGRAM         [0x2000]byte
+	CHRRAM         []byte
 }
 
 // MMC3State — bank registers + IRQ counter + PRG-RAM + CHR-RAM (rare).
@@ -79,6 +95,8 @@ func SaveCart(c Cartridge) (CartState, error) {
 		return CartState{Kind: "MMC1", MMC1: m.saveState()}, nil
 	case *MMC3:
 		return CartState{Kind: "MMC3", MMC3: m.saveState()}, nil
+	case *FME7:
+		return CartState{Kind: "FME7", FME7: m.saveState()}, nil
 	default:
 		return CartState{}, fmt.Errorf("cart: unsupported type for save-state %T", c)
 	}
@@ -114,6 +132,11 @@ func LoadCart(c Cartridge, s CartState) error {
 			return fmt.Errorf("cart: state kind %q doesn't match MMC3 cart", s.Kind)
 		}
 		return m.loadState(*s.MMC3)
+	case *FME7:
+		if s.Kind != "FME7" || s.FME7 == nil {
+			return fmt.Errorf("cart: state kind %q doesn't match FME7 cart", s.Kind)
+		}
+		return m.loadState(*s.FME7)
 	default:
 		return fmt.Errorf("cart: unsupported type for load-state %T", c)
 	}
@@ -206,6 +229,47 @@ func (c *MMC1) loadState(s MMC1State) error {
 	if c.chrIsRAM {
 		if len(s.CHRRAM) != len(c.chr) {
 			return fmt.Errorf("mmc1: CHR-RAM length mismatch (have %d, got %d)", len(c.chr), len(s.CHRRAM))
+		}
+		copy(c.chr, s.CHRRAM)
+	}
+	return nil
+}
+
+// --- FME-7 ---
+
+func (c *FME7) saveState() *FME7State {
+	s := &FME7State{
+		Command:        c.command,
+		ChrBanks:       c.chrBanks,
+		PrgRAMBk:       c.prgRAMBk,
+		PrgBanks:       c.prgBanks,
+		Mirroring:      c.mirroring,
+		IRQCountEnable: c.irqCountEnable,
+		IRQEnable:      c.irqEnable,
+		IRQCounter:     c.irqCounter,
+		IRQPending:     c.irqPending,
+		PRGRAM:         c.prgRAM,
+	}
+	if c.chrIsRAM {
+		s.CHRRAM = append(s.CHRRAM, c.chr...)
+	}
+	return s
+}
+
+func (c *FME7) loadState(s FME7State) error {
+	c.command = s.Command
+	c.chrBanks = s.ChrBanks
+	c.prgRAMBk = s.PrgRAMBk
+	c.prgBanks = s.PrgBanks
+	c.mirroring = s.Mirroring
+	c.irqCountEnable = s.IRQCountEnable
+	c.irqEnable = s.IRQEnable
+	c.irqCounter = s.IRQCounter
+	c.irqPending = s.IRQPending
+	c.prgRAM = s.PRGRAM
+	if c.chrIsRAM {
+		if len(s.CHRRAM) != len(c.chr) {
+			return fmt.Errorf("fme7: CHR-RAM length mismatch (have %d, got %d)", len(c.chr), len(s.CHRRAM))
 		}
 		copy(c.chr, s.CHRRAM)
 	}
