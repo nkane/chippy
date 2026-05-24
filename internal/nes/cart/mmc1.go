@@ -29,6 +29,7 @@ type MMC1 struct {
 	chr      []byte
 	chrIsRAM bool
 	prgRAM   [0x2000]byte
+	battery  bool // iNES flag6 bit 1; routes save to a sibling .sav
 
 	// Shift register state.
 	shift    byte // 5-bit accumulator
@@ -58,6 +59,7 @@ func NewMMC1(rom *nes.ROM) (*MMC1, error) {
 		// $C000, switch at $8000) per nesdev. control bits 2-3 = 11.
 		control:   0x0C,
 		mirroring: rom.Mirroring,
+		battery:   rom.Battery,
 	}
 	switch {
 	case len(rom.CHR) == 0:
@@ -207,3 +209,12 @@ func (c *MMC1) chrOffset(addr uint16) int {
 // Mirroring returns the cached mode (updated on every control
 // register write).
 func (c *MMC1) Mirroring() nes.Mirroring { return c.mirroring }
+
+// BatteryBacked reports the iNES header's battery bit. ROMs with
+// the bit set (Zelda, Final Fantasy, Metroid via password) expect
+// their $6000-$7FFF PRG-RAM to survive power-off.
+func (c *MMC1) BatteryBacked() bool { return c.battery }
+
+// PRGRAM exposes the 8 KiB PRG-RAM region for save / restore.
+// Aliased; callers must copy if detachment is needed.
+func (c *MMC1) PRGRAM() []byte { return c.prgRAM[:] }

@@ -70,13 +70,12 @@ func main() {
 		os.Exit(2)
 	}
 
-	f, err := os.Open(*romPath)
+	romBytes, err := os.ReadFile(*romPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "nessy:", err)
 		os.Exit(1)
 	}
-	rom, err := nes.Parse(f)
-	_ = f.Close()
+	rom, err := nes.ParseBytes(romBytes)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "nessy: parse ROM:", err)
 		os.Exit(1)
@@ -87,6 +86,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "nessy: build NES:", err)
 		os.Exit(1)
 	}
+
+	// Battery-backed PRG-RAM (#267). Load any existing .sav into
+	// the cart's PRG-RAM before the CPU runs; write it back when
+	// the game loop exits. SHA-keyed so renaming the ROM doesn't
+	// orphan the save.
+	loadBattery(bus.cart, romBytes)
+	defer saveBattery(bus.cart, romBytes)
 
 	// Optional ca65 / ld65 .dbg symbol + source map. Auto-detect as
 	// `<rom>.dbg` sibling if the user didn't pass -dbg. Missing /

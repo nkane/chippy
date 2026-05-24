@@ -95,3 +95,7 @@ func (c *CNROM) PPUWrite(addr uint16, v byte) {
 
 // Mirroring is pinned at construction.
 func (c *CNROM) Mirroring() nes.Mirroring { return c.mirroring }
+
+// CNROM ships no PRG-RAM slot — never battery-backed.
+func (c *CNROM) BatteryBacked() bool { return false }
+func (c *CNROM) PRGRAM() []byte      { return nil }

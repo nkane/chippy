@@ -99,3 +99,7 @@ func (c *UxROM) PPUWrite(addr uint16, v byte) {
 
 // Mirroring is pinned at construction from the iNES header.
 func (c *UxROM) Mirroring() nes.Mirroring { return c.mirroring }
+
+// UxROM ships no PRG-RAM slot — never battery-backed.
+func (c *UxROM) BatteryBacked() bool { return false }
+func (c *UxROM) PRGRAM() []byte      { return nil }
