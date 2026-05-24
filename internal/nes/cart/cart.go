@@ -36,14 +36,16 @@ type Cartridge interface {
 }
 
 // Open dispatches on the parsed ROM's Mapper byte and returns the
-// concrete cart. v0.1 supports only NROM (mapper 0); other mappers
-// return an explicit error so the user can see why the ROM didn't
-// boot.
+// concrete cart. v0.3 ships NROM (mapper 0) + MMC1 (mapper 1);
+// other mappers return an explicit error so the user can see why
+// the ROM didn't boot.
 func Open(rom *nes.ROM) (Cartridge, error) {
 	switch rom.Mapper {
 	case 0:
 		return NewNROM(rom)
+	case 1:
+		return NewMMC1(rom)
 	default:
-		return nil, fmt.Errorf("cart: unsupported mapper %d (v0.1 ships only NROM/mapper 0)", rom.Mapper)
+		return nil, fmt.Errorf("cart: unsupported mapper %d (v0.3 ships NROM/mapper 0 + MMC1/mapper 1)", rom.Mapper)
 	}
 }

@@ -28,6 +28,12 @@ const (
 	MirrorHorizontal Mirroring = iota
 	MirrorVertical
 	MirrorFourScreen
+	// MirrorSingleLower / MirrorSingleUpper are the two
+	// "single-screen" modes MMC1 (and a few other mappers) flip in
+	// at runtime via control-register writes. The iNES header
+	// never advertises these directly — only mappers set them.
+	MirrorSingleLower
+	MirrorSingleUpper
 )
 
 func (m Mirroring) String() string {
@@ -36,6 +42,10 @@ func (m Mirroring) String() string {
 		return "vertical"
 	case MirrorFourScreen:
 		return "four-screen"
+	case MirrorSingleLower:
+		return "single-lower"
+	case MirrorSingleUpper:
+		return "single-upper"
 	default:
 		return "horizontal"
 	}
