@@ -165,15 +165,19 @@ pass `-nessy-binary PATH`. Build a local nessy with `go build -tags=nessy -o nes
 
 #### Demos
 
-Three homemade demos ship under [`roms/demos/`](roms/demos/) — hand-rolled
+Homemade demos ship under [`roms/demos/`](roms/demos/) — hand-rolled
 ca65 sources + checked-in `.nes` artifacts. Each doubles as a framebuffer-hash
-regression test under `cmd/nessy/demo_*_test.go`:
+or audio-presence regression test under `cmd/nessy/demo_*_test.go`:
 
 | Demo | What it tests | Source |
 |---|---|---|
 | [`hello-bg`](roms/demos/hello-bg/) | PPU bg renderer + palette + nametable + reset path | Static "HELLO NESSY" title screen |
 | [`input-echo`](roms/demos/input-echo/) | $4016 joypad strobe + serial shift + per-frame VRAM writes | 8 indicator boxes light up under live joypad input |
 | [`vblank-bounce`](roms/demos/vblank-bounce/) | PPU NMI line + CPU NMI service + `JMP self` idle | Single tile bounces inside the playfield |
+| [`triangle-arpeggio`](roms/demos/triangle-arpeggio/) | APU triangle channel + NMI-driven note rotation | A-major arpeggio (audio only) |
+| [`noise-drum`](roms/demos/noise-drum/) | APU noise channel + LFSR feedback path | Low/high noise drum hit (audio only) |
+| [`all-channels`](roms/demos/all-channels/) | Non-linear DAC mixer under multi-channel load | Pulse 1+2 + triangle + noise chord (audio only) |
+| [`dmc-sample`](roms/demos/dmc-sample/) | DMC channel DMA fetch + delta-PCM + loop bit | 65-byte alternating-bit sample looped (audio only) |
 
 Run any of them:
 

@@ -59,6 +59,24 @@ func TestDemo_AllChannels_EveryChannelActive(t *testing.T) {
 	}
 }
 
+// dmc-sample loops a 65-byte alternating-bit sample with the DMC
+// channel's loop bit set. After 30 frames the channel should still
+// have bytesRemaining > 0 (loop keeps reloading) and the mixed
+// stream should be non-silent.
+func TestDemo_DMCSample_LoopsAndEmits(t *testing.T) {
+	_, bus := runDemoFramesWithBus(t, "../../roms/demos/dmc-sample/dmc-sample.nes", 30)
+	samples := bus.apu.Samples()
+	if len(samples) < 10_000 {
+		t.Errorf("sample count = %d; want ring near saturation", len(samples))
+	}
+	if !anyNonZero(samples) {
+		t.Errorf("dmc-sample produced silence")
+	}
+	if bus.apu.DMCBytesRemaining() == 0 {
+		t.Errorf("DMC bytes-remaining drained; loop bit should have reloaded")
+	}
+}
+
 func anyNonZero(samples []int16) bool {
 	for _, s := range samples {
 		if s != 0 {
