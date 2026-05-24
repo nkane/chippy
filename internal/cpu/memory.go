@@ -75,3 +75,26 @@ func (r *RAM) ResetShadow() {
 		r.shadow = make(map[byte][256]byte)
 	}
 }
+
+// SaveFullState returns a copy of the full 64 KiB Data backing store
+// for the nessy save-state system (#266). The cost is small enough
+// that we don't bother range-restricting to the NES's 2 KiB internal
+// RAM — saving the whole address space stays correct for hosts that
+// directly poke higher pages.
+func (r *RAM) SaveFullState() []byte {
+	out := make([]byte, len(r.Data))
+	copy(out, r.Data[:])
+	return out
+}
+
+// LoadFullState overwrites Data from s. Lengths must match the
+// 64 KiB backing store; mismatched input is rejected so a malformed
+// save can't half-write memory.
+func (r *RAM) LoadFullState(s []byte) error {
+	if len(s) != len(r.Data) {
+		return errBadStateSize
+	}
+	copy(r.Data[:], s)
+	r.ResetShadow()
+	return nil
+}
