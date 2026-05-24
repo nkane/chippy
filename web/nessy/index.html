@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>nessy — NES emulator in the browser</title>
+<style>
+  body {
+    margin: 0;
+    font: 14px system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #111;
+    color: #ddd;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+    min-height: 100vh;
+    box-sizing: border-box;
+  }
+  h1 { margin: 0 0 8px; font-size: 24px; }
+  p.sub { margin: 0 0 16px; color: #888; }
+  #canvas-host {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    margin: 16px 0;
+    background: #000;
+    border: 1px solid #333;
+  }
+  .controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .controls button, .controls label {
+    background: #222;
+    color: #ddd;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 8px 14px;
+    cursor: pointer;
+  }
+  .controls input[type=file] { display: none; }
+  pre.help {
+    margin-top: 24px;
+    color: #888;
+    background: #1a1a1a;
+    padding: 12px 16px;
+    border-radius: 4px;
+    border: 1px solid #2a2a2a;
+    line-height: 1.5;
+  }
+  a { color: #6cf; }
+</style>
+</head>
+<body>
+  <h1>nessy</h1>
+  <p class="sub">NES emulator running in your browser via Go js/wasm + Ebiten.</p>
+
+  <div id="canvas-host"></div>
+
+  <div class="controls">
+    <label>
+      Load ROM…
+      <input id="rom-picker" type="file" accept=".nes" />
+    </label>
+    <span id="status">loading…</span>
+  </div>
+
+  <pre class="help">Keyboard:
+  Arrows — D-pad
+  Z / X  — A / B
+  Enter  — Start
+  RShift — Select
+
+This page boots a default homebrew demo. Use "Load ROM…" to swap
+in your own .nes file. The ROM stays in your browser — nothing is
+uploaded.</pre>
+
+  <script src="wasm_exec.js"></script>
+  <script>
+    (async () => {
+      const status = document.getElementById('status');
+      status.textContent = 'fetching wasm…';
+      const go = new Go();
+      const resp = await fetch('nessy.wasm');
+      const result = await WebAssembly.instantiateStreaming(resp, go.importObject);
+      status.textContent = 'starting emulator…';
+      go.run(result.instance); // Ebiten owns the event loop after this.
+
+      // Ebiten mounts its canvas into document.body by default; move
+      // it into our host div + size it to 3× native NES resolution
+      // (256×240 → 768×720).
+      const wait = setInterval(() => {
+        const cv = document.querySelector('canvas');
+        if (!cv) return;
+        clearInterval(wait);
+        document.getElementById('canvas-host').appendChild(cv);
+        cv.style.width = '768px';
+        cv.style.height = '720px';
+        status.textContent = 'running default demo';
+      }, 50);
+
+      document.getElementById('rom-picker').addEventListener('change', async (e) => {
+        const f = e.target.files[0];
+        if (!f) return;
+        const buf = new Uint8Array(await f.arrayBuffer());
+        const msg = nessy.loadROM(buf);
+        status.textContent = (msg === 'ok') ? `loaded ${f.name}` : `error: ${msg}`;
+      });
+    })();
+  </script>
+</body>
+</html>
