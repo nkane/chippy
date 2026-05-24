@@ -154,6 +154,14 @@ func (s *StatusPeripheral) Write(addr uint16, v byte) { s.apu.Write(addr, v) }
 // before SetIRQSink lands harmlessly on the flag-only path.
 func (a *APU) SetIRQSink(s IRQSink) { a.irqSink = s }
 
+// Per-channel length-counter accessors. Headless test code uses
+// these to assert "channel still active" without grabbing internal
+// fields. Side-effect-free.
+func (a *APU) Pulse1LengthCounter() byte   { return a.pulse1.lengthCounter }
+func (a *APU) Pulse2LengthCounter() byte   { return a.pulse2.lengthCounter }
+func (a *APU) TriangleLengthCounter() byte { return a.triangle.lengthCounter }
+func (a *APU) NoiseLengthCounter() byte    { return a.noise.lengthCounter }
+
 // SetDMCBus wires the CPU bus the DMC reads sample bytes from and
 // the cpu.Stall hook the DMA byte-fetch charges. Optional — when
 // either argument is nil the DMC channel still tracks state but
