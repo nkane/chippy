@@ -44,13 +44,15 @@ var keyMap = []struct {
 // a concurrent DAP request can't observe a mid-instruction register
 // snapshot.
 type game struct {
-	bus   *nesBus
-	cpuMu *sync.Mutex
-	audio *audioSink // optional; nil when -mute set or audio init failed
+	bus       *nesBus
+	cpuMu     *sync.Mutex
+	audio     *audioSink // optional; nil when -mute set or audio init failed
+	titleBase string     // window title prefix; FPS appended every ~0.5 s
+	frameNum  uint64
 }
 
-func newGame(bus *nesBus, cpuMu *sync.Mutex) *game {
-	return &game{bus: bus, cpuMu: cpuMu}
+func newGame(bus *nesBus, cpuMu *sync.Mutex, titleBase string) *game {
+	return &game{bus: bus, cpuMu: cpuMu, titleBase: titleBase}
 }
 
 // loopSteppedBanner is a one-shot diagnostic: prints to stderr the
@@ -80,10 +82,25 @@ func (g *game) Update() error {
 			g.bus.cpu.PC, g.bus.cpu.Cycles, waitForAttach.Load(), dapAttached.Load())
 	}
 	g.cpuMu.Lock()
-	defer g.cpuMu.Unlock()
 	target := g.bus.cpu.Cycles + cpuCyclesPerFrame
 	for g.bus.cpu.Cycles < target && !g.bus.cpu.Halted {
 		g.bus.cpu.Step()
+	}
+	// Drain APU samples while we hold cpuMu, then push them to the
+	// audio sink (which has its own queue lock). Decouples the
+	// audio thread from cpuMu — the pre-decoupling design had Read
+	// blocking on cpuMu and burned ~38% of runtime in
+	// pthread_cond_signal contention.
+	mono := g.bus.apu.Samples()
+	g.cpuMu.Unlock()
+	g.audio.push(mono)
+	// Refresh the window title with the actual TPS / FPS every ~0.5 s
+	// (30 frames at 60 TPS). Cheap surface for the "is Update running
+	// at 60Hz?" question.
+	g.frameNum++
+	if g.titleBase != "" && g.frameNum%30 == 0 {
+		ebiten.SetWindowTitle(fmt.Sprintf("%s — TPS %.1f FPS %.1f",
+			g.titleBase, ebiten.ActualTPS(), ebiten.ActualFPS()))
 	}
 	return nil
 }

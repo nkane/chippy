@@ -98,6 +98,16 @@ type PPU struct {
 	// pass.
 	bgOpaque [ScreenWidth * ScreenHeight]bool
 
+	// sprite0HitScanline (-1 = no hit predicted) is the visible
+	// scanline at which the next frame's sprite-0 hit will land,
+	// computed from THIS frame's renderSprites pass. stepDot fires
+	// the $2002 bit-6 flag when scanline reaches this value so
+	// games that poll $2002 for the hit (SMB1 status-bar split)
+	// see the flag mid-frame instead of waiting until the per-
+	// frame compositor runs at vblank entry. Per-dot accuracy is
+	// the v0.4 #268 issue; this is the v0.3 stopgap.
+	sprite0HitScanline int
+
 	// Scroll capture for mid-frame splits (issue #206). frameStartScroll
 	// is snapshotted at the end of vblank (when scanline rolls back to
 	// 0) so renderFrame knows what scroll values were active for the
@@ -125,7 +135,7 @@ type scrollSnapshot struct {
 // access + nametable mirroring) and an NMI sink (the CPU). Both may be
 // nil for register-level tests that don't exercise rendering or NMI.
 func New(cart Cart, nmi NMI) *PPU {
-	p := &PPU{cart: cart, nmi: nmi}
+	p := &PPU{cart: cart, nmi: nmi, sprite0HitScanline: -1}
 	p.Reset()
 	return p
 }
@@ -151,6 +161,7 @@ func (p *PPU) Reset() {
 	for i := range p.frame {
 		p.frame[i] = 0
 	}
+	p.sprite0HitScanline = -1
 }
 
 // Range claims $2000-$3FFF (the mirrored register window). $4014
@@ -294,6 +305,124 @@ func (p *PPU) scrollFromV() {
 	p.ctrl = (p.ctrl &^ 0x03) | nametable
 }
 
+// predictSprite0Hit computes the visible scanline at which the
+// $2002 bit-6 flag should fire this frame by walking sprite 0's
+// 8×8 (or 8×16) bounding box against the current frame's BG state
+// — nametable + attribute + pattern fetched live from the cart.
+// Stores -1 when no hit will occur (either gating disabled or no
+// opaque-over-opaque overlap exists).
+//
+// Called once per frame at the scanline 0 dot 0 transition, before
+// the game's NMI handler has finished any post-vblank work but
+// after any prior-frame nametable writes have settled. Uses
+// frameStartScroll for the BG-pixel resolution so the prediction
+// matches what the playfield will look like at scanlines BEFORE
+// the mid-frame split.
+//
+// Per-dot accuracy (the full v0.4 #268 path) eventually replaces
+// this; for v0.3 the prediction is sufficient for SMB1-class
+// titles where sprite-0 sits in the static status bar.
+func (p *PPU) predictSprite0Hit() {
+	p.sprite0HitScanline = -1
+	if p.mask&0x18 != 0x18 {
+		return
+	}
+	spriteY := int(p.oam[0]) + 1
+	if spriteY >= ScreenHeight {
+		return
+	}
+	spriteH := 8
+	if p.ctrl&0x20 != 0 {
+		spriteH = 16
+	}
+	tileIdx := p.oam[1]
+	attr := p.oam[2]
+	spriteX := int(p.oam[3])
+	hflip := attr&0x40 != 0
+	vflip := attr&0x80 != 0
+	sprPatternBase := uint16(0)
+	if p.ctrl&0x08 != 0 && p.ctrl&0x20 == 0 {
+		sprPatternBase = 0x1000
+	}
+	bgPatternBase := uint16(0)
+	if p.ctrl&0x10 != 0 {
+		bgPatternBase = 0x1000
+	}
+	snap := p.frameStartScroll
+
+	for row := 0; row < spriteH; row++ {
+		py := spriteY + row
+		if py >= ScreenHeight {
+			break
+		}
+		fineY := row
+		if vflip {
+			fineY = spriteH - 1 - row
+		}
+		var tileAddr uint16
+		if spriteH == 16 {
+			base := uint16(0)
+			if tileIdx&1 != 0 {
+				base = 0x1000
+			}
+			tileNum := uint16(tileIdx & 0xFE)
+			if fineY >= 8 {
+				tileNum |= 1
+			}
+			tileAddr = base + tileNum*16 + uint16(fineY&7)
+		} else {
+			tileAddr = sprPatternBase + uint16(tileIdx)*16 + uint16(fineY)
+		}
+		spLo := p.busRead(tileAddr)
+		spHi := p.busRead(tileAddr + 8)
+		for col := 0; col < 8; col++ {
+			px := spriteX + col
+			if px < 0 || px >= ScreenWidth {
+				continue
+			}
+			bitCol := col
+			if !hflip {
+				bitCol = 7 - col
+			}
+			b := uint(bitCol)
+			if ((spLo>>b)&1)|((spHi>>b)&1) == 0 {
+				continue
+			}
+			// BG lookup at (px, py) using frameStartScroll.
+			effX := px + int(snap.scrollX)
+			effY := py + int(snap.scrollY)
+			ntX := snap.baseNametable & 1
+			ntY := (snap.baseNametable >> 1) & 1
+			if effX >= 256 {
+				effX -= 256
+				ntX ^= 1
+			}
+			if effY >= 240 {
+				effY -= 240
+				ntY ^= 1
+			}
+			coarseX := effX / 8
+			coarseY := effY / 8
+			fineX := effX % 8
+			fineYbg := effY % 8
+			ntBase := uint16(0x2000) +
+				uint16(ntY)*0x0800 +
+				uint16(ntX)*0x0400
+			bgTileIdx := p.busRead(ntBase + uint16(coarseY)*32 + uint16(coarseX))
+			bgAddr := bgPatternBase + uint16(bgTileIdx)*16 + uint16(fineYbg)
+			bgLo := p.busRead(bgAddr)
+			bgHi := p.busRead(bgAddr + 8)
+			bgB := uint(7 - fineX)
+			bgLow := (bgLo >> bgB) & 1
+			bgHigh := (bgHi >> bgB) & 1
+			if (bgHigh<<1)|bgLow != 0 {
+				p.sprite0HitScanline = py
+				return
+			}
+		}
+	}
+}
+
 // incVRAMAddr advances v after a $2007 access. PPUCTRL bit 2 selects
 // step 1 vs step 32.
 func (p *PPU) incVRAMAddr() {
@@ -332,7 +461,23 @@ func (p *PPU) stepDot() {
 				scrollY:       p.scrollY,
 				baseNametable: p.ctrl & 0x03,
 			}
+			// Re-predict sprite-0 hit using CURRENT state. The prior
+			// pass at renderSprites used last frame's bgOpaque — fine
+			// when sprite-0 + BG are stable, broken the moment a new
+			// BG column scrolls in. Predicting per-frame from the live
+			// nametable + sprite-0 OAM keeps SMB1 status-bar splits
+			// stable across the playfield.
+			p.predictSprite0Hit()
 		}
+	}
+	// Mid-frame sprite-0 hit predictor — see sprite0HitScanline.
+	// Fires once per frame at the predicted scanline so games that
+	// poll $2002 bit 6 in a tight loop (SMB1 status-bar split) see
+	// the flag set mid-render instead of post-frame.
+	if p.dot == 1 && p.scanline >= 0 && p.scanline < ScreenHeight &&
+		p.scanline == p.sprite0HitScanline &&
+		p.mask&0x18 == 0x18 && p.status&0x40 == 0 {
+		p.status |= 0x40
 	}
 	switch {
 	case p.scanline == vblankScanline && p.dot == 1:

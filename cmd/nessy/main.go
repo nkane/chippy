@@ -136,8 +136,9 @@ func main() {
 			*dapPort, *dapPort)
 	}
 
-	g := newGame(bus, cpuMu)
-	sink, err := newAudioSink(bus.apu, cpuMu, *mute)
+	titleBase := fmt.Sprintf("nessy — %s", filepath.Base(*romPath))
+	g := newGame(bus, cpuMu, titleBase)
+	sink, err := newAudioSink(*mute)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "nessy: audio init failed (continuing muted):", err)
 	}
@@ -145,7 +146,7 @@ func main() {
 	sink.start()
 	defer sink.close()
 	ebiten.SetWindowSize(256*(*scale), 240*(*scale))
-	ebiten.SetWindowTitle(fmt.Sprintf("nessy — %s", filepath.Base(*romPath)))
+	ebiten.SetWindowTitle(titleBase)
 	ebiten.SetTPS(60)
 	if err := ebiten.RunGame(g); err != nil {
 		fmt.Fprintln(os.Stderr, "nessy:", err)
