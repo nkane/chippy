@@ -19,6 +19,7 @@ type FullState struct {
 	ReadBuf                     byte
 	ScrollX, ScrollY            byte
 	ScrollHi                    bool
+	OpenBus                     byte
 
 	VRAM    [0x800]byte
 	OAM     [256]byte
@@ -56,6 +57,7 @@ func (p *PPU) SaveFullState() FullState {
 		Ctrl: p.ctrl, Mask: p.mask, Status: p.status, OAMAddr: p.oamAddr,
 		V: p.v, T: p.t, X: p.x, W: p.w, ReadBuf: p.readBuf,
 		ScrollX: p.scrollX, ScrollY: p.scrollY, ScrollHi: p.scrollHi,
+		OpenBus: p.openBus,
 		VRAM: p.vram, OAM: p.oam, Palette: p.palette,
 		Scanline: p.scanline, Dot: p.dot, FrameCount: p.frameCount,
 		FrameStartScroll: exportScroll(p.frameStartScroll),
@@ -94,6 +96,7 @@ func (p *PPU) LoadFullState(s FullState) error {
 	p.ctrl, p.mask, p.status, p.oamAddr = s.Ctrl, s.Mask, s.Status, s.OAMAddr
 	p.v, p.t, p.x, p.w, p.readBuf = s.V, s.T, s.X, s.W, s.ReadBuf
 	p.scrollX, p.scrollY, p.scrollHi = s.ScrollX, s.ScrollY, s.ScrollHi
+	p.openBus = s.OpenBus
 	p.vram = s.VRAM
 	p.oam = s.OAM
 	p.palette = s.Palette

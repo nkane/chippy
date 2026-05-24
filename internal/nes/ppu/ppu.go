@@ -89,6 +89,20 @@ type PPU struct {
 	scrollY  byte
 	scrollHi bool // tracks $2005 toggle state alongside $2006
 
+	// openBus mirrors the PPU's external data bus latch. Real
+	// silicon's PPU bus is shared between CPU + PPU reads; the latch
+	// retains whatever byte last crossed it. Writes to ANY $2000-$2007
+	// register update it; reads from write-only registers ($2000,
+	// $2001, $2003, $2005, $2006) return it as-is; $2002 reads return
+	// status bits 5-7 OR'd with latch bits 0-4; $2004 / $2007 reads
+	// return their value AND update the latch. Open-bus quirks
+	// matter for ppu_open_bus.nes — see #272.
+	//
+	// Real silicon has per-bit DRAM-cell decay (~1 frame). We don't
+	// model the decay; latch holds the last value indefinitely. Good
+	// enough for every shipping ROM that probes the latch.
+	openBus byte
+
 	// Memory the PPU owns directly.
 	vram    [0x800]byte // 2 KiB nametable RAM
 	oam     [256]byte   // sprite memory
@@ -179,44 +193,62 @@ func (p *PPU) Reset() {
 // OAMDMA is deliberately not claimed here — see package doc.
 func (p *PPU) Range() (uint16, uint16) { return 0x2000, 0x3FFF }
 
-// Read services CPU reads of mirrored PPU registers.
+// Read services CPU reads of mirrored PPU registers. Every read
+// updates the open-bus latch with whatever value gets returned (the
+// 2C02 places the result on the shared PPU bus). Reads from
+// write-only registers return the latch as-is.
 func (p *PPU) Read(addr uint16) byte {
 	switch 0x2000 | (addr & 0x0007) {
 	case 0x2002:
-		// PPUSTATUS: top 3 bits return the live flags; the bottom 5 are
-		// "open-bus" — many ROMs see the last data on the PPU bus there,
-		// but for v0.1 we return 0. Reading also clears vblank (bit 7)
-		// and resets the $2005 / $2006 write-toggle.
-		s := p.status & 0xE0
+		// PPUSTATUS: top 3 bits (vblank / sprite-0 / overflow) come
+		// from the live status register; bottom 5 bits come from
+		// the open-bus latch (real silicon doesn't drive them).
+		// Reading also clears vblank + the $2005/$2006 toggle.
+		out := (p.status & 0xE0) | (p.openBus & 0x1F)
 		p.status &^= 0x80
 		p.w = false
 		p.scrollHi = false
-		return s
+		// Only the high 3 bits leave on the bus; latch's high 3
+		// bits get the status, low 5 unchanged.
+		p.openBus = (p.openBus & 0x1F) | (p.status & 0xE0)
+		return out
 	case 0x2004:
-		return p.oam[p.oamAddr]
+		out := p.oam[p.oamAddr]
+		p.openBus = out
+		return out
 	case 0x2007:
 		// $2007 reads are buffered: each read returns the previously
 		// buffered byte, then refills the buffer from VRAM[v]. Reads
 		// from palette space ($3F00-$3FFF) bypass the buffer and
 		// return immediately; the buffer is loaded with the mirrored
-		// nametable byte underneath the palette region.
+		// nametable byte underneath the palette region. Palette reads
+		// only place 6 bits on the bus (the palette RAM is 6-bit) —
+		// the upper 2 bits come from the open-bus latch.
 		var out byte
 		addrV := p.v & 0x3FFF
 		if addrV >= 0x3F00 {
-			out = p.busRead(addrV)
+			pal := p.busRead(addrV) & 0x3F
+			out = pal | (p.openBus & 0xC0)
 			p.readBuf = p.busRead(addrV - 0x1000)
+			// Palette reads put the 6 palette bits on the bus.
+			p.openBus = (p.openBus & 0xC0) | pal
 		} else {
 			out = p.readBuf
 			p.readBuf = p.busRead(addrV)
+			p.openBus = out
 		}
 		p.incVRAMAddr()
 		return out
 	}
-	return 0
+	// Write-only registers ($2000 / $2001 / $2003 / $2005 / $2006)
+	// return the open-bus latch verbatim.
+	return p.openBus
 }
 
-// Write services CPU writes to mirrored PPU registers.
+// Write services CPU writes to mirrored PPU registers. Every write
+// updates the open-bus latch with the byte that just crossed the bus.
 func (p *PPU) Write(addr uint16, v byte) {
+	p.openBus = v
 	switch 0x2000 | (addr & 0x0007) {
 	case 0x2000:
 		prev := p.ctrl
