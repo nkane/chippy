@@ -147,20 +147,23 @@ func TestBuildNES_OAMDMA_RepeatedWrites(t *testing.T) {
 		bus.ram.Write(0x0300+uint16(i), 0x22)
 	}
 
+	// At STA $4014 time, c.Cycles = 7 (Reset) + 2 (LDA) = 9 (odd) →
+	// odd-cycle alignment adds one stall → 514. Same path for the
+	// second DMA (cycle count stays odd between back-to-back DMAs).
 	bus.cpu.Step() // LDA #$02
-	bus.cpu.Step() // STA $4014 → DMA #1 (OAM all $11), queue 513 stall
+	bus.cpu.Step() // STA $4014 → DMA #1 (OAM all $11), queue 514 stall
 	stalled := bus.cpu.Step()
-	if stalled != 513 {
-		t.Fatalf("stall #1 cycles = %d; want 513", stalled)
+	if stalled != 514 {
+		t.Fatalf("stall #1 cycles = %d; want 514 (odd-cycle entry)", stalled)
 	}
 	// After first DMA, OAM has wrapped (oamAddr ticked 256 → back to 0
 	// since byte counter overflows). So the second DMA overwrites
 	// from the top with the $03 page contents.
 	bus.cpu.Step() // LDA #$03
-	bus.cpu.Step() // STA $4014 → DMA #2 (OAM all $22), queue 513 stall
+	bus.cpu.Step() // STA $4014 → DMA #2 (OAM all $22), queue 514 stall
 	stalled = bus.cpu.Step()
-	if stalled != 513 {
-		t.Fatalf("stall #2 cycles = %d; want 513", stalled)
+	if stalled != 514 {
+		t.Fatalf("stall #2 cycles = %d; want 514 (odd-cycle entry)", stalled)
 	}
 	for i := range 256 {
 		if got := bus.ppu.OAM(byte(i)); got != 0x22 {
@@ -170,10 +173,9 @@ func TestBuildNES_OAMDMA_RepeatedWrites(t *testing.T) {
 }
 
 // Stall cycles MUST flow to the PPU's bus-ticker hook — sprites
-// depend on accurate vblank timing, so a 513-cycle stall has to
-// advance the PPU dot counter by 513 * 3 = 1539 dots. Catches a
-// regression where Step()'s stall drain skips the busTicker.Tick
-// fan-out.
+// depend on accurate vblank timing, so an N-cycle stall has to
+// advance the PPU dot counter by N*3 dots. Catches a regression
+// where Step()'s stall drain skips the busTicker.Tick fan-out.
 func TestBuildNES_OAMDMA_StallTicksPPU(t *testing.T) {
 	prog := []byte{
 		0xA9, 0x02, // LDA #$02
@@ -189,11 +191,12 @@ func TestBuildNES_OAMDMA_StallTicksPPU(t *testing.T) {
 	}
 	bus.cpu.Step() // LDA #$02 → 2 cyc → 6 dots
 	bus.cpu.Step() // STA $4014 → 4 cyc → 12 dots
+	// Stall = 513 + (CycleAtWrite & 1). CycleAtWrite = 7 + 2 = 9 (odd) → 514.
 	preDots := absoluteDot(bus.ppu)
-	bus.cpu.Step() // drain 513-cyc stall → 1539 dots
+	bus.cpu.Step() // drain stall
 	postDots := absoluteDot(bus.ppu)
-	if got := postDots - preDots; got != 513*3 {
-		t.Fatalf("PPU dot delta during stall = %d; want %d (513 cyc * 3 dots/cyc)", got, uint64(513*3))
+	if got := postDots - preDots; got != 514*3 {
+		t.Fatalf("PPU dot delta during stall = %d; want %d (514 cyc * 3 dots/cyc)", got, uint64(514*3))
 	}
 }
 
@@ -235,7 +238,7 @@ func TestBuildNES_OAMDMA_RoundTripsThroughCPU(t *testing.T) {
 	}
 
 	bus.cpu.Step() // LDA #$02
-	bus.cpu.Step() // STA $4014 → fires DMA, queues 513 stall
+	bus.cpu.Step() // STA $4014 → fires DMA, queues 513 or 514 stall
 
 	// OAM should now contain the seeded pattern from $0200-$02FF.
 	for i := range 256 {
@@ -245,14 +248,15 @@ func TestBuildNES_OAMDMA_RoundTripsThroughCPU(t *testing.T) {
 		}
 	}
 
-	// Next Step drains the bus-steal stall.
+	// Next Step drains the bus-steal stall. Cycle-at-write was odd
+	// (Reset 7 + LDA 2 = 9), so the odd-alignment penalty adds one.
 	preCycles := bus.cpu.Cycles
 	stalled := bus.cpu.Step()
-	if stalled != 513 {
-		t.Errorf("post-DMA Step cycles = %d; want 513", stalled)
+	if stalled != 514 {
+		t.Errorf("post-DMA Step cycles = %d; want 514", stalled)
 	}
-	if delta := bus.cpu.Cycles - preCycles; delta != 513 {
-		t.Errorf("CPU.Cycles delta = %d; want 513", delta)
+	if delta := bus.cpu.Cycles - preCycles; delta != 514 {
+		t.Errorf("CPU.Cycles delta = %d; want 514", delta)
 	}
 }
 
