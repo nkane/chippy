@@ -28,6 +28,103 @@ package ppu
 //	          bit 7    : vertical flip
 //	byte 3: X position
 
+// compositeScanlineSprites paints sprite pixels for one scanline
+// over the BG layer that renderScanlineEnabled just wrote. Walks
+// OAM 0..63 forward (lower index wins on overlap, matching real
+// silicon priority). Updates sprite-overflow flag based on this
+// scanline's sprite count. Designed to fire right after the BG
+// scanline render so the framebuffer is "complete" for that row
+// before Ebiten's Draw can sample it.
+func (p *PPU) compositeScanlineSprites(y int) {
+	if p.mask&0x10 == 0 {
+		return
+	}
+	spriteH := 8
+	if p.ctrl&0x20 != 0 {
+		spriteH = 16
+	}
+	sprPatternBase := uint16(0)
+	if p.ctrl&0x08 != 0 && p.ctrl&0x20 == 0 {
+		sprPatternBase = 0x1000
+	}
+	// Per-scanline overflow count.
+	inRange := 0
+	// Track which screen-x columns of this scanline a sprite has
+	// already painted (lower OAM idx wins on overlap).
+	var painted [ScreenWidth]bool
+	for i := 0; i < 64; i++ {
+		spriteY := int(p.oam[i*4+0]) + 1
+		if y < spriteY || y >= spriteY+spriteH {
+			continue
+		}
+		inRange++
+		// Simple-correct overflow: silicon's buggy version is
+		// #283.
+		if inRange > 8 {
+			p.status |= 0x20
+		}
+		tileIdx := p.oam[i*4+1]
+		attr := p.oam[i*4+2]
+		spriteX := int(p.oam[i*4+3])
+		paletteSel := attr & 0x03
+		priorityBehind := attr&0x20 != 0
+		hflip := attr&0x40 != 0
+		vflip := attr&0x80 != 0
+
+		row := y - spriteY
+		fineY := row
+		if vflip {
+			fineY = spriteH - 1 - row
+		}
+		var tileAddr uint16
+		if spriteH == 16 {
+			base := uint16(0)
+			if tileIdx&1 != 0 {
+				base = 0x1000
+			}
+			tileNum := uint16(tileIdx & 0xFE)
+			if fineY >= 8 {
+				tileNum |= 1
+			}
+			tileAddr = base + tileNum*16 + uint16(fineY&7)
+		} else {
+			tileAddr = sprPatternBase + uint16(tileIdx)*16 + uint16(fineY)
+		}
+		low := p.busRead(tileAddr)
+		high := p.busRead(tileAddr + 8)
+		for col := 0; col < 8; col++ {
+			px := spriteX + col
+			if px < 0 || px >= ScreenWidth {
+				continue
+			}
+			bitCol := col
+			if !hflip {
+				bitCol = 7 - col
+			}
+			bit := uint(bitCol)
+			val := ((high>>bit)&1)<<1 | ((low >> bit) & 1)
+			if val == 0 {
+				continue
+			}
+			pxIdx := y*ScreenWidth + px
+			if painted[px] {
+				continue // earlier sprite already won this pixel
+			}
+			painted[px] = true
+			if priorityBehind && p.bgOpaque[pxIdx] {
+				continue
+			}
+			colorIdx := p.palette[0x10|(paletteSel<<2)|val]
+			r, g, b := paletteRGB(colorIdx)
+			off := pxIdx * 4
+			p.frame[off+0] = r
+			p.frame[off+1] = g
+			p.frame[off+2] = b
+			p.frame[off+3] = 0xFF
+		}
+	}
+}
+
 // renderSprites composites the sprite layer over the BG. Mutates
 // p.frame; reads p.bgOpaque; updates p.status (sprite-0 hit + sprite
 // overflow flags).

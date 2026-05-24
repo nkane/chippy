@@ -28,15 +28,14 @@ type apuStream struct {
 	pending []byte
 }
 
-// maxQueueBytes caps the pending queue at ~80ms of stereo PCM
-// (44100 samples/sec × 4 bytes × 0.08 s ≈ 14 KB). Trade-off: low
-// enough to keep jump-to-sound latency in NES-perception range
-// (jump+land is ~500ms; we want sub-100ms), large enough to
-// absorb the drain cadence's jitter between game frames + oto's
-// pull cycles. Drops on overflow are inaudible at this depth in
-// practice; long stalls (debugger pause) can produce a brief
-// click on resume, fine.
-const maxQueueBytes = 4 * 44100 * 80 / 1000
+// maxQueueBytes caps the pending queue at ~150ms of stereo PCM
+// (44100 samples/sec × 4 bytes × 0.15 s ≈ 26 KB). 80ms was too
+// tight — Ebiten's audio thread jitter occasionally pushed past
+// the cap, causing audible drops ("scan-like click"). 150ms
+// absorbs the jitter while keeping perceived input-to-sound
+// latency under ~200ms (Player buffer 50ms + queue worst case
+// 150ms). Drops only on pathological stalls (paused debugger).
+const maxQueueBytes = 4 * 44100 * 150 / 1000
 
 // Push appends new stereo PCM bytes. Called from the game-loop
 // goroutine after it drains APU.Samples() under cpuMu — we copy /
