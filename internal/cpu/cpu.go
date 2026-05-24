@@ -117,6 +117,12 @@ func (c *CPU) Stall(cycles int) {
 // dummy-cycle penalties against odd vs even CPU cycles.
 func (c *CPU) CurrentCycle() uint64 { return c.Cycles }
 
+// PendingStall returns the un-drained stall debt queued by an earlier
+// peripheral (typically OAMDMA). A non-zero value at DMC-fetch time
+// signals bus contention — the DMC fetch lands inside the OAMDMA
+// window and pays a 2-cycle alignment penalty per nesdev (#300).
+func (c *CPU) PendingStall() int { return c.pendingStall }
+
 func New(bus Bus) *CPU {
 	return NewVariant(bus, VariantNMOS)
 }
