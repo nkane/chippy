@@ -41,6 +41,22 @@ const cpuClockHz = 1789773
 // of these per frame counter cycle (q, h, q, h+IRQ).
 const quarterFrameCycles = 7457
 
+// IRQSink is the CPU's named-source IRQ surface from the APU's
+// point of view (see cpu.AssertIRQSource / cpu.ClearIRQSource). The
+// APU asserts under name "apu-frame" at the end of each 4-step
+// frame counter cycle (unless inhibited) and clears the source on
+// $4015 read or $4017 inhibit write. DMC IRQ wiring lands with the
+// DMC channel itself (issue #246).
+type IRQSink interface {
+	AssertIRQSource(src string)
+	ClearIRQSource(src string)
+}
+
+// frameIRQSource is the name the APU uses on cpu.AssertIRQSource for
+// its frame-counter IRQ. Exported as a constant so callers wiring
+// the sink can see the contract without grepping.
+const frameIRQSource = "apu-frame"
+
 // APU is the 2A03 audio half. Claims $4000-$4015 on the CPU bus;
 // the $4017 frame-counter write comes in from the joypad's $4017
 // forwarder so the two peripherals don't fight over the same
@@ -52,10 +68,17 @@ type APU struct {
 	// Frame counter state. mode4Step true = 4-step (the default,
 	// 240 Hz IRQ ticks); false = 5-step (no IRQ). irqInhibit gates
 	// the 4-step IRQ.
-	mode4Step  bool
-	irqInhibit bool
-	frameStep  int // 0-3 in 4-step, 0-4 in 5-step
-	frameTimer int // CPU cycles until the next step boundary
+	mode4Step    bool
+	irqInhibit   bool
+	frameStep    int // 0-3 in 4-step, 0-4 in 5-step
+	frameTimer   int // CPU cycles until the next step boundary
+	frameIRQFlag bool
+
+	// irqSink (optional) is the CPU's IRQ line. nil means
+	// "headless" — registers still track the IRQ flag but nothing
+	// is asserted on the CPU. cmd/nessy wires this via SetIRQSink
+	// after both APU + CPU are constructed.
+	irqSink IRQSink
 
 	// Pulse units run at half CPU rate; alternateTick toggles each
 	// CPU cycle and triggers the pulse-timer step on every other.
@@ -116,12 +139,14 @@ func (s *StatusPeripheral) Read(addr uint16) byte { return s.apu.Read(addr) }
 // counter clear behavior on $4015 writes still fires.
 func (s *StatusPeripheral) Write(addr uint16, v byte) { s.apu.Write(addr, v) }
 
-// Read services CPU reads. Only $4015 returns meaningful data:
-// bit 0 = pulse-1 length > 0, bit 1 = pulse-2 length > 0; other
-// bits report triangle / noise / DMC / frame-IRQ status (v0.3
-// once those channels land). Reading $4015 also clears the frame
-// IRQ flag — a side effect callers should know about. Other
-// register reads return open-bus 0.
+// SetIRQSink wires the CPU's named-source IRQ surface. May be nil
+// in tests / headless contexts. Frame-counter IRQ assertions
+// before SetIRQSink lands harmlessly on the flag-only path.
+func (a *APU) SetIRQSink(s IRQSink) { a.irqSink = s }
+
+// Read services CPU reads. $4015 returns the per-channel status +
+// IRQ flags; reading also clears the frame-IRQ flag (per nesdev).
+// Other register addresses return open-bus 0.
 func (a *APU) Read(addr uint16) byte {
 	if addr != 0x4015 {
 		return 0
@@ -132,6 +157,18 @@ func (a *APU) Read(addr uint16) byte {
 	}
 	if a.pulse2.lengthCounter > 0 {
 		v |= 0x02
+	}
+	// Triangle (bit 2), noise (bit 3), DMC (bit 4) bits land with
+	// the channels themselves (v0.3 follow-ups). DMC IRQ at bit 7
+	// also waits on the DMC channel.
+	if a.frameIRQFlag {
+		v |= 0x40
+	}
+	// Reading $4015 clears the frame-IRQ flag (NOT the DMC IRQ —
+	// that has its own ack path).
+	a.frameIRQFlag = false
+	if a.irqSink != nil {
+		a.irqSink.ClearIRQSource(frameIRQSource)
 	}
 	return v
 }
@@ -167,13 +204,20 @@ func (a *APU) Write(addr uint16, v byte) {
 
 // SetFrameCounter accepts the $4017 write forwarded from
 // joypad.Port. Bit 7 = mode (0 = 4-step, 1 = 5-step); bit 6 = IRQ
-// inhibit. Real silicon also resets the frame divider and fires an
-// immediate clock when the 5-step bit is set; v0.2 mirrors that.
+// inhibit. Inhibit set also clears any pending frame IRQ
+// immediately (per nesdev). 5-step mode never fires the IRQ.
 func (a *APU) SetFrameCounter(v byte) {
 	a.mode4Step = v&0x80 == 0
 	a.irqInhibit = v&0x40 != 0
 	a.frameStep = 0
 	a.frameTimer = quarterFrameCycles
+	if a.irqInhibit {
+		// Inhibit set clears any pending IRQ + drops the line.
+		a.frameIRQFlag = false
+		if a.irqSink != nil {
+			a.irqSink.ClearIRQSource(frameIRQSource)
+		}
+	}
 	if !a.mode4Step {
 		// 5-step mode: immediate quarter + half frame tick on write.
 		a.tickQuarterFrame()
@@ -235,8 +279,15 @@ func (a *APU) advanceFrameStep() {
 		case 3:
 			a.tickQuarterFrame()
 			a.tickHalfFrame()
-			// IRQ firing deferred to v0.3 (no peripheral IRQ
-			// pump wired up for APU yet).
+			// 4-step IRQ fires at the end of each cycle unless
+			// inhibited. Level-triggered; stays asserted until
+			// $4015 read or $4017-inhibit-set acks it.
+			if !a.irqInhibit {
+				a.frameIRQFlag = true
+				if a.irqSink != nil {
+					a.irqSink.AssertIRQSource(frameIRQSource)
+				}
+			}
 		}
 		a.frameStep = (a.frameStep + 1) & 3
 	} else {
