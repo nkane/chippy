@@ -5,6 +5,7 @@ package main
 import (
 	"io"
 	"sync"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2/audio"
 
@@ -27,15 +28,15 @@ type apuStream struct {
 	pending []byte
 }
 
-// maxQueueBytes caps the pending queue at ~500ms of stereo PCM
-// (44100 samples/sec × 4 bytes × 0.5 s ≈ 88 KB). Bounds worst-case
-// audio latency at half a second so drift doesn't grow unbounded
-// across a long session, but big enough that the Ebiten / oto
-// drain cadence's natural jitter never hits the cap during normal
-// play — drops translate to audible clicks, so the cap exists for
-// the pathological case (e.g. nessy paused with a debugger
-// attached while audio kept queueing).
-const maxQueueBytes = 4 * 44100 / 2
+// maxQueueBytes caps the pending queue at ~80ms of stereo PCM
+// (44100 samples/sec × 4 bytes × 0.08 s ≈ 14 KB). Trade-off: low
+// enough to keep jump-to-sound latency in NES-perception range
+// (jump+land is ~500ms; we want sub-100ms), large enough to
+// absorb the drain cadence's jitter between game frames + oto's
+// pull cycles. Drops on overflow are inaudible at this depth in
+// practice; long stalls (debugger pause) can produce a brief
+// click on resume, fine.
+const maxQueueBytes = 4 * 44100 * 80 / 1000
 
 // Push appends new stereo PCM bytes. Called from the game-loop
 // goroutine after it drains APU.Samples() under cpuMu — we copy /
@@ -96,6 +97,12 @@ func newAudioSink(mute bool) (*audioSink, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Shrink the Player's internal buffer to ~50ms. Default is
+	// closer to 100ms on macOS which compounds with our queue
+	// depth to give 200+ ms of perceptible delay between a button
+	// press + the resulting sound. NES players notice <50ms; we
+	// aim for sub-100ms total end-to-end.
+	player.SetBufferSize(50 * time.Millisecond)
 	return &audioSink{ctx: ctx, player: player, stream: stream}, nil
 }
 
@@ -109,7 +116,7 @@ func (s *audioSink) start() {
 	if s == nil {
 		return
 	}
-	const primeBytes = 4 * 44100 / 10 // ~100ms of silence
+	const primeBytes = 4 * 44100 * 20 / 1000 // ~20ms of silence
 	s.stream.Push(make([]byte, primeBytes))
 	s.player.Play()
 }
