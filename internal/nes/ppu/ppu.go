@@ -621,6 +621,13 @@ func (p *PPU) stepDot() {
 	if p.dot == 1 && p.scanline >= 0 && p.scanline < ScreenHeight {
 		p.checkSprite0HitForScanline(p.scanline)
 	}
+	// Per-scanline BG render (issue #268). Each visible scanline
+	// rasterizes at dot 256 (end of the visible portion of that
+	// scanline) so subsequent $2005 / $2006 writes from the game's
+	// poll loop reach the NEXT scanline's scroll snapshot.
+	if p.dot == 256 && p.scanline >= 0 && p.scanline < ScreenHeight {
+		p.renderScanlineEnabled(p.scanline)
+	}
 	switch {
 	case p.scanline == vblankScanline && p.dot == 1:
 		// Render the visible frame using state captured at vblank
