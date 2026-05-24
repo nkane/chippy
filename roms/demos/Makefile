@@ -14,7 +14,8 @@
 # Toolchain (cc65 ≥ 2.19) on macOS:  brew install cc65
 #               on debian/ubuntu:    sudo apt-get install cc65
 
-DEMOS := hello-bg input-echo vblank-bounce audio-test
+DEMOS := hello-bg input-echo vblank-bounce audio-test \
+         triangle-arpeggio noise-drum all-channels
 
 CA65      := ca65
 LD65      := ld65
