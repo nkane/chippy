@@ -152,6 +152,19 @@ Saves live in `~/.nessy/states/<rom-hash>-slot<N>.state` (gzip-compressed
 gob). Slots are keyed by ROM SHA-256 — a save from one game can't
 accidentally restore into another.
 
+Recent ROMs: `nessy` with no args prints the last 5 ROMs you booted
+from `~/.nessy/recent`; `nessy N` (1..5) opens the Nth recent slot.
+
+Controller config: `~/.nessy/controller.json` re-maps any NES button
+to any Ebiten key. Example:
+
+```json
+{ "p1": { "A": "Space", "B": "LeftShift", "Start": "Enter" } }
+```
+
+Missing entries keep the default mapping (Arrows / Z / X / Enter /
+Right Shift).
+
 #### One-shell debug launch
 
 Skip the two-terminal dance. `chippy -nessy ROM` spawns nessy in the

@@ -61,11 +61,27 @@ func main() {
 		}()
 	}
 
-	// Accept the positional form: `nessy game.nes`.
+	// Accept the positional form: `nessy game.nes` OR the recent-
+	// list shortcut `nessy N` (1..recentMax) that opens the Nth
+	// most-recent ROM. No args: print the recent list + exit.
 	if *romPath == "" && flag.NArg() == 1 {
-		*romPath = flag.Arg(0)
+		arg := flag.Arg(0)
+		if slot, ok := parseRecentSlot(arg); ok {
+			list := loadRecent()
+			if slot < 1 || slot > len(list) {
+				fmt.Fprintf(os.Stderr, "nessy: recent slot %d out of range (have %d entries)\n", slot, len(list))
+				os.Exit(2)
+			}
+			*romPath = list[slot-1]
+		} else {
+			*romPath = arg
+		}
 	}
 	if *romPath == "" {
+		if list := loadRecent(); len(list) > 0 {
+			printRecent(list)
+			return
+		}
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -74,11 +90,23 @@ func main() {
 		os.Exit(2)
 	}
 
+	// Optional controller config: applied to keyMap before the
+	// game loop starts. Missing file is silent; malformed file
+	// warns + keeps defaults.
+	if cfg, err := loadControllerConfig(); err != nil {
+		fmt.Fprintln(os.Stderr, "nessy: controller config:", err)
+	} else {
+		applyControllerConfig(cfg)
+	}
+
 	romBytes, err := os.ReadFile(*romPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "nessy:", err)
 		os.Exit(1)
 	}
+	// Record successful read in the recent-ROMs list. Failed
+	// reads above already exited, so we know the path is good.
+	recordRecent(*romPath)
 	rom, err := nes.ParseBytes(romBytes)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "nessy: parse ROM:", err)
