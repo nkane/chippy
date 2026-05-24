@@ -112,6 +112,11 @@ func (c *CPU) Stall(cycles int) {
 	}
 }
 
+// CurrentCycle returns the running CPU cycle counter. Bus-stealing
+// peripherals (OAMDMA, DMC sample fetch) read this to align their
+// dummy-cycle penalties against odd vs even CPU cycles.
+func (c *CPU) CurrentCycle() uint64 { return c.Cycles }
+
 func New(bus Bus) *CPU {
 	return NewVariant(bus, VariantNMOS)
 }

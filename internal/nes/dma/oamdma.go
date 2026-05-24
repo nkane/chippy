@@ -21,10 +21,12 @@ type CPUBus interface {
 	Read(addr uint16) byte
 }
 
-// CPUStaller is the subset of *cpu.CPU we use to charge the 513 stall
-// cycles. Interface-narrowing keeps tests trivial.
+// CPUStaller is the subset of *cpu.CPU we use to charge the stall
+// cycles. CurrentCycle() drives the odd-cycle alignment penalty
+// (513 vs 514). Interface-narrowing keeps tests trivial.
 type CPUStaller interface {
 	Stall(cycles int)
+	CurrentCycle() uint64
 }
 
 // OAMDMA is the $4014 peripheral. A CPU write of byte $XX triggers a
@@ -36,12 +38,15 @@ type CPUStaller interface {
 // most common observed value) — no shipping ROM reads this register
 // in a way that depends on the result.
 //
-// Out of scope for v0.2:
-//   - The "514 on odd CPU cycle" alignment penalty (DMC contention
-//     timing isn't modelled either, so the 1-cycle skew doesn't matter
-//     yet).
+// Real silicon charges 513 stall cycles on even-CPU-cycle entry and
+// 514 on odd-CPU-cycle entry (the bus-steal aligns on a read cycle,
+// so an odd-cycle start eats one extra dummy cycle). We model that.
+//
+// Out of scope:
 //   - Per-byte sub-cycle accounting; we batch the full 256-byte copy
-//     into the Write call and report a flat 513-cycle stall.
+//     into the Write call and report a single stall total.
+//   - DMC sample-DMA contention with OAMDMA (tracked separately under
+//     the cycle-accuracy hardening pass).
 type OAMDMA struct {
 	bus  CPUBus
 	ppu  PPU
@@ -75,7 +80,11 @@ func (d *OAMDMA) Write(addr uint16, page byte) {
 		b := d.bus.Read(base + uint16(i))
 		d.ppu.WriteOAM(b)
 	}
-	d.cpu.Stall(513)
+	stall := 513
+	if d.cpu.CurrentCycle()&1 == 1 {
+		stall++
+	}
+	d.cpu.Stall(stall)
 }
 
 // LastPage returns the most recent byte written to $4014. Exposed for

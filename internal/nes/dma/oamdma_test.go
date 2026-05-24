@@ -14,10 +14,15 @@ type fakePPU struct {
 
 func (p *fakePPU) WriteOAM(v byte) { p.oam = append(p.oam, v) }
 
-// fakeStaller records the cumulative stall count.
-type fakeStaller struct{ stalled int }
+// fakeStaller records the cumulative stall count and reports the
+// emulated CPU cycle (configurable for odd-cycle tests).
+type fakeStaller struct {
+	stalled int
+	cycle   uint64
+}
 
-func (s *fakeStaller) Stall(cycles int) { s.stalled += cycles }
+func (s *fakeStaller) Stall(cycles int)     { s.stalled += cycles }
+func (s *fakeStaller) CurrentCycle() uint64 { return s.cycle }
 
 // A $4014 write copies the named CPU page into OAM verbatim and
 // stalls the CPU 513 cycles.
@@ -121,14 +126,43 @@ func TestOAMDMA_ThroughMMIO(t *testing.T) {
 			t.Fatalf("oam[%d] = $%02X; want $AA", i, b)
 		}
 	}
-	// Stall queued — first Step should drain 513 cycles without
-	// executing an opcode.
+	// Stall queued — first Step drains the stall without executing an
+	// opcode. Real silicon: 513 cycles on even-CPU-cycle entry, 514
+	// on odd. cpu.Reset() leaves Cycles=7 (odd), so this path expects
+	// 514.
+	wantStall := 513
+	if processor.Cycles&1 == 1 {
+		wantStall = 514
+	}
 	preCycles := processor.Cycles
 	got := processor.Step()
-	if got != 513 {
-		t.Fatalf("post-DMA Step cycles = %d; want 513", got)
+	if got != wantStall {
+		t.Fatalf("post-DMA Step cycles = %d; want %d", got, wantStall)
 	}
-	if processor.Cycles != preCycles+513 {
-		t.Fatalf("CPU.Cycles delta = %d; want 513", processor.Cycles-preCycles)
+	if processor.Cycles != preCycles+uint64(wantStall) {
+		t.Fatalf("CPU.Cycles delta = %d; want %d", processor.Cycles-preCycles, wantStall)
+	}
+}
+
+// Odd-CPU-cycle entry adds a dummy cycle: 513 → 514. The penalty
+// matches the bus-steal alignment behaviour of real silicon (the
+// nesdev "1+513" vs "2+512" framing).
+func TestOAMDMA_OddCycleAddsOne(t *testing.T) {
+	ram := cpu.NewRAM()
+	pp := &fakePPU{}
+	st := &fakeStaller{cycle: 7} // odd
+	d := New(ram, pp, st)
+
+	d.Write(0x4014, 0x00)
+
+	if st.stalled != 514 {
+		t.Fatalf("odd-entry stall = %d; want 514", st.stalled)
+	}
+
+	st = &fakeStaller{cycle: 8} // even
+	d = New(ram, pp, st)
+	d.Write(0x4014, 0x00)
+	if st.stalled != 513 {
+		t.Fatalf("even-entry stall = %d; want 513", st.stalled)
 	}
 }
