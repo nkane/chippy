@@ -27,16 +27,15 @@ type apuStream struct {
 	pending []byte
 }
 
-// maxQueueBytes caps the pending queue at ~100ms of stereo PCM
-// (44100 samples/sec × 4 bytes × 0.1 s ≈ 17.6 KB). Without the
-// cap, any frame where game.Update runs slightly faster than
-// wallclock — Ebiten's catch-up scheduling occasionally fires two
-// Updates back-to-back when the previous frame ran long —
-// accumulates samples the audio thread can't drain fast enough
-// and the playback latency keeps growing. Audio drifts behind the
-// visible game state. Capping bounds latency at ~100ms; the
-// dropped-oldest policy prefers fresh audio over a smooth tail.
-const maxQueueBytes = 4 * 44100 / 10
+// maxQueueBytes caps the pending queue at ~500ms of stereo PCM
+// (44100 samples/sec × 4 bytes × 0.5 s ≈ 88 KB). Bounds worst-case
+// audio latency at half a second so drift doesn't grow unbounded
+// across a long session, but big enough that the Ebiten / oto
+// drain cadence's natural jitter never hits the cap during normal
+// play — drops translate to audible clicks, so the cap exists for
+// the pathological case (e.g. nessy paused with a debugger
+// attached while audio kept queueing).
+const maxQueueBytes = 4 * 44100 / 2
 
 // Push appends new stereo PCM bytes. Called from the game-loop
 // goroutine after it drains APU.Samples() under cpuMu — we copy /
@@ -101,11 +100,17 @@ func newAudioSink(mute bool) (*audioSink, error) {
 }
 
 // start kicks off playback. Called once after newGame so the
-// player is ready before the game loop's first tick.
+// player is ready before the game loop's first tick. Pre-seeds
+// the queue with a short slice of silence so the audio thread's
+// initial Read finds something to consume before the first frame
+// of game audio arrives — without that prime, oto starts in an
+// "underrun" state and emits a click on first real data.
 func (s *audioSink) start() {
 	if s == nil {
 		return
 	}
+	const primeBytes = 4 * 44100 / 10 // ~100ms of silence
+	s.stream.Push(make([]byte, primeBytes))
 	s.player.Play()
 }
 
