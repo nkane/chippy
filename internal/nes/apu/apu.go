@@ -415,17 +415,18 @@ func (a *APU) emitSample() {
 	// Triangle's amplitude (0-15) sits in the tnd group and on
 	// real silicon mixes at a different coefficient; the linear
 	// stand-in undercounts triangle slightly — fine for v0.3.
-	pulses := int32(a.pulse1.output()) + int32(a.pulse2.output())
-	tri := int32(a.triangle.output())
-	noi := int32(a.noise.output())
-	dmc := int32(a.dmc.mixerOutput())
-	// Pulse sum 0..30 → scale 500 (v0.2 levels). Triangle / noise
-	// each 0..15 → scale 333 so peak each ≈ peak pulse pair. DMC
-	// is 0..127 → scale 40 so peak (127*40 ≈ 5080) sits in the
-	// same ballpark. Real silicon's pulse_table + tnd_table are
-	// non-linear; #249 installs the proper LUT once all channels
-	// land.
-	sample := int16(pulses*500 + tri*333 + noi*333 + dmc*40)
+	// Non-linear DAC mix per nesdev (#249). Output is a float in
+	// [0, ~1.0]; scale to int16 with headroom — peak combined
+	// signal lands around 0.5 + 0.5 = 1.0, so 30000 keeps a
+	// comfortable safety margin under int16 max.
+	mix := mixSample(
+		a.pulse1.output(),
+		a.pulse2.output(),
+		a.triangle.output(),
+		a.noise.output(),
+		a.dmc.mixerOutput(),
+	)
+	sample := int16(mix * 30000)
 	a.samples = append(a.samples, sample)
 }
 
