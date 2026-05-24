@@ -15,7 +15,7 @@
 #               on debian/ubuntu:    sudo apt-get install cc65
 
 DEMOS := hello-bg input-echo vblank-bounce audio-test \
-         triangle-arpeggio noise-drum all-channels
+         triangle-arpeggio noise-drum all-channels dmc-sample
 
 CA65      := ca65
 LD65      := ld65

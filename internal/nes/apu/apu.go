@@ -161,6 +161,7 @@ func (a *APU) Pulse1LengthCounter() byte   { return a.pulse1.lengthCounter }
 func (a *APU) Pulse2LengthCounter() byte   { return a.pulse2.lengthCounter }
 func (a *APU) TriangleLengthCounter() byte { return a.triangle.lengthCounter }
 func (a *APU) NoiseLengthCounter() byte    { return a.noise.lengthCounter }
+func (a *APU) DMCBytesRemaining() uint16   { return a.dmc.bytesRemaining }
 
 // SetDMCBus wires the CPU bus the DMC reads sample bytes from and
 // the cpu.Stall hook the DMA byte-fetch charges. Optional — when
