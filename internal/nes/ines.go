@@ -51,18 +51,49 @@ func (m Mirroring) String() string {
 	}
 }
 
-// ROM is a parsed iNES cartridge image. It owns the PRG-ROM + CHR-ROM
-// byte slices and the header flags a mapper constructor needs.
+// ROM is a parsed iNES (or NES 2.0) cartridge image. It owns the
+// PRG-ROM + CHR-ROM byte slices and the header flags a mapper
+// constructor needs.
 type ROM struct {
-	Mapper    uint8
+	Mapper    uint16 // 12-bit mapper number per NES 2.0 (low 8 bits = iNES 1.0)
+	SubMapper uint8  // NES 2.0 sub-mapper (0 when header is iNES 1.0 or sub-mapper unused)
 	Mirroring Mirroring
 	Battery   bool // PRG-RAM battery-backed
 	Trainer   []byte
 	PRG       []byte // n × 16 KiB
 	CHR       []byte // n × 8 KiB, or nil/empty for CHR-RAM carts
-	NES2      bool   // true when the header advertises NES 2.0 (extensions parsed best-effort)
-	// nes2Submapper / nes2PrgRam / etc — future fields. v0.1 ignores
-	// them and treats the file as iNES 1.0 for mapper construction.
+	NES2      bool   // true when the header advertises NES 2.0
+
+	// NES 2.0 extensions. Zero values for iNES 1.0 ROMs.
+	PRGRAMSize int      // $6000-$7FFF SRAM size in bytes
+	EEPROMSize int      // EEPROM (battery-backed PRG-RAM) size in bytes
+	CHRRAMSize int      // CHR-RAM size in bytes (0 = use CHR-ROM)
+	TVSystem   TVSystem // NTSC / PAL / Dual
+}
+
+// TVSystem names the cart's intended TV-system per NES 2.0 flag12.
+// chippy currently runs the NTSC timing diagram regardless; the hint
+// is recorded for future PAL / Dendy support.
+type TVSystem uint8
+
+const (
+	TVNTSC TVSystem = iota
+	TVPAL
+	TVDual // NTSC + PAL (both expected to work)
+	TVDendy
+)
+
+func (t TVSystem) String() string {
+	switch t {
+	case TVPAL:
+		return "PAL"
+	case TVDual:
+		return "dual"
+	case TVDendy:
+		return "Dendy"
+	default:
+		return "NTSC"
+	}
 }
 
 // Errors returned from Parse.
@@ -103,7 +134,7 @@ func ParseBytes(data []byte) (*ROM, error) {
 	}
 
 	rom := &ROM{
-		Mapper:  (flag7 & 0xF0) | (flag6 >> 4),
+		Mapper:  uint16((flag7 & 0xF0) | (flag6 >> 4)),
 		Battery: flag6&0x02 != 0,
 	}
 	switch {
@@ -116,6 +147,9 @@ func ParseBytes(data []byte) (*ROM, error) {
 	}
 	// NES 2.0 detection: bits 2-3 of flag7 == 0b10 ("NES 2 ID").
 	rom.NES2 = (flag7 & 0x0C) == 0x08
+	if rom.NES2 {
+		parseNES2Extensions(data, rom, &prgBanks, &chrBanks)
+	}
 
 	off := headerLen
 	if flag6&0x04 != 0 { // trainer present
@@ -147,4 +181,84 @@ func ParseBytes(data []byte) (*ROM, error) {
 		return nil, ErrInvalidSize
 	}
 	return rom, nil
+}
+
+// parseNES2Extensions reads the NES 2.0-specific bytes (flag8 +
+// flag9 + flag10 + flag12) and writes the derived fields into rom.
+// Also extends PRG / CHR bank counts when the v2.0 high nibbles
+// are non-zero. Per the spec:
+//
+//	flag8 bits 0-3 → high nibble of 12-bit mapper number.
+//	flag8 bits 4-7 → 4-bit sub-mapper.
+//	flag9 bits 0-3 → high nibble of PRG bank count (combined with
+//	                 flag4 to form a 12-bit value; if the high
+//	                 nibble is $F the value is computed as an
+//	                 exponent + multiplier per the spec).
+//	flag9 bits 4-7 → same for CHR.
+//	flag10 bits 0-3 → PRG-RAM size (2 << v) bytes when v != 0.
+//	flag10 bits 4-7 → EEPROM size (2 << v) bytes when v != 0.
+//	flag11 — same shape for CHR-RAM + CHR-NVRAM.
+//	flag12 bits 0-1 → TV system (0 = NTSC, 1 = PAL, 2 = dual,
+//	                  3 = Dendy).
+//
+// chippy currently consumes the mapper / sub-mapper / TV-system
+// hints; PRG/CHR-RAM/EEPROM sizes are recorded but not yet acted
+// on (cart constructors still use fixed 8 KiB PRG-RAM).
+func parseNES2Extensions(data []byte, rom *ROM, prgBanks, chrBanks *int) {
+	flag8 := data[8]
+	flag9 := data[9]
+	flag10 := data[10]
+	flag11 := data[11]
+	flag12 := data[12]
+
+	// Mapper high nibble + sub-mapper.
+	rom.Mapper |= uint16(flag8&0x0F) << 8
+	rom.SubMapper = (flag8 & 0xF0) >> 4
+
+	// Extended PRG / CHR bank counts. NES 2.0 uses flag9's nibbles
+	// as the high 4 bits of a 12-bit bank count; if the nibble is
+	// $F, the corresponding flag4/flag5 byte is interpreted as
+	// (M × 2^E) with M = bits 0-1 + 1 and E = bits 2-7 (exponential
+	// encoding). chippy implements the linear path + the exponent
+	// fallback.
+	*prgBanks = extendedBankCount(flag9&0x0F, data[4])
+	*chrBanks = extendedBankCount((flag9&0xF0)>>4, data[5])
+
+	// PRG-RAM + EEPROM. Both nibbles store (2 << v) bytes when
+	// non-zero. v = 0 means absent (size 0).
+	if v := flag10 & 0x0F; v != 0 {
+		rom.PRGRAMSize = 64 << v
+	}
+	if v := (flag10 & 0xF0) >> 4; v != 0 {
+		rom.EEPROMSize = 64 << v
+	}
+	// CHR-RAM + CHR-NVRAM (flag11). We only track CHR-RAM size.
+	if v := flag11 & 0x0F; v != 0 {
+		rom.CHRRAMSize = 64 << v
+	}
+
+	switch flag12 & 0x03 {
+	case 1:
+		rom.TVSystem = TVPAL
+	case 2:
+		rom.TVSystem = TVDual
+	case 3:
+		rom.TVSystem = TVDendy
+	default:
+		rom.TVSystem = TVNTSC
+	}
+}
+
+// extendedBankCount returns the bank count given the v2.0 high
+// nibble + the v1.0 low byte. Implements both linear (high < $F)
+// and exponential (high == $F) encodings per the NES 2.0 spec.
+func extendedBankCount(high4, lo byte) int {
+	if high4 == 0x0F {
+		// Exponent / multiplier: M = bits 0-1 + 1, E = bits 2-7.
+		// Size = M × 2^E. lo encodes both.
+		exp := int((lo >> 2) & 0x3F)
+		mul := int((lo&0x03)<<1) | 1 // M ∈ {1, 3, 5, 7}
+		return mul << exp
+	}
+	return int(high4)<<8 | int(lo)
 }
