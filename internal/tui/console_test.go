@@ -148,6 +148,48 @@ func TestConsole_ScrollClamps(t *testing.T) {
 	}
 }
 
+// Tab completes the current buffer against the same verb / symbol
+// pool the `:` prompt uses. With no symbols loaded, completing a
+// prefix like "spe" should land on "speed ".
+func TestConsole_TabCompletesVerb(t *testing.T) {
+	m := newConsoleModel(t)
+	m.ConsoleActive = true
+	m.ConsoleBuf = "spe"
+	updated, _ := m.updateConsole(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(Model)
+	if m.ConsoleBuf != "speed " {
+		t.Errorf("Tab on \"spe\" → %q; want %q", m.ConsoleBuf, "speed ")
+	}
+}
+
+// First open seeds the scrollback with an onboarding hint. Subsequent
+// opens don't spam: scrollback already non-empty so the seed-block
+// stays unique.
+func TestConsole_FirstOpenSeedsHint(t *testing.T) {
+	m := newConsoleModel(t)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'`'}})
+	m = updated.(Model)
+	if len(m.ConsoleScrollback) == 0 {
+		t.Errorf("first open didn't seed scrollback")
+	}
+	first := m.ConsoleScrollback[0]
+	if !strings.Contains(first, "console") || !strings.Contains(first, "Tab") {
+		t.Errorf("seed hint missing key text; got %q", first)
+	}
+	// Close + reopen — no growth from the seed block.
+	closeAndReopen := func() Model {
+		u, _ := m.updateConsole(tea.KeyMsg{Type: tea.KeyEsc})
+		m := u.(Model)
+		u, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'`'}})
+		return u.(Model)
+	}
+	preLen := len(m.ConsoleScrollback)
+	m = closeAndReopen()
+	if len(m.ConsoleScrollback) != preLen {
+		t.Errorf("re-open seeded again: %d → %d", preLen, len(m.ConsoleScrollback))
+	}
+}
+
 // consoleView renders a header + the live input line at minimum,
 // even with empty scrollback. Smoke test against the rendered
 // string.

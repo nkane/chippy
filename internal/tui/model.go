@@ -504,6 +504,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ConsoleActive = true
 			m.ConsoleBuf = ""
 			m.Status = "console"
+			// First-open onboarding hint — printed only when the
+			// scrollback is empty so it doesn't spam on repeat
+			// opens.
+			if len(m.ConsoleScrollback) == 0 {
+				m.appendConsole("chippy console — same verbs as `:` prompt. Tab completes.")
+				m.appendConsole("Try: help, syms, bp <addr>, goto <addr|sym>, watch <addr>, speed N, theme NAME.")
+				m.appendConsole("Esc or ` closes.")
+			}
 		case "i":
 			if m.Keyboard != nil {
 				m.InputMode = true

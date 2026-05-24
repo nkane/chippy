@@ -22,9 +22,19 @@ Enter
 Sleep 1500ms
 Show
 
-# Open the console.
+# Open the console — first-open onboarding hint seeds the
+# scrollback so users see what commands exist.
 Type "`"
-Sleep 800ms
+Sleep 1200ms
+
+# Type a partial verb + Tab to demonstrate completion.
+Type "spe"
+Sleep 300ms
+Tab
+Sleep 600ms
+Type "60"
+Enter
+Sleep 500ms
 
 # Run pc — outputs the current PC.
 Type "pc"

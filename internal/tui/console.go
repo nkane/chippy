@@ -53,6 +53,13 @@ func (m Model) updateConsole(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.ConsoleBuf) > 0 {
 			m.ConsoleBuf = m.ConsoleBuf[:len(m.ConsoleBuf)-1]
 		}
+	case "tab":
+		// Reuse the `:` prompt's verb / symbol completer so the
+		// console knows the same commands. Returns the extended
+		// buffer (or the same buffer if no completion possible).
+		if completed, ok := completePrompt(m.ConsoleBuf, m.Syms); ok {
+			m.ConsoleBuf = completed
+		}
 	case "pgup":
 		m.ConsoleScrollOffset += 8
 		if max := len(m.ConsoleScrollback); m.ConsoleScrollOffset > max {
