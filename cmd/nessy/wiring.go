@@ -100,6 +100,13 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 		ap.SetSunsoft5B(s5b)
 		fme7.SetAudioSink(s5b)
 	}
+	// VRC6 (mappers 24/26) ships a dedicated 3-channel audio
+	// expansion (#302). Same wiring pattern as Sunsoft 5B.
+	if vrc6, ok := c.(interface{ SetAudioSink(cart.VRC6AudioSink) }); ok {
+		v6 := apu.NewVRC6Audio()
+		ap.SetVRC6Audio(v6)
+		vrc6.SetAudioSink(v6)
+	}
 	// NewVariant called Reset() before MMIO had the cart's $FFFC vector
 	// visible? No — we registered the cart above, so Reset's vector
 	// fetch returns the right bytes via the MMIO → cart-peripheral path.
