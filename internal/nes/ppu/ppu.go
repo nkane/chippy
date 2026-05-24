@@ -439,6 +439,68 @@ func (p *PPU) activeScrollFor(y int) scrollSnapshot {
 	return active
 }
 
+// incCoarseX advances v's coarse-X (bits 0-4) wrapping at 32, where
+// the wrap also flips the nametable's horizontal bit (10). Fired at
+// dots 8, 16, ..., 256 of visible + pre-render scanlines while
+// rendering is enabled (per nesdev "loopy" timing diagram).
+func (p *PPU) incCoarseX() {
+	if p.v&0x001F == 31 {
+		p.v &^= 0x001F
+		p.v ^= 0x0400 // flip horizontal nametable bit
+	} else {
+		p.v++
+	}
+}
+
+// incY advances v's fine-Y (bits 12-14) and coarse-Y (bits 5-9)
+// with the standard 2C02 carry: fine-Y rolls every 8 lines, coarse-Y
+// rolls at 30 (the visible nametable height — rows 30-31 are the
+// attribute table, not displayable) and flips the vertical
+// nametable bit (11). Fired at dot 256 of visible + pre-render
+// scanlines while rendering is enabled.
+func (p *PPU) incY() {
+	if p.v&0x7000 != 0x7000 {
+		p.v += 0x1000 // fine-Y < 7: bump
+	} else {
+		p.v &^= 0x7000 // fine-Y wraps to 0
+		y := (p.v & 0x03E0) >> 5
+		switch y {
+		case 29:
+			y = 0
+			p.v ^= 0x0800 // flip vertical nametable bit
+		case 31:
+			y = 0 // attribute-table rollover; no nametable flip
+		default:
+			y++
+		}
+		p.v = (p.v &^ 0x03E0) | (y << 5)
+	}
+}
+
+// copyXFromT copies the horizontal bits of t into v (coarse-X +
+// horizontal nametable bit). Per nesdev, fired at dot 257 of every
+// visible + pre-render scanline when rendering is enabled.
+func (p *PPU) copyXFromT() {
+	p.v = (p.v &^ 0x041F) | (p.t & 0x041F)
+}
+
+// copyYFromT copies the vertical bits of t into v (fine-Y, coarse-Y,
+// vertical nametable bit). Per nesdev, fired repeatedly at dots
+// 280-304 of the pre-render scanline when rendering is enabled.
+func (p *PPU) copyYFromT() {
+	p.v = (p.v &^ 0x7BE0) | (p.t & 0x7BE0)
+}
+
+// renderingEnabled reports whether the PPU is currently rendering
+// (PPUMASK BG show OR sprite show). Loopy v register increments
+// only fire when rendering is on — disabled rendering = no fetches
+// = no scrolling state machine. cmd/nessy hits PPUMASK bit 3 + 4
+// for the playfield; status-bar-only states still count as
+// "rendering" if either bit is on.
+func (p *PPU) renderingEnabled() bool {
+	return p.mask&0x18 != 0
+}
+
 // incVRAMAddr advances v after a $2007 access. PPUCTRL bit 2 selects
 // step 1 vs step 32.
 func (p *PPU) incVRAMAddr() {
@@ -496,6 +558,35 @@ func (p *PPU) stepDot() {
 	// poll loop reach the NEXT scanline's scroll snapshot.
 	if p.dot == 256 && p.scanline >= 0 && p.scanline < ScreenHeight {
 		p.renderScanlineEnabled(p.scanline)
+	}
+	// Loopy v register increments per nesdev's PPU timing diagram
+	// (issue #268 stage 3). Only fire when rendering is on. Visible
+	// scanlines + pre-render scanline run the same fetch state
+	// machine; vblank scanlines do nothing.
+	if p.renderingEnabled() &&
+		(p.scanline < ScreenHeight || p.scanline == preRenderScanline) {
+		switch {
+		case p.dot >= 1 && p.dot <= 256 && p.dot%8 == 0:
+			// Tile fetch boundary — coarse-X bumps every 8 dots
+			// from dot 8 through dot 256.
+			p.incCoarseX()
+			if p.dot == 256 {
+				// Dot 256 also triggers the Y increment (the dot
+				// after the last visible-pixel tile fetch).
+				p.incY()
+			}
+		case p.dot == 257:
+			// Horizontal reload: t's coarse-X + horizontal NT bit
+			// copy into v so the next scanline's tile fetches start
+			// from the freshly-set scroll-X.
+			p.copyXFromT()
+		case p.scanline == preRenderScanline && p.dot >= 280 && p.dot <= 304:
+			// Vertical reload: t's fine-Y + coarse-Y + vertical NT
+			// bit copy into v during pre-render. Real silicon
+			// repeats the copy across 25 dots; the result is
+			// idempotent so a single copy at this range suffices.
+			p.copyYFromT()
+		}
 	}
 	switch {
 	case p.scanline == vblankScanline && p.dot == 1:
