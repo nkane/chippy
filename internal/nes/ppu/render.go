@@ -26,43 +26,45 @@ package ppu
 // sufficient for SMB1-class games — see the issue's "out of scope"
 // notes.
 func (p *PPU) renderFrame() {
-	// Reset bgOpaque before drawing. renderSprites reads it and every
-	// frame starts from a clean slate.
-	for i := range p.bgOpaque {
-		p.bgOpaque[i] = false
+	// BG layer is primarily drawn per-scanline by stepDot at dot
+	// 256 of each visible scanline (issue #268). renderFrame still
+	// walks the whole frame here as a fallback for tests that call
+	// it directly + as a safety net in case stepDot hasn't fired
+	// for some scanlines (the per-scanline call is idempotent so
+	// the redundant render at vblank doesn't change pixels). Also
+	// flushes the per-frame scrollEvents log.
+	for y := range ScreenHeight {
+		p.renderScanlineEnabled(y)
+	}
+	p.scrollEvents = p.scrollEvents[:0]
+}
+
+// renderScanlineEnabled is the per-scanline entry point called from
+// stepDot at dot 256 of each visible scanline. Handles the BG-show
+// gate (PPUMASK bit 3) — when off, fills a single row with the
+// universal background color; when on, defers to renderScanline.
+// Also resets bgOpaque at scanline 0 so the sprite compositor (still
+// per-frame at vblank entry, for now) sees a clean mask.
+func (p *PPU) renderScanlineEnabled(y int) {
+	if y == 0 {
+		for i := range p.bgOpaque {
+			p.bgOpaque[i] = false
+		}
 	}
 	if p.mask&0x08 == 0 {
-		// PPUMASK bit 3 = "show background". When off the screen is
-		// the universal background color and bgOpaque stays
-		// all-false so sprites win every composite.
 		r, g, b := paletteRGB(p.palette[0])
-		for i := 0; i < len(p.frame); i += 4 {
-			p.frame[i+0] = r
-			p.frame[i+1] = g
-			p.frame[i+2] = b
-			p.frame[i+3] = 0xFF
+		rowBase := y * ScreenWidth * 4
+		for x := 0; x < ScreenWidth; x++ {
+			off := rowBase + x*4
+			p.frame[off+0] = r
+			p.frame[off+1] = g
+			p.frame[off+2] = b
+			p.frame[off+3] = 0xFF
 		}
-		p.scrollEvents = p.scrollEvents[:0]
 		return
 	}
-
-	// Walk scanlines, advancing the events cursor as we cross each
-	// snapshot's scanline. Activity below the snapshot's scanline
-	// renders with the *previous* snapshot — events are inclusive at
-	// the snapshot's scanline (e.g. a write at scanline 32 applies
-	// from row 32 down).
-	active := p.frameStartScroll
-	eventIdx := 0
-	for y := range ScreenHeight {
-		for eventIdx < len(p.scrollEvents) && p.scrollEvents[eventIdx].scanline <= y {
-			active = p.scrollEvents[eventIdx]
-			eventIdx++
-		}
-		p.renderScanline(y, active)
-	}
-	// Done consuming this frame's events. Next frame starts with a
-	// clean log + a fresh frameStartScroll captured by stepDot.
-	p.scrollEvents = p.scrollEvents[:0]
+	snap := p.activeScrollFor(y)
+	p.renderScanline(y, snap)
 }
 
 // renderScanline rasterizes one row using the supplied snapshot's
