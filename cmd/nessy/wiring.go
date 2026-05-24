@@ -150,8 +150,19 @@ func (w *cartPeripheral) Write(addr uint16, v byte) {
 // the currently-mapped bank shows.
 func (w *cartPeripheral) Peek(addr uint16) byte { return w.cart.CPURead(addr) }
 
+// Tick forwards per-instruction CPU cycle deltas to the inner cart
+// when it implements cpu.Ticker. FME-7's IRQ counter (mapper 69)
+// ticks at CPU rate via this hook; MMC3's A12-edge IRQ doesn't need
+// it (already fires from PPU bus accesses).
+func (w *cartPeripheral) Tick(cycles int) {
+	if t, ok := w.cart.(cpu.Ticker); ok {
+		t.Tick(cycles)
+	}
+}
+
 // compile-time check.
 var (
 	_ cpu.Peripheral = (*cartPeripheral)(nil)
 	_ cpu.Peeker     = (*cartPeripheral)(nil)
+	_ cpu.Ticker     = (*cartPeripheral)(nil)
 )
