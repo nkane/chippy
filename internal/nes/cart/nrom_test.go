@@ -140,15 +140,15 @@ func TestOpen_DispatchByMapper(t *testing.T) {
 		t.Errorf("Open should return *NROM; got %T", cart)
 	}
 
-	rom.Mapper = 4 // MMC3
+	// Mapper 5 (MMC5) — not yet supported. v0.4 ships NROM / MMC1 /
+	// UxROM / CNROM / MMC3.
+	rom.Mapper = 5
 	_, err = Open(rom)
 	if err == nil {
-		t.Fatalf("MMC3 should return unsupported error")
+		t.Fatalf("MMC5 should return unsupported error")
 	}
-	if !strings.Contains(err.Error(), "unsupported mapper 4") {
+	if !strings.Contains(err.Error(), "unsupported mapper 5") {
 		t.Errorf("error should name the mapper number; got %q", err.Error())
 	}
-	// Sentinel-style errors not yet defined — string-contains is enough
-	// for v0.1.
 	_ = errors.New // appease the import even if Sentinel arrives later
 }

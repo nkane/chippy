@@ -84,6 +84,13 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 	// 4-cycle bus-steal stall.
 	ap.SetIRQSink(processor)
 	ap.SetDMCBus(mmio, processor)
+	// MMC3 carts assert IRQ on the named "mmc3" source via the same
+	// multi-source pump. Type-assertion through the interface so
+	// non-MMC3 carts (NROM / MMC1 / UxROM / CNROM) silently skip
+	// the wiring.
+	if mmc3, ok := c.(interface{ SetIRQSink(cart.IRQSink) }); ok {
+		mmc3.SetIRQSink(processor)
+	}
 	// NewVariant called Reset() before MMIO had the cart's $FFFC vector
 	// visible? No — we registered the cart above, so Reset's vector
 	// fetch returns the right bytes via the MMIO → cart-peripheral path.
