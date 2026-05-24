@@ -83,6 +83,12 @@ type APU struct {
 	frameTimer   int // CPU cycles until the next step boundary
 	frameIRQFlag bool
 
+	// sunsoft5b (optional) is the audio half of the FME-7 mapper
+	// package. nil unless cmd/nessy wires it via SetSunsoft5B
+	// during cart construction. Output is folded into emitSample's
+	// mix.
+	sunsoft5b *Sunsoft5B
+
 	// irqSink (optional) is the CPU's IRQ line. nil means
 	// "headless" — registers still track the IRQ flag but nothing
 	// is asserted on the CPU. cmd/nessy wires this via SetIRQSink
@@ -153,6 +159,15 @@ func (s *StatusPeripheral) Write(addr uint16, v byte) { s.apu.Write(addr, v) }
 // in tests / headless contexts. Frame-counter IRQ assertions
 // before SetIRQSink lands harmlessly on the flag-only path.
 func (a *APU) SetIRQSink(s IRQSink) { a.irqSink = s }
+
+// SetSunsoft5B wires the audio half of the FME-7 cart so its
+// channel mix gets folded into the APU's sample emission. nil
+// disables the addend (the default for non-FME7 carts).
+func (a *APU) SetSunsoft5B(s *Sunsoft5B) { a.sunsoft5b = s }
+
+// Sunsoft5B returns the active 5B chip pointer (or nil). Used by
+// the cart wiring to expose the chip for FME-7's port forwarding.
+func (a *APU) Sunsoft5B() *Sunsoft5B { return a.sunsoft5b }
 
 // Per-channel length-counter accessors. Headless test code uses
 // these to assert "channel still active" without grabbing internal
@@ -324,6 +339,12 @@ func (a *APU) stepCPU() {
 	// DMC period timer ticks every CPU cycle. The fetch path may
 	// charge cpu.Stall cycles + assert IRQ at sample exhaustion.
 	a.dmc.tickTimer(a.dmcBus, a.dmcStaller, a.irqSink)
+	// Sunsoft 5B audio expansion (#306) — only present when the cart
+	// is FME-7 with the audio half wired. Internally divides CPU
+	// rate by 16 to match the YM2149 prescaler.
+	if a.sunsoft5b != nil {
+		a.sunsoft5b.Step()
+	}
 
 	// Sample emission. cyclesPerSample is fractional (40.585...);
 	// accumulate in units of 1e6 to avoid drift over long horizons.
@@ -436,6 +457,12 @@ func (a *APU) emitSample() {
 		a.dmc.mixerOutput(),
 	)
 	sample := int16(mix * 30000)
+	// Sunsoft 5B expansion mix-in. The chip's Output() returns 0..45
+	// (3 channels × 0..15 per square level). Scale to a small int16
+	// addend so it sits alongside the 2A03 mix without clipping.
+	if a.sunsoft5b != nil {
+		sample += int16(a.sunsoft5b.Output() * 200)
+	}
 	a.samples = append(a.samples, sample)
 }
 

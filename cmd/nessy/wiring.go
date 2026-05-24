@@ -91,6 +91,15 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 	if mmc3, ok := c.(interface{ SetIRQSink(cart.IRQSink) }); ok {
 		mmc3.SetIRQSink(processor)
 	}
+	// FME-7 (mapper 69) optionally pairs with the Sunsoft 5B audio
+	// expansion (#306). Construct the audio chip, hand it to the APU
+	// as a mixer addend, and wire the cart's $C000/$E000 port pair to
+	// forward writes through to it. Non-FME7 carts skip the wiring.
+	if fme7, ok := c.(interface{ SetAudioSink(cart.Sunsoft5BSink) }); ok {
+		s5b := apu.NewSunsoft5B()
+		ap.SetSunsoft5B(s5b)
+		fme7.SetAudioSink(s5b)
+	}
 	// NewVariant called Reset() before MMIO had the cart's $FFFC vector
 	// visible? No — we registered the cart above, so Reset's vector
 	// fetch returns the right bytes via the MMIO → cart-peripheral path.
