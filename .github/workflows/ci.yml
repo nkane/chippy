@@ -311,6 +311,9 @@ jobs:
             ### chippy-bp-and-run (#225)
             ![chippy-bp-and-run](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/chippy-bp-and-run.gif)
 
+            ### chippy-console (#232)
+            ![chippy-console](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/chippy-console.gif)
+
   cmos-e2e:
     name: cmos e2e demo
     runs-on: ubuntu-latest

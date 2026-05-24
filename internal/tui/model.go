@@ -142,6 +142,18 @@ type Model struct {
 	PromptActive bool
 	PromptBuf    string
 
+	// Quake-style drop-down console (issue #232 draft). Backtick
+	// toggles. While active a scrollback panel covers the top ~50%
+	// of the screen with an embedded prompt — each Enter runs the
+	// current buffer through runCommand and appends `> cmd` + the
+	// result to the scrollback. Esc / backtick closes; PgUp / PgDn
+	// scroll. The existing `:` prompt stays as the bottom-line
+	// quick-fire variant.
+	ConsoleActive       bool
+	ConsoleBuf          string
+	ConsoleScrollback   []string
+	ConsoleScrollOffset int
+
 	// Prompt command history. Persisted to HistPath when set, capped at
 	// histCap entries. HistIdx walks back from the newest entry; -1 means
 	// "not navigating, PromptBuf is live". HistTemp saves the in-progress
@@ -441,6 +453,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.PromptActive {
 			return m.updatePrompt(msg)
 		}
+		// Quake console owns all input while open. Backtick toggles
+		// from anywhere except the other modal states above (those
+		// gates fire first so the console can't fight them).
+		if m.ConsoleActive {
+			return m.updateConsole(msg)
+		}
 		// Help modal: paging keys advance, any other key dismisses.
 		if m.ShowHelp {
 			switch msg.String() {
@@ -482,6 +500,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			m.saveState()
 			return m, tea.Quit
+		case "`":
+			m.ConsoleActive = true
+			m.ConsoleBuf = ""
+			m.Status = "console"
+			// First-open onboarding hint — printed only when the
+			// scrollback is empty so it doesn't spam on repeat
+			// opens.
+			if len(m.ConsoleScrollback) == 0 {
+				m.appendConsole("chippy console — same verbs as `:` prompt. Tab completes.")
+				m.appendConsole("Try: help, syms, bp <addr>, goto <addr|sym>, watch <addr>, speed N, theme NAME.")
+				m.appendConsole("Esc or ` closes.")
+			}
 		case "i":
 			if m.Keyboard != nil {
 				m.InputMode = true
@@ -1208,6 +1238,14 @@ func (m Model) View() string {
 		bodyBlock = lipgloss.Place(m.W, bodyHeight, lipgloss.Center, lipgloss.Center, m.symsModal())
 	case m.ImmediateActive:
 		bodyBlock = lipgloss.Place(m.W, bodyHeight, lipgloss.Center, lipgloss.Center, m.immediateModal())
+	case m.ConsoleActive:
+		// Quake drop-down: console anchored at the top, the rest of
+		// the body still visible behind it (only top half consumed).
+		console := m.consoleView(m.W, bodyHeight)
+		bodyBlock = lipgloss.JoinVertical(lipgloss.Left,
+			console,
+			lipgloss.PlaceHorizontal(m.W, lipgloss.Center, body),
+		)
 	default:
 		bodyBlock = lipgloss.PlaceHorizontal(m.W, lipgloss.Center, body)
 	}
