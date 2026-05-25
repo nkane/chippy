@@ -205,6 +205,7 @@ or audio-presence regression test under `cmd/nessy/demo_*_test.go`:
 | [`oam-grid`](roms/demos/oam-grid/) | $4014 OAMDMA + 64-sprite OAM walk + sprite priority | 8×8 grid of solid squares centred on the playfield |
 | [`state-counter`](roms/demos/state-counter/) | Save-state round-trip probe (frame_cnt → $3F00) | BG colour cycles through the palette as frame_cnt advances |
 | [`vrc6-chord`](roms/demos/vrc6-chord/) | VRC6 cart + 3-channel audio expansion (mapper 24) | Sustained low chord (audio only) |
+| [`sunsoft5b-chord`](roms/demos/sunsoft5b-chord/) | FME-7 cart + Sunsoft 5B audio (mapper 69) | Three-tone chord via YM2149 clone (audio only) |
 
 Run any of them:
 
