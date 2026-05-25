@@ -20,7 +20,7 @@ func TestCMOSDemo_E2E(t *testing.T) {
 	if !ok {
 		t.Skip("can't locate test file")
 	}
-	bin := filepath.Join(filepath.Dir(thisFile), "..", "..", "example", "cmos_demo.bin")
+	bin := filepath.Join(filepath.Dir(thisFile), "..", "example", "cmos_demo.bin")
 
 	ram := cpu.NewRAM()
 	if _, err := loader.Load(ram, bin, loader.Options{Addr: 0x8000}); err != nil {

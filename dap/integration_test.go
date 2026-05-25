@@ -165,7 +165,7 @@ func buildChippy(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	binPath := filepath.Join(dir, "chippy")
-	repoRoot, err := filepath.Abs("../..")
+	repoRoot, err := filepath.Abs("..")
 	if err != nil {
 		t.Fatalf("abs repo root: %v", err)
 	}
