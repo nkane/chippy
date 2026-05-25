@@ -89,6 +89,12 @@ func (c *CPU) Step() int {
 	// cycle delta after each instruction. The Ticker assertion is
 	// cached on c.busTicker at SetBus time so the no-ticker fast path
 	// is one nil-check; perfgate ceiling holds.
+	//
+	// NOTE (#342): this batches the PPU tick at instruction granularity,
+	// so a $2002 read sees the PPU lagging up to one instruction. Single-
+	// dot-accurate vblank timing (Blargg ppu_vbl_nmi test 2) needs per-
+	// CPU-cycle PPU stepping with register reads resolving at their exact
+	// cycle — a larger architecture change scoped separately.
 	if c.busTicker != nil {
 		c.busTicker.Tick(cycles)
 	}
