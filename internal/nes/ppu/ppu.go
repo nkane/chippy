@@ -369,15 +369,18 @@ func (p *PPU) recordScrollChange() {
 //	||| ++-------------- nametable select (2 bits)
 //	+++----------------- fine Y (3 bits)
 //
-// fine X is NOT stored in v (it lives in the separate `x` latch);
-// v0.2 doesn't model fine-X yet, so scrollX is whatever coarse-X*8
-// $2006 implicitly latched.
+// fine X is NOT stored in v — it lives in the separate `x` latch,
+// set by the first $2005 write. A $2006 scroll change leaves `x`
+// untouched, so the effective horizontal scroll is coarse-X*8 plus
+// whatever fine-X the last $2005 write latched (#282). Folding p.x
+// in here gives sub-tile horizontal scroll precision; games that
+// never write $2005 keep p.x == 0 so the result is unchanged.
 func (p *PPU) scrollFromV() {
 	coarseX := byte(p.v & 0x1F)
 	coarseY := byte((p.v >> 5) & 0x1F)
 	fineY := byte((p.v >> 12) & 0x07)
 	nametable := byte((p.v >> 10) & 0x03)
-	p.scrollX = coarseX * 8
+	p.scrollX = coarseX*8 + p.x
 	p.scrollY = coarseY*8 + fineY
 	p.ctrl = (p.ctrl &^ 0x03) | nametable
 }
