@@ -639,6 +639,20 @@ func (p *PPU) stepDot() {
 		p.renderScanlineEnabled(p.scanline)
 		p.compositeScanlineSprites(p.scanline)
 	}
+	// Per-scanline A12 clock (#352, unblocks #323). Real silicon does
+	// sprite-pattern fetches every scanline during hblank (dots
+	// 257-320), toggling PPU address line A12 even when no sprite is
+	// in range. MMC3's scanline IRQ counts those A12 rising edges.
+	// Our burst renderer skips the garbage fetches, so emit one dummy
+	// sprite-pattern-table read here to reproduce the per-scanline
+	// A12 rise (after the dot-256 BG fetch has driven A12 low for
+	// the common BG=$0000 / sprite=$1000 config). The value is
+	// discarded + the framebuffer is untouched — demo SHAs hold; the
+	// only effect is the cart's A12 edge detector (e.g. MMC3) ticking.
+	if p.dot == 260 && p.renderingEnabled() &&
+		(p.scanline < ScreenHeight || p.scanline == p.timing.PreRenderScanline) {
+		_ = p.busRead(0x1000)
+	}
 	// Loopy v register increments per nesdev's PPU timing diagram
 	// (issue #268 stage 3). Only fire when rendering is on. Visible
 	// scanlines + pre-render scanline run the same fetch state
