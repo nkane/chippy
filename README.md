@@ -207,6 +207,7 @@ or audio-presence regression test under `cmd/nessy/demo_*_test.go`:
 | [`vrc6-chord`](roms/demos/vrc6-chord/) | VRC6 cart + 3-channel audio expansion (mapper 24) | Sustained low chord (audio only) |
 | [`sunsoft5b-chord`](roms/demos/sunsoft5b-chord/) | FME-7 cart + Sunsoft 5B audio (mapper 69) | Three-tone chord via YM2149 clone (audio only) |
 | [`scroll-split`](roms/demos/scroll-split/) | Mid-frame horizontal scroll split (per-scanline `$2005`) | Vertical stripes offset between top + bottom halves |
+| [`mmc3-split`](roms/demos/mmc3-split/) | MMC3 scanline-IRQ split bar (A12-counted) | Top half blue, bottom half green |
 
 Run any of them:
 
