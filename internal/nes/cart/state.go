@@ -13,12 +13,13 @@ import (
 // the ROM file at load time. CHR is persisted only for CHR-RAM carts
 // (CHR-ROM is immutable + part of the ROM).
 type CartState struct {
-	Kind  string // "NROM" | "UxROM" | "CNROM" | "MMC1" | "MMC3" | "FME7" | "VRC" | "VRC6" | "VRC7"
+	Kind  string // "NROM" | "UxROM" | "CNROM" | "MMC1" | "MMC3" | "AOROM" | "FME7" | "VRC" | "VRC6" | "VRC7"
 	NROM  *NROMState
 	UxROM *UxROMState
 	CNROM *CNROMState
 	MMC1  *MMC1State
 	MMC3  *MMC3State
+	AOROM *AOROMState
 	FME7  *FME7State
 	VRC   *VRCState
 	VRC6  *VRC6State
@@ -69,6 +70,14 @@ type VRC6State struct {
 // NROMState — only CHR-RAM (when present) is mutable.
 type NROMState struct {
 	CHRRAM []byte // nil if CHR-ROM
+}
+
+// AOROMState — 32 KiB bank reg + runtime single-screen mirroring +
+// CHR-RAM.
+type AOROMState struct {
+	PrgBank   byte
+	Mirroring nes.Mirroring
+	CHRRAM    []byte
 }
 
 // UxROMState — bank reg + CHR-RAM + bus-conflict variant flag.
@@ -159,6 +168,8 @@ func SaveCart(c Cartridge) (CartState, error) {
 		return CartState{Kind: "MMC1", MMC1: m.saveState()}, nil
 	case *MMC3:
 		return CartState{Kind: "MMC3", MMC3: m.saveState()}, nil
+	case *AOROM:
+		return CartState{Kind: "AOROM", AOROM: m.saveState()}, nil
 	case *FME7:
 		return CartState{Kind: "FME7", FME7: m.saveState()}, nil
 	case *VRC:
@@ -202,6 +213,11 @@ func LoadCart(c Cartridge, s CartState) error {
 			return fmt.Errorf("cart: state kind %q doesn't match MMC3 cart", s.Kind)
 		}
 		return m.loadState(*s.MMC3)
+	case *AOROM:
+		if s.Kind != "AOROM" || s.AOROM == nil {
+			return fmt.Errorf("cart: state kind %q doesn't match AOROM cart", s.Kind)
+		}
+		return m.loadState(*s.AOROM)
 	case *FME7:
 		if s.Kind != "FME7" || s.FME7 == nil {
 			return fmt.Errorf("cart: state kind %q doesn't match FME7 cart", s.Kind)
@@ -457,6 +473,24 @@ func (c *VRC7) loadState(s VRC7State) error {
 		}
 		copy(c.chr, s.CHRRAM)
 	}
+	return nil
+}
+
+// --- AOROM ---
+
+func (c *AOROM) saveState() *AOROMState {
+	s := &AOROMState{PrgBank: c.prgBank, Mirroring: c.mirroring}
+	s.CHRRAM = append(s.CHRRAM, c.chr...)
+	return s
+}
+
+func (c *AOROM) loadState(s AOROMState) error {
+	c.prgBank = s.PrgBank
+	c.mirroring = s.Mirroring
+	if len(s.CHRRAM) != len(c.chr) {
+		return fmt.Errorf("aorom: CHR-RAM length mismatch (have %d, got %d)", len(c.chr), len(s.CHRRAM))
+	}
+	copy(c.chr, s.CHRRAM)
 	return nil
 }
 
