@@ -1,5 +1,7 @@
 package cpu
 
+import "fmt"
+
 // Step executes one instruction. Returns cycles consumed.
 // If the instruction is an infinite tight loop (PC unchanged afterwards) the
 // CPU is marked Halted so callers can stop free-running.
@@ -72,7 +74,14 @@ func (c *CPU) Step() int {
 		stalled := c.pendingStall
 		c.pendingStall = 0
 		c.Cycles += uint64(stalled)
-		if c.busTicker != nil {
+		switch {
+		case c.nesCycle:
+			// Per-cycle so the PPU stays in lockstep through the bus
+			// steal (#342); also keeps the NMI poll advancing.
+			for range stalled {
+				c.tick()
+			}
+		case c.busTicker != nil:
 			c.busTicker.Tick(stalled)
 		}
 		return stalled
@@ -85,47 +94,23 @@ func (c *CPU) Step() int {
 		c.Tracer.LogStep(c, c.Bus)
 	}
 	startPC := c.PC
-	op := c.Bus.Read(c.PC)
+	// Per-cycle interleave (#342, VariantNES): every bus access ticks the
+	// chain one cycle, so the PPU/APU/cart run in 1:1 lockstep with the
+	// CPU and a $2002 read samples the PPU at its true dot. instrCycles
+	// counts those ticks; it must equal the instruction's accounted total
+	// (asserted below). Other variants keep the post-instruction batch
+	// tick — their byte-for-byte behavior is unchanged.
+	c.instrCycles = 0
+	op := c.read(c.PC) // cycle 1: opcode fetch
 	c.PC++
 	in := c.opcodes[op]
 	addr, pageCrossed := c.resolve(in.Mode)
 	c.extraCycles = 0
-	// Per-cycle PPU sync for the NES variant (#342). The 2C02 needs a
-	// $2002 read to sample the PPU at the instruction's data-access
-	// cycle — the operand read/write lands on the final cycle for the
-	// load/store + RMW modes that reach PPU registers. So advance the
-	// bus ticker by the base instruction length BEFORE running the
-	// opcode body; the branch + page-cross extras (which never touch
-	// $2000/$2002) tick afterward. Other CPU variants keep the simpler
-	// post-instruction batch tick — the chippy debugger doesn't drive
-	// a dot-accurate PPU, so its byte-for-byte behavior is unchanged.
-	//
-	// Together with the NMI interrupt-poll latch (nmiDue, sampled at the
-	// penultimate cycle just below) this passes Blargg ppu_vbl_nmi tests
-	// 2-5 (vbl_set_time, vbl_clear_time, nmi_control, nmi_timing). The
-	// remaining sub-tests (6+: suppression) need a $2002 read to race the
-	// /NMI edge at sub-cycle resolution — the read must land *between* the
-	// PPU's flag-set and the CPU's edge-sample — which this instruction-
-	// stepped, pre-tick model can't represent. That needs true per-cycle
-	// CPU↔PPU interleave; still scoped to #342.
-	nesSync := c.Variant == VariantNES && c.busTicker != nil
-	switch {
-	case nesSync:
-		// Advance the PPU to the penultimate cycle, poll the NMI line,
-		// then tick the final cycle. The 6502 samples interrupts before
-		// the last cycle, so an NMI raised on that cycle (or by the
-		// opcode body, the final-cycle bus operation) is serviced one
-		// instruction later — Blargg 05-nmi_timing pins this. The full
-		// base length still ticks before the body, so a $2002 read in the
-		// body samples the PPU at its true data-access dot (#342).
-		if in.Cycles > 1 {
-			c.busTicker.Tick(in.Cycles - 1)
-		}
-		c.nmiDue = c.nmiPending
-		c.busTicker.Tick(1)
-	case c.Variant == VariantNES:
-		// NES without a bus ticker still polls so the nmiDue latch
-		// advances and NMIs get serviced.
+	if c.nesCycle {
+		c.addrDummies(in, addr, pageCrossed)
+	} else if c.Variant == VariantNES {
+		// NES without a bus ticker can't interleave, but still polls so
+		// the nmiDue latch advances and NMIs get serviced.
 		c.nmiDue = c.nmiPending
 	}
 	in.Exec(c, addr, in.Mode)
@@ -134,9 +119,10 @@ func (c *CPU) Step() int {
 		cycles++
 	}
 	c.Cycles += uint64(cycles)
-	if nesSync {
-		if rem := cycles - in.Cycles; rem > 0 {
-			c.busTicker.Tick(rem)
+	if c.nesCycle {
+		if c.instrCycles != cycles {
+			panic(fmt.Sprintf("cpu: cycle mismatch %s mode=%d ticked=%d want=%d",
+				in.Name, in.Mode, c.instrCycles, cycles))
 		}
 	} else if c.busTicker != nil {
 		c.busTicker.Tick(cycles)
@@ -157,30 +143,60 @@ func (c *CPU) Step() int {
 	return cycles
 }
 
+// addrDummies issues the dummy bus cycles an addressing mode performs
+// beyond its explicit operand + data accesses, so the per-cycle tick
+// count matches the instruction's true length (#342). Zero-page-indexed
+// dummies live in resolve; multi-cycle stack / control / RMW dummies
+// live in their handlers. This covers the implied/accumulator internal
+// cycle and the absolute/indirect-indexed fix-up read.
+func (c *CPU) addrDummies(in Instr, addr uint16, pageCrossed bool) {
+	switch in.Mode {
+	case IMP, ACC:
+		// 2-cycle implied/accumulator ops do a dummy read of the next
+		// byte. Multi-cycle implied ops (stack, RTS/RTI/BRK) carry their
+		// own dummies in the handler, so gate on the 2-cycle length.
+		if in.Cycles == 2 {
+			c.idle(c.PC)
+		}
+	case ABX:
+		// Indexed read: extra fix-up read only when the page is crossed
+		// (PageAdd). Indexed write / RMW (PageAdd false): always.
+		if !in.PageAdd || pageCrossed {
+			base := addr - uint16(c.X)
+			c.idle((base & 0xFF00) | (addr & 0x00FF))
+		}
+	case ABY, IZY:
+		if !in.PageAdd || pageCrossed {
+			base := addr - uint16(c.Y)
+			c.idle((base & 0xFF00) | (addr & 0x00FF))
+		}
+	}
+}
+
 // --- helpers for read/write w/ ACC mode ---
 func (c *CPU) load(addr uint16, mode AddrMode) byte {
 	if mode == ACC {
 		return c.A
 	}
-	return c.Bus.Read(addr)
+	return c.read(addr)
 }
 func (c *CPU) store(addr uint16, mode AddrMode, v byte) {
 	if mode == ACC {
 		c.A = v
 		return
 	}
-	c.Bus.Write(addr, v)
+	c.write(addr, v)
 }
 
 // --- ops ---
 
-func opLDA(c *CPU, addr uint16, m AddrMode) { c.A = c.Bus.Read(addr); c.setZN(c.A) }
-func opLDX(c *CPU, addr uint16, m AddrMode) { c.X = c.Bus.Read(addr); c.setZN(c.X) }
-func opLDY(c *CPU, addr uint16, m AddrMode) { c.Y = c.Bus.Read(addr); c.setZN(c.Y) }
+func opLDA(c *CPU, addr uint16, m AddrMode) { c.A = c.read(addr); c.setZN(c.A) }
+func opLDX(c *CPU, addr uint16, m AddrMode) { c.X = c.read(addr); c.setZN(c.X) }
+func opLDY(c *CPU, addr uint16, m AddrMode) { c.Y = c.read(addr); c.setZN(c.Y) }
 
-func opSTA(c *CPU, addr uint16, m AddrMode) { c.Bus.Write(addr, c.A) }
-func opSTX(c *CPU, addr uint16, m AddrMode) { c.Bus.Write(addr, c.X) }
-func opSTY(c *CPU, addr uint16, m AddrMode) { c.Bus.Write(addr, c.Y) }
+func opSTA(c *CPU, addr uint16, m AddrMode) { c.write(addr, c.A) }
+func opSTX(c *CPU, addr uint16, m AddrMode) { c.write(addr, c.X) }
+func opSTY(c *CPU, addr uint16, m AddrMode) { c.write(addr, c.Y) }
 
 func opTAX(c *CPU, _ uint16, _ AddrMode) { c.X = c.A; c.setZN(c.X) }
 func opTAY(c *CPU, _ uint16, _ AddrMode) { c.Y = c.A; c.setZN(c.Y) }
@@ -189,17 +205,29 @@ func opTXA(c *CPU, _ uint16, _ AddrMode) { c.A = c.X; c.setZN(c.A) }
 func opTXS(c *CPU, _ uint16, _ AddrMode) { c.SP = c.X }
 func opTYA(c *CPU, _ uint16, _ AddrMode) { c.A = c.Y; c.setZN(c.A) }
 
-func opPHA(c *CPU, _ uint16, _ AddrMode) { c.push(c.A) }
-func opPHP(c *CPU, _ uint16, _ AddrMode) { c.push(c.P | FlagB | FlagU) }
-func opPLA(c *CPU, _ uint16, _ AddrMode) { c.A = c.pop(); c.setZN(c.A) }
-func opPLP(c *CPU, _ uint16, _ AddrMode) { c.P = (c.pop() &^ FlagB) | FlagU }
+// Push/pull carry an internal dummy cycle (or two) beyond the explicit
+// stack access; idle() ticks them for the per-cycle NES path (#342) and
+// is a no-op elsewhere.
+func opPHA(c *CPU, _ uint16, _ AddrMode) { c.idle(c.PC); c.push(c.A) }
+func opPHP(c *CPU, _ uint16, _ AddrMode) { c.idle(c.PC); c.push(c.P | FlagB | FlagU) }
+func opPLA(c *CPU, _ uint16, _ AddrMode) {
+	c.idle(c.PC)
+	c.idle(0x100 | uint16(c.SP))
+	c.A = c.pop()
+	c.setZN(c.A)
+}
+func opPLP(c *CPU, _ uint16, _ AddrMode) {
+	c.idle(c.PC)
+	c.idle(0x100 | uint16(c.SP))
+	c.P = (c.pop() &^ FlagB) | FlagU
+}
 
-func opAND(c *CPU, addr uint16, m AddrMode) { c.A &= c.Bus.Read(addr); c.setZN(c.A) }
-func opEOR(c *CPU, addr uint16, m AddrMode) { c.A ^= c.Bus.Read(addr); c.setZN(c.A) }
-func opORA(c *CPU, addr uint16, m AddrMode) { c.A |= c.Bus.Read(addr); c.setZN(c.A) }
+func opAND(c *CPU, addr uint16, m AddrMode) { c.A &= c.read(addr); c.setZN(c.A) }
+func opEOR(c *CPU, addr uint16, m AddrMode) { c.A ^= c.read(addr); c.setZN(c.A) }
+func opORA(c *CPU, addr uint16, m AddrMode) { c.A |= c.read(addr); c.setZN(c.A) }
 
 func opBIT(c *CPU, addr uint16, m AddrMode) {
-	v := c.Bus.Read(addr)
+	v := c.read(addr)
 	c.setFlag(FlagZ, c.A&v == 0)
 	c.setFlag(FlagN, v&0x80 != 0)
 	c.setFlag(FlagV, v&0x40 != 0)
@@ -214,7 +242,7 @@ func opBIT(c *CPU, addr uint16, m AddrMode) {
 //   - N and V reflect the partially-adjusted high nibble (also "undefined"
 //     on NMOS but deterministic, and Bruce Clark's vectors check them)
 func opADC(c *CPU, addr uint16, m AddrMode) {
-	v := c.Bus.Read(addr)
+	v := c.read(addr)
 	carry := uint16(0)
 	if c.hasFlag(FlagC) {
 		carry = 1
@@ -241,7 +269,7 @@ func opADC(c *CPU, addr uint16, m AddrMode) {
 // hardware where those flags are documented as undefined but in fact reflect
 // the parallel binary subtract); A holds the decimal result.
 func opSBC(c *CPU, addr uint16, m AddrMode) {
-	v := c.Bus.Read(addr)
+	v := c.read(addr)
 	carry := uint16(0)
 	if c.hasFlag(FlagC) {
 		carry = 1
@@ -315,18 +343,32 @@ func cmp(c *CPU, reg, v byte) {
 	c.setFlag(FlagZ, reg == v)
 	c.setFlag(FlagN, (reg-v)&0x80 != 0)
 }
-func opCMP(c *CPU, addr uint16, m AddrMode) { cmp(c, c.A, c.Bus.Read(addr)) }
-func opCPX(c *CPU, addr uint16, m AddrMode) { cmp(c, c.X, c.Bus.Read(addr)) }
-func opCPY(c *CPU, addr uint16, m AddrMode) { cmp(c, c.Y, c.Bus.Read(addr)) }
+func opCMP(c *CPU, addr uint16, m AddrMode) { cmp(c, c.A, c.read(addr)) }
+func opCPX(c *CPU, addr uint16, m AddrMode) { cmp(c, c.X, c.read(addr)) }
+func opCPY(c *CPU, addr uint16, m AddrMode) { cmp(c, c.Y, c.read(addr)) }
+
+// rmwDummy is the read-modify-write internal cycle: the 6502 writes the
+// unmodified value back before the modified one (memory modes only). The
+// ticked dummy write keeps the per-cycle count exact (#342); a no-op
+// write under non-NES variants is harmless.
+func (c *CPU) rmwDummy(addr uint16, m AddrMode, old byte) {
+	if m != ACC {
+		c.write(addr, old)
+	}
+}
 
 func opINC(c *CPU, addr uint16, m AddrMode) {
-	v := c.Bus.Read(addr) + 1
-	c.Bus.Write(addr, v)
+	old := c.read(addr)
+	c.rmwDummy(addr, m, old)
+	v := old + 1
+	c.write(addr, v)
 	c.setZN(v)
 }
 func opDEC(c *CPU, addr uint16, m AddrMode) {
-	v := c.Bus.Read(addr) - 1
-	c.Bus.Write(addr, v)
+	old := c.read(addr)
+	c.rmwDummy(addr, m, old)
+	v := old - 1
+	c.write(addr, v)
 	c.setZN(v)
 }
 func opINX(c *CPU, _ uint16, _ AddrMode) { c.X++; c.setZN(c.X) }
@@ -336,6 +378,7 @@ func opDEY(c *CPU, _ uint16, _ AddrMode) { c.Y--; c.setZN(c.Y) }
 
 func opASL(c *CPU, addr uint16, m AddrMode) {
 	v := c.load(addr, m)
+	c.rmwDummy(addr, m, v)
 	c.setFlag(FlagC, v&0x80 != 0)
 	v <<= 1
 	c.store(addr, m, v)
@@ -343,6 +386,7 @@ func opASL(c *CPU, addr uint16, m AddrMode) {
 }
 func opLSR(c *CPU, addr uint16, m AddrMode) {
 	v := c.load(addr, m)
+	c.rmwDummy(addr, m, v)
 	c.setFlag(FlagC, v&1 != 0)
 	v >>= 1
 	c.store(addr, m, v)
@@ -350,6 +394,7 @@ func opLSR(c *CPU, addr uint16, m AddrMode) {
 }
 func opROL(c *CPU, addr uint16, m AddrMode) {
 	v := c.load(addr, m)
+	c.rmwDummy(addr, m, v)
 	carryIn := byte(0)
 	if c.hasFlag(FlagC) {
 		carryIn = 1
@@ -361,6 +406,7 @@ func opROL(c *CPU, addr uint16, m AddrMode) {
 }
 func opROR(c *CPU, addr uint16, m AddrMode) {
 	v := c.load(addr, m)
+	c.rmwDummy(addr, m, v)
 	carryIn := byte(0)
 	if c.hasFlag(FlagC) {
 		carryIn = 0x80
@@ -373,11 +419,19 @@ func opROR(c *CPU, addr uint16, m AddrMode) {
 
 func opJMP(c *CPU, addr uint16, _ AddrMode) { c.PC = addr }
 func opJSR(c *CPU, addr uint16, _ AddrMode) {
+	c.idle(0x100 | uint16(c.SP)) // internal stack-pointer cycle
 	c.push16(c.PC - 1)
 	c.PC = addr
 }
-func opRTS(c *CPU, _ uint16, _ AddrMode) { c.PC = c.pop16() + 1 }
+func opRTS(c *CPU, _ uint16, _ AddrMode) {
+	c.idle(c.PC) // dummy read of next byte
+	c.idle(0x100 | uint16(c.SP))
+	c.PC = c.pop16() + 1
+	c.idle(c.PC) // internal cycle: PC increment
+}
 func opRTI(c *CPU, _ uint16, _ AddrMode) {
+	c.idle(c.PC)                 // dummy read of next byte
+	c.idle(0x100 | uint16(c.SP)) // dummy stack read before the pulls
 	c.P = (c.pop() &^ FlagB) | FlagU
 	c.PC = c.pop16()
 }
@@ -386,10 +440,13 @@ func branch(c *CPU, addr uint16, take bool) {
 	if !take {
 		return
 	}
-	// extra cycle, +1 if page crossed
+	// Taken branch: +1 cycle (dummy opcode-fetch at the current PC),
+	// +1 more if the target is on a different page.
 	c.extraCycles++
+	c.idle(c.PC)
 	if (c.PC & 0xFF00) != (addr & 0xFF00) {
 		c.extraCycles++
+		c.idle(addr)
 	}
 	c.PC = addr
 }
@@ -411,6 +468,7 @@ func opCLD(c *CPU, _ uint16, _ AddrMode) { c.setFlag(FlagD, false) }
 func opSED(c *CPU, _ uint16, _ AddrMode) { c.setFlag(FlagD, true) }
 
 func opBRK(c *CPU, _ uint16, _ AddrMode) {
+	c.idle(c.PC) // dummy read of the padding byte
 	c.PC++
 	c.push16(c.PC)
 	c.push(c.P | FlagB | FlagU)
@@ -421,11 +479,18 @@ func opBRK(c *CPU, _ uint16, _ AddrMode) {
 	if c.Variant == VariantCMOS65C02 {
 		c.setFlag(FlagD, false)
 	}
-	lo := uint16(c.Bus.Read(VecIRQ))
-	hi := uint16(c.Bus.Read(VecIRQ + 1))
+	lo := uint16(c.read(VecIRQ))
+	hi := uint16(c.read(VecIRQ + 1))
 	c.PC = lo | hi<<8
 }
-func opNOP(c *CPU, _ uint16, _ AddrMode) {}
+func opNOP(c *CPU, addr uint16, m AddrMode) {
+	// Illegal multi-byte NOPs (DOP/TOP) read their operand and discard
+	// it — that read is a real cycle. The canonical implied NOP (and
+	// accumulator forms) have no operand; addrDummies ticks their idle.
+	if m != IMP && m != ACC {
+		_ = c.read(addr)
+	}
+}
 
 // opWAI (CMOS $CB) puts the CPU to sleep until an IRQ or NMI is signalled.
 // Once awakened, execution continues with the next opcode; the interrupt

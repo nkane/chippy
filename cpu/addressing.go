@@ -32,82 +32,88 @@ func (c *CPU) resolve(m AddrMode) (addr uint16, pageCrossed bool) {
 		addr = c.PC
 		c.PC++
 	case ZP:
-		addr = uint16(c.Bus.Read(c.PC))
+		addr = uint16(c.read(c.PC))
 		c.PC++
 	case ZPX:
-		addr = uint16(c.Bus.Read(c.PC)+c.X) & 0xFF
+		base := c.read(c.PC)
 		c.PC++
+		c.idle(uint16(base)) // dummy read while adding X
+		addr = uint16(base+c.X) & 0xFF
 	case ZPY:
-		addr = uint16(c.Bus.Read(c.PC)+c.Y) & 0xFF
+		base := c.read(c.PC)
 		c.PC++
+		c.idle(uint16(base)) // dummy read while adding Y
+		addr = uint16(base+c.Y) & 0xFF
 	case REL:
-		off := int8(c.Bus.Read(c.PC))
+		off := int8(c.read(c.PC))
 		c.PC++
 		addr = uint16(int32(c.PC) + int32(off))
 	case ABS:
-		lo := uint16(c.Bus.Read(c.PC))
-		hi := uint16(c.Bus.Read(c.PC + 1))
+		lo := uint16(c.read(c.PC))
+		hi := uint16(c.read(c.PC + 1))
 		c.PC += 2
 		addr = lo | hi<<8
 	case ABX:
-		lo := uint16(c.Bus.Read(c.PC))
-		hi := uint16(c.Bus.Read(c.PC + 1))
+		lo := uint16(c.read(c.PC))
+		hi := uint16(c.read(c.PC + 1))
 		c.PC += 2
 		base := lo | hi<<8
 		addr = base + uint16(c.X)
 		pageCrossed = (base & 0xFF00) != (addr & 0xFF00)
 	case ABY:
-		lo := uint16(c.Bus.Read(c.PC))
-		hi := uint16(c.Bus.Read(c.PC + 1))
+		lo := uint16(c.read(c.PC))
+		hi := uint16(c.read(c.PC + 1))
 		c.PC += 2
 		base := lo | hi<<8
 		addr = base + uint16(c.Y)
 		pageCrossed = (base & 0xFF00) != (addr & 0xFF00)
 	case IND:
-		lo := uint16(c.Bus.Read(c.PC))
-		hi := uint16(c.Bus.Read(c.PC + 1))
+		lo := uint16(c.read(c.PC))
+		hi := uint16(c.read(c.PC + 1))
 		c.PC += 2
 		ptr := lo | hi<<8
 		var loAddr, hiAddr uint16
 		if c.Variant == VariantCMOS65C02 {
 			// CMOS fixed the page-wrap bug.
-			loAddr = uint16(c.Bus.Read(ptr))
-			hiAddr = uint16(c.Bus.Read(ptr + 1))
+			loAddr = uint16(c.read(ptr))
+			hiAddr = uint16(c.read(ptr + 1))
 		} else {
 			// NMOS 6502 page-wrap bug.
-			loAddr = uint16(c.Bus.Read(ptr))
-			hiAddr = uint16(c.Bus.Read((ptr & 0xFF00) | uint16(byte(ptr)+1)))
+			loAddr = uint16(c.read(ptr))
+			hiAddr = uint16(c.read((ptr & 0xFF00) | uint16(byte(ptr)+1)))
 		}
 		addr = loAddr | hiAddr<<8
 	case IZX:
-		zp := c.Bus.Read(c.PC) + c.X
+		ptr := c.read(c.PC)
 		c.PC++
-		lo := uint16(c.Bus.Read(uint16(zp)))
-		hi := uint16(c.Bus.Read(uint16(zp + 1)))
+		c.idle(uint16(ptr)) // dummy read while adding X to the pointer
+		zp := ptr + c.X
+		lo := uint16(c.read(uint16(zp)))
+		hi := uint16(c.read(uint16(zp + 1)))
 		addr = lo | hi<<8
 	case IZY:
-		zp := c.Bus.Read(c.PC)
+		zp := c.read(c.PC)
 		c.PC++
-		lo := uint16(c.Bus.Read(uint16(zp)))
-		hi := uint16(c.Bus.Read(uint16(zp + 1)))
+		lo := uint16(c.read(uint16(zp)))
+		hi := uint16(c.read(uint16(zp + 1)))
 		base := lo | hi<<8
 		addr = base + uint16(c.Y)
 		pageCrossed = (base & 0xFF00) != (addr & 0xFF00)
 	case IZP:
 		// 65C02: (zp) — like IZY/IZX but no register offset.
-		zp := c.Bus.Read(c.PC)
+		zp := c.read(c.PC)
 		c.PC++
-		lo := uint16(c.Bus.Read(uint16(zp)))
-		hi := uint16(c.Bus.Read(uint16(zp + 1)))
+		lo := uint16(c.read(uint16(zp)))
+		hi := uint16(c.read(uint16(zp + 1)))
 		addr = lo | hi<<8
 	case IAX:
 		// 65C02: (abs,X) — used by JMP. No page-wrap bug.
-		lo := uint16(c.Bus.Read(c.PC))
-		hi := uint16(c.Bus.Read(c.PC + 1))
+		lo := uint16(c.read(c.PC))
+		hi := uint16(c.read(c.PC + 1))
 		c.PC += 2
 		ptr := (lo | hi<<8) + uint16(c.X)
-		loAddr := uint16(c.Bus.Read(ptr))
-		hiAddr := uint16(c.Bus.Read(ptr + 1))
+		loAddr := uint16(c.read(ptr))
+		hiAddr := uint16(c.read(ptr + 1))
 		addr = loAddr | hiAddr<<8
 	case ZPR:
 		// 65C02: BBR/BBS — opcode + zp byte + rel byte. We resolve the

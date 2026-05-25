@@ -36,15 +36,19 @@ package cpu
 
 // opDCP: M := M-1; CMP A vs new M.
 func opDCP(c *CPU, addr uint16, _ AddrMode) {
-	v := c.Bus.Read(addr) - 1
-	c.Bus.Write(addr, v)
+	old := c.read(addr)
+	c.write(addr, old) // RMW dummy write-back of the old value
+	v := old - 1
+	c.write(addr, v)
 	cmp(c, c.A, v)
 }
 
 // opISC: M := M+1; SBC A, new M. Honors decimal mode via opSBC path.
 func opISC(c *CPU, addr uint16, m AddrMode) {
-	v := c.Bus.Read(addr) + 1
-	c.Bus.Write(addr, v)
+	old := c.read(addr)
+	c.write(addr, old) // RMW dummy write-back
+	v := old + 1
+	c.write(addr, v)
 	// Inline SBC against v: re-use the same arithmetic as opSBC. We can't
 	// call opSBC directly (it would re-read), so duplicate the dispatch.
 	carry := uint16(0)
@@ -65,48 +69,52 @@ func opISC(c *CPU, addr uint16, m AddrMode) {
 
 // opSLO: M := M<<1; A := A | M. C := old bit 7.
 func opSLO(c *CPU, addr uint16, _ AddrMode) {
-	v := c.Bus.Read(addr)
+	v := c.read(addr)
+	c.write(addr, v) // RMW dummy write-back
 	c.setFlag(FlagC, v&0x80 != 0)
 	v <<= 1
-	c.Bus.Write(addr, v)
+	c.write(addr, v)
 	c.A |= v
 	c.setZN(c.A)
 }
 
 // opRLA: M := ROL M; A := A & M.
 func opRLA(c *CPU, addr uint16, _ AddrMode) {
-	v := c.Bus.Read(addr)
+	v := c.read(addr)
+	c.write(addr, v) // RMW dummy write-back
 	carryIn := byte(0)
 	if c.hasFlag(FlagC) {
 		carryIn = 1
 	}
 	c.setFlag(FlagC, v&0x80 != 0)
 	v = (v << 1) | carryIn
-	c.Bus.Write(addr, v)
+	c.write(addr, v)
 	c.A &= v
 	c.setZN(c.A)
 }
 
 // opSRE: M := M>>1; A := A ^ M. C := old bit 0.
 func opSRE(c *CPU, addr uint16, _ AddrMode) {
-	v := c.Bus.Read(addr)
+	v := c.read(addr)
+	c.write(addr, v) // RMW dummy write-back
 	c.setFlag(FlagC, v&1 != 0)
 	v >>= 1
-	c.Bus.Write(addr, v)
+	c.write(addr, v)
 	c.A ^= v
 	c.setZN(c.A)
 }
 
 // opRRA: M := ROR M; ADC A, new M. Honors decimal mode via opADC path.
 func opRRA(c *CPU, addr uint16, m AddrMode) {
-	v := c.Bus.Read(addr)
+	v := c.read(addr)
+	c.write(addr, v) // RMW dummy write-back
 	carryIn := byte(0)
 	if c.hasFlag(FlagC) {
 		carryIn = 0x80
 	}
 	c.setFlag(FlagC, v&1 != 0)
 	v = (v >> 1) | carryIn
-	c.Bus.Write(addr, v)
+	c.write(addr, v)
 	// ADC with v
 	carry := uint16(0)
 	if c.hasFlag(FlagC) {
@@ -127,7 +135,7 @@ func opRRA(c *CPU, addr uint16, m AddrMode) {
 
 // opLAX: A,X := M.
 func opLAX(c *CPU, addr uint16, _ AddrMode) {
-	v := c.Bus.Read(addr)
+	v := c.read(addr)
 	c.A = v
 	c.X = v
 	c.setZN(v)
@@ -135,21 +143,21 @@ func opLAX(c *CPU, addr uint16, _ AddrMode) {
 
 // opSAX: M := A & X. Does not affect any flags.
 func opSAX(c *CPU, addr uint16, _ AddrMode) {
-	c.Bus.Write(addr, c.A&c.X)
+	c.write(addr, c.A&c.X)
 }
 
 // --- immediate-only illegals ---
 
 // opANC: A := A & imm; then C := bit7 of A (i.e. C copies N).
 func opANC(c *CPU, addr uint16, _ AddrMode) {
-	c.A &= c.Bus.Read(addr)
+	c.A &= c.read(addr)
 	c.setZN(c.A)
 	c.setFlag(FlagC, c.A&0x80 != 0)
 }
 
 // opALR (also ASR): A := (A & imm) >> 1. C := old bit 0 of (A & imm).
 func opALR(c *CPU, addr uint16, _ AddrMode) {
-	c.A &= c.Bus.Read(addr)
+	c.A &= c.read(addr)
 	c.setFlag(FlagC, c.A&1 != 0)
 	c.A >>= 1
 	c.setZN(c.A)
@@ -163,7 +171,7 @@ func opALR(c *CPU, addr uint16, _ AddrMode) {
 // (Decimal-mode ARR has even weirder behaviour; we implement the binary
 // case here. Real software almost never uses ARR in decimal mode.)
 func opARR(c *CPU, addr uint16, _ AddrMode) {
-	c.A &= c.Bus.Read(addr)
+	c.A &= c.read(addr)
 	carryIn := byte(0)
 	if c.hasFlag(FlagC) {
 		carryIn = 0x80
@@ -177,22 +185,20 @@ func opARR(c *CPU, addr uint16, _ AddrMode) {
 // opSBX (also called AXS): X := (A & X) - imm. Carry set if no borrow.
 // A is unchanged. Flags are set from the result.
 func opSBX(c *CPU, addr uint16, _ AddrMode) {
-	v := c.Bus.Read(addr)
+	v := c.read(addr)
 	tmp := uint16(c.A&c.X) + uint16(v^0xFF) + 1 // i.e. (A&X) - v
 	c.setFlag(FlagC, tmp > 0xFF)
 	c.X = byte(tmp)
 	c.setZN(c.X)
 }
 
-// opNOP2 / opNOP3 — multi-byte NOPs that still need to consume the operand
-// byte (which the addressing-mode resolver already reads via `addr` param).
-// We don't need a body; the side effect of having a non-IMP mode in the
-// opcode table is the PC advancing past the operand. opNOP() works fine
-// here because the PC bump happens in resolve(), not in Exec.
-//
-// We expose this alias purely for readability in the table.
-func opNOP2(c *CPU, _ uint16, _ AddrMode) {}
-func opNOP3(c *CPU, _ uint16, _ AddrMode) {}
+// opNOP2 / opNOP3 — multi-byte NOPs (DOP/TOP) that read their operand
+// and discard it. The PC already advanced in resolve; the read here is
+// the instruction's real data cycle, ticked for the per-cycle NES path
+// (#342). Both always carry a memory operand (never IMP), so the read is
+// unconditional.
+func opNOP2(c *CPU, addr uint16, _ AddrMode) { _ = c.read(addr) }
+func opNOP3(c *CPU, addr uint16, _ AddrMode) { _ = c.read(addr) }
 
 // --- table installation ---
 

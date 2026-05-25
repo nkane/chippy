@@ -19,9 +19,21 @@ func (c *fakeCart) PPUWrite(addr uint16, v byte) { c.chr[addr&0x1FFF] = v }
 func (c *fakeCart) Mirroring() nes.Mirroring     { return c.mir }
 
 // fakeNMI counts how many times TriggerNMI was called.
-type fakeNMI struct{ count int }
+type fakeNMI struct {
+	count int // NMIs the CPU would take = rising edges of the /NMI line
+	line  bool
+}
 
 func (n *fakeNMI) TriggerNMI() { n.count++ }
+
+// SetNMILine counts a rising edge as one NMI, mirroring the CPU's edge
+// detector, so tests that assert on count work against the level model.
+func (n *fakeNMI) SetNMILine(level bool) {
+	if level && !n.line {
+		n.count++
+	}
+	n.line = level
+}
 
 // Vblank flag flips at scanline 241 dot 1. Tick advances 3 dots per
 // CPU cycle, so the precise CPU cycle count is the scanline / 3 + dot
