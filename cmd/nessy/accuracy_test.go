@@ -65,7 +65,7 @@ var accuracyROMs = []accuracyROM{
 		sha:       "8dbab1be785585c399cf055ef02147b788ab75fd80e81cf9568a2feafc03fb7d",
 		pathEnv:   "CHIPPY_ACCURACY_VBL_NMI_BIN",
 		maxFrames: 1200, // ~20 s emulated; the suite finishes well under
-		knownFail: "PPU vbl-flag set-timing race (test 2/10) — tracked in #342",
+		knownFail: "cycle-accurate NMI delivery (nmi_control, test 4/10) — vbl set+clear races pass; tracked in #342",
 	},
 }
 

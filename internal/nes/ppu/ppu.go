@@ -114,6 +114,17 @@ type PPU struct {
 	dot        int
 	frameCount uint64
 
+	// Per-dot vblank-flag race state (#342). `dots` is a monotonic dot
+	// counter. `vblSetAtDots` / `vblClearAtDots` record the dots on
+	// which the flag is raised (241,1) and auto-cleared (pre-render,1);
+	// sentinel = never. A $2002 read landing on the set dot loses the
+	// race and reads 0 (the set hasn't propagated CPU-side); a read on
+	// the clear dot reads the pre-clear value (still set). Blargg's
+	// 02-vbl_set_time + 03-vbl_clear_time pin both edges to a single dot.
+	dots           uint64
+	vblSetAtDots   uint64
+	vblClearAtDots uint64
+
 	// timing holds the region-specific frame geometry (NTSC / PAL /
 	// Dendy). Defaults to NTSC in New so existing callers + the
 	// SHA-pinned demos render byte-identically; buildNES calls
@@ -194,6 +205,7 @@ func (p *PPU) Reset() {
 	p.v, p.t, p.x, p.w, p.readBuf = 0, 0, 0, false, 0
 	p.scrollX, p.scrollY, p.scrollHi = 0, 0, false
 	p.scanline, p.dot, p.frameCount = p.timing.PreRenderScanline, 0, 0
+	p.dots, p.vblSetAtDots, p.vblClearAtDots = 0, ^uint64(0), ^uint64(0)
 	for i := range p.vram {
 		p.vram[i] = 0
 	}
@@ -224,6 +236,18 @@ func (p *PPU) Read(addr uint16) byte {
 		// the open-bus latch (real silicon doesn't drive them).
 		// Reading also clears vblank + the $2005/$2006 toggle.
 		out := (p.status & 0xE0) | (p.openBus & 0x1F)
+		// 2C02 vblank-set race (#342): a CPU read landing on the exact
+		// dot the flag is set reads bit 7 as 0 — the set hasn't
+		// propagated to the CPU side — and clears the flag. Blargg's
+		// 02-vbl_set_time pins this: the read on the set dot suppresses
+		// that frame's flag (second read sees it clear), while a read
+		// one dot earlier does not.
+		switch p.dots {
+		case p.vblSetAtDots:
+			out &^= 0x80
+		case p.vblClearAtDots:
+			out |= 0x80
+		}
 		p.status &^= 0x80
 		p.w = false
 		p.scrollHi = false
@@ -588,6 +612,7 @@ func (p *PPU) Tick(cpuCycles int) {
 
 func (p *PPU) stepDot() {
 	p.dot++
+	p.dots++
 	// Odd-frame dot-skip: on NTSC, with rendering enabled, the
 	// pre-render scanline (261) is one dot shorter on odd frames —
 	// the PPU jumps from dot 339 straight to (0,0) of the next
@@ -692,6 +717,9 @@ func (p *PPU) stepDot() {
 		p.PresentFrame()
 		p.scrollEvents = p.scrollEvents[:0]
 		p.status |= 0x80
+		// Record the dot of the set so a $2002 read landing on it loses
+		// the race (#342).
+		p.vblSetAtDots = p.dots
 		if p.ctrl&0x80 != 0 && p.nmi != nil {
 			p.nmi.TriggerNMI()
 		}
@@ -701,6 +729,9 @@ func (p *PPU) stepDot() {
 		// they're always clear, but the mask covers their bits for
 		// when they land.
 		p.status &^= 0xE0
+		// Record the auto-clear dot so a $2002 read landing on it wins
+		// the race and still reads the flag set (#342).
+		p.vblClearAtDots = p.dots
 	}
 }
 
