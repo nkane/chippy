@@ -221,6 +221,31 @@ Rebuild from ca65 source (requires `brew install cc65` / `apt-get install cc65`)
 make -C roms/demos all
 ```
 
+#### Headless recording
+
+`cmd/nessy-record` captures a ROM run as a GIF or MP4 (video + audio +
+scripted input) with no window, no OpenGL, no screen grab — it
+synthesizes the recording straight from the emulator, so it's
+deterministic and CI-friendly.
+
+```sh
+go build -o nessy-record ./cmd/nessy-record
+
+# GIF (stdlib only, video):
+./nessy-record -rom roms/demos/vblank-bounce/vblank-bounce.nes -frames 120 -o out.gif
+
+# MP4 with audio (needs ffmpeg):
+./nessy-record -rom roms/demos/all-channels/all-channels.nes -frames 120 -o out.mp4
+
+# Scripted joypad input (JSON keyframe timeline):
+echo '{"20":["Up"],"40":["Up","A"],"60":[]}' > in.json
+./nessy-record -rom game.nes -script in.json -frames 90 -o out.gif
+```
+
+The CI smoke job renders demo GIFs + an audio MP4 on every PR and
+embeds them in a sticky comment. `make -C test/smoke nessy-record`
+reproduces those locally.
+
 ---
 
 ## Quick start

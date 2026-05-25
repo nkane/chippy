@@ -268,12 +268,20 @@ jobs:
       - name: Render smoke tapes
         run: make -C test/smoke chippy
 
-      - name: Upload rendered GIFs (workflow artifact)
+      - name: Render nessy headless captures (GIF + MP4)
+        # Synthesized straight from the emulator — no Ebiten window,
+        # no GL, no screen grab. Deterministic so the artifacts are
+        # stable. ffmpeg (installed above) muxes the audio MP4.
+        run: make -C test/smoke nessy-record
+
+      - name: Upload rendered GIFs + MP4s (workflow artifact)
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: chippy-smoke-gifs
-          path: test/smoke/out/*.gif
+          path: |
+            test/smoke/out/*.gif
+            test/smoke/out/*.mp4
           if-no-files-found: error
 
       # ---- PR-only: publish GIFs + post sticky comment ----
@@ -313,6 +321,22 @@ jobs:
 
             ### chippy-console (#232)
             ![chippy-console](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/chippy-console.gif)
+
+            ## nessy headless captures
+
+            Synthesized straight from the emulator (no window / GL / screen grab) — deterministic across runs.
+
+            ### nessy-vblank-bounce (PPU NMI + sprite move)
+            ![nessy-vblank-bounce](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/nessy-vblank-bounce.gif)
+
+            ### nessy-oam-grid (64-sprite OAMDMA, #326)
+            ![nessy-oam-grid](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/nessy-oam-grid.gif)
+
+            ### nessy-input-echo (scripted joypad input, #328-style)
+            ![nessy-input-echo](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/nessy-input-echo.gif)
+
+            ### nessy-all-channels (video + audio)
+            🔊 [nessy-all-channels.mp4](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/nessy-all-channels.mp4) — H.264 + AAC, plays the APU mixer output.
 
   cmos-e2e:
     name: cmos e2e demo

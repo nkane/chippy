@@ -1,6 +1,7 @@
 # Build artifacts (binary at repo root only, not the cmd/chippy package)
 /chippy
 /nessy
+/nessy-record
 *.bin
 *.o
 *.dbg
