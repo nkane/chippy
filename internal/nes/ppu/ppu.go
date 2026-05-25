@@ -129,6 +129,12 @@ type PPU struct {
 	vblSetAtDots   uint64
 	vblClearAtDots uint64
 
+	// oddSkipArmed latches renderingEnabled() at dot 339 of the
+	// pre-render scanline; the next dot's boundary check uses it to
+	// decide the odd-frame dot-skip, matching the hardware sample point
+	// relative to a $2001 BG-enable write (#342, Blargg 10-even_odd).
+	oddSkipArmed bool
+
 	// timing holds the region-specific frame geometry (NTSC / PAL /
 	// Dendy). Defaults to NTSC in New so existing callers + the
 	// SHA-pinned demos render byte-identically; buildNES calls
@@ -636,8 +642,13 @@ func (p *PPU) stepDot() {
 	// frame, skipping dot 340. Games like SMB1 are timing-sensitive
 	// to this: the missing dot keeps the 240-line visible scroll in
 	// phase with the audio frame rate over the long horizon.
+	//
+	// The skip is decided by whether rendering is enabled as of dot 339
+	// (latched in oddSkipArmed below), not dot 340 — Blargg
+	// 10-even_odd_timing pins this to the exact dot relative to the
+	// $2001 write that enables BG (#342).
 	boundary := p.timing.DotsPerScanline
-	if p.timing.OddFrameSkip && p.scanline == p.timing.PreRenderScanline && p.renderingEnabled() && p.frameCount&1 == 1 {
+	if p.timing.OddFrameSkip && p.scanline == p.timing.PreRenderScanline && p.oddSkipArmed && p.frameCount&1 == 1 {
 		boundary = p.timing.DotsPerScanline - 1
 	}
 	if p.dot >= boundary {
@@ -657,6 +668,11 @@ func (p *PPU) stepDot() {
 				baseNametable: p.ctrl & 0x03,
 			}
 		}
+	}
+	// Latch the odd-frame-skip decision at dot 339 of the pre-render
+	// scanline for the next dot's boundary check (#342).
+	if p.scanline == p.timing.PreRenderScanline && p.dot == 339 {
+		p.oddSkipArmed = p.renderingEnabled()
 	}
 	// Per-scanline sprite-0 hit detector (issue #268). At each
 	// visible scanline we live-check whether sprite 0's row at y

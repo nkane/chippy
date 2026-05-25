@@ -1,4 +1,11 @@
-# Per-cycle CPU↔PPU interleave (#342, tests 6-10)
+# Per-cycle CPU↔PPU interleave (#342, tests 6-10) — ✅ COMPLETE (10/10)
+
+**Outcome:** Blargg `ppu_vbl_nmi` passes **10/10**, now a hard accuracy
+gate (no `knownFail`). Landed across PRs: P0 #365 (safety net), P1 #366
+(per-cycle interleave + /NMI level model → 9/10), P3 (dot-339 odd-frame
+latch → 10/10). nestest byte-identical, NMOS/CMOS untouched, demo SHAs
+unchanged, perfgate holds.
+
 
 Goal: pass Blargg `ppu_vbl_nmi` tests 6-10 (`suppression`, `nmi_disable`,
 `nmi_timing` edge cases, `even_odd_*`). These need a `$2002` read to race
