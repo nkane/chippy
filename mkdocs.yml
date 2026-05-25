@@ -64,6 +64,7 @@ nav:
       - Debugging: nessy/debugging.md
   - Internals:
       - Architecture (context dump): context.md
+      - Repo split plan: repo-split.md
   - Mascot:
       - mascot-prompts.md
   - Playground: https://nkane.dev/chippy/playground/
