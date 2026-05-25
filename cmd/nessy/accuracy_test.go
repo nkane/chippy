@@ -67,6 +67,15 @@ var accuracyROMs = []accuracyROM{
 		maxFrames: 2200, // ~37 s emulated; the suite finishes near frame 1550
 		// Full pass (10/10) after the per-cycle CPU↔PPU rewrite (#342).
 	},
+	{
+		// Per-instruction cycle timing (branches, page-cross, RMW, etc.).
+		// Validates the per-cycle CPU model end-to-end (#318, #342).
+		name:      "instr_timing.nes",
+		url:       "https://github.com/christopherpow/nes-test-roms/raw/master/instr_timing/instr_timing.nes",
+		sha:       "3d1bca14266f1e25b75a34ddd29c9df1ce9c6d990c8663a218f72e7861660fb0",
+		pathEnv:   "CHIPPY_ACCURACY_INSTR_TIMING_BIN",
+		maxFrames: 2400,
+	},
 }
 
 func TestAccuracy(t *testing.T) {
