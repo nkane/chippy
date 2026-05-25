@@ -35,6 +35,44 @@ package ppu
 // scanline's sprite count. Designed to fire right after the BG
 // scanline render so the framebuffer is "complete" for that row
 // before Ebiten's Draw can sample it.
+// evaluateSpriteOverflow reproduces the 2C02's buggy sprite-overflow
+// flag (#283). Real silicon evaluates OAM into secondary OAM during
+// each visible scanline; once 8 sprites are found it keeps scanning
+// for a 9th but, on a NOT-in-range result, increments BOTH the sprite
+// index n AND the byte index m (instead of resetting m to 0). The
+// floating m makes it read tile-index / attribute / X bytes as if
+// they were Y coordinates, producing the hardware-specific false
+// positives + false negatives that games like Battletoads lean on.
+//
+// y is the visible scanline; spriteY in the OAM is stored as
+// (drawn_y - 1), so the in-range test compares against oam[base]+1
+// matching the compositor's spriteY convention.
+func (p *PPU) evaluateSpriteOverflow(y, spriteH int) {
+	n := 0 // sprite index 0..63
+	m := 0 // byte index within a sprite; should stay 0, the bug drifts it
+	count := 0
+	for n < 64 {
+		yByte := int(p.oam[(4*n+m)&0xFF])
+		spriteY := yByte + 1
+		inRange := y >= spriteY && y < spriteY+spriteH
+		if count < 8 {
+			if inRange {
+				count++
+			}
+			n++ // normal scan: advance to next sprite, m stays 0
+			continue
+		}
+		// count == 8 — scanning for the 9th sprite.
+		if inRange {
+			p.status |= 0x20 // overflow latched
+			return
+		}
+		// Hardware bug: m drifts alongside n on a miss.
+		m = (m + 1) & 3
+		n++
+	}
+}
+
 func (p *PPU) compositeScanlineSprites(y int) {
 	if p.mask&0x10 == 0 {
 		return
@@ -47,8 +85,9 @@ func (p *PPU) compositeScanlineSprites(y int) {
 	if p.ctrl&0x08 != 0 && p.ctrl&0x20 == 0 {
 		sprPatternBase = 0x1000
 	}
-	// Per-scanline overflow count.
-	inRange := 0
+	// Sprite-overflow flag uses the silicon's buggy evaluator
+	// (#283) — not a simple count. See evaluateSpriteOverflow.
+	p.evaluateSpriteOverflow(y, spriteH)
 	// Track which screen-x columns of this scanline a sprite has
 	// already painted (lower OAM idx wins on overlap).
 	var painted [ScreenWidth]bool
@@ -56,12 +95,6 @@ func (p *PPU) compositeScanlineSprites(y int) {
 		spriteY := int(p.oam[i*4+0]) + 1
 		if y < spriteY || y >= spriteY+spriteH {
 			continue
-		}
-		inRange++
-		// Simple-correct overflow: silicon's buggy version is
-		// #283.
-		if inRange > 8 {
-			p.status |= 0x20
 		}
 		tileIdx := p.oam[i*4+1]
 		attr := p.oam[i*4+2]
@@ -141,30 +174,14 @@ func (p *PPU) renderSprites() {
 		spriteH = 16
 	}
 
-	// First pass: per-scanline sprite count to drive overflow.
-	// Real silicon sets overflow only when secondary OAM fills past
-	// 8 entries on a scanline; we approximate by counting how many
-	// sprites' Y-ranges intersect each visible scanline.
-	overflow := false
+	// First pass: drive the sprite-overflow flag through the silicon's
+	// buggy evaluator (#283), once per visible scanline. The
+	// per-scanline composite path (compositeScanlineSprites) calls
+	// the same evaluator; this legacy per-frame path mirrors it so
+	// direct renderSprites() callers (tests) see identical flag
+	// behaviour.
 	for y := range ScreenHeight {
-		count := 0
-		for i := range 64 {
-			topY := int(p.oam[i*4+0]) + 1
-			if y < topY || y >= topY+spriteH {
-				continue
-			}
-			count++
-			if count > 8 {
-				overflow = true
-				break
-			}
-		}
-		if overflow {
-			break
-		}
-	}
-	if overflow {
-		p.status |= 0x20
+		p.evaluateSpriteOverflow(y, spriteH)
 	}
 
 	// Second pass: composite. Track per-pixel sprite-drawn so lower
