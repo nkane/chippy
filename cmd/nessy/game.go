@@ -95,7 +95,7 @@ func (g *game) Update() error {
 			"nessy: game loop entering autonomous-step mode at PC=$%04X cycles=%d (waitForAttach=%v dapAttached=%d)\n",
 			g.bus.cpu.PC, g.bus.cpu.Cycles, waitForAttach.Load(), dapAttached.Load())
 	}
-	budget := uint64(cpuCyclesPerFrame)
+	budget := uint64(g.bus.timing.CyclesPerFrame)
 	if ebiten.IsKeyPressed(ebiten.KeyTab) {
 		budget *= fastForwardMultiplier
 	}

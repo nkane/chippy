@@ -192,7 +192,9 @@ func main() {
 	defer sink.close()
 	ebiten.SetWindowSize(256*(*scale), 240*(*scale))
 	ebiten.SetWindowTitle(titleBase)
-	ebiten.SetTPS(60)
+	// Display refresh follows the cart's region — 60 Hz NTSC, 50 Hz
+	// PAL / Dendy — so the game runs at the right wall-clock speed.
+	ebiten.SetTPS(bus.timing.FPS)
 	if err := ebiten.RunGame(g); err != nil {
 		fmt.Fprintln(os.Stderr, "nessy:", err)
 		os.Exit(1)

@@ -24,22 +24,24 @@
 // CPU cycle).
 package apu
 
-import "github.com/nkane/chippy/internal/cpu"
+import (
+	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/internal/nes"
+)
 
 // Sample rate the APU's int16 ring buffer emits at. 44.1 kHz is the
 // standard CD-quality target and the most common Ebiten audio
 // context rate.
 const SampleRate = 44100
 
-// cpuClockHz is the NTSC CPU clock — 1.789773 MHz. cycles-per-sample
-// at 44100 Hz comes out to 40.585...; the APU keeps a fractional
-// accumulator so the emitted sample rate stays locked over time.
-const cpuClockHz = 1789773
-
-// quarterFrameCycles is the period of the 240 Hz frame-counter step
-// in CPU cycles — 1789773 / 240 ≈ 7457. The 4-step mode fires four
-// of these per frame counter cycle (q, h, q, h+IRQ).
-const quarterFrameCycles = 7457
+// NTSC reference clock + frame-counter step, used as the defaults +
+// the values the existing APU tests pin against. Runtime reads
+// a.cpuClockHz / a.quarterFrameCycles, which default to these via
+// nes.NTSC and switch under SetRegion for PAL / Dendy carts.
+const (
+	cpuClockHz         = 1789773 // NTSC CPU clock (Hz)
+	quarterFrameCycles = 7457    // NTSC 240 Hz frame-counter step (CPU cycles)
+)
 
 // IRQSink is the CPU's named-source IRQ surface from the APU's
 // point of view (see cpu.AssertIRQSource / cpu.ClearIRQSource). The
@@ -114,6 +116,11 @@ type APU struct {
 	sampleAccum int
 	samples     []int16
 	samplesMax  int
+
+	// Region-specific clock + frame-counter step. Default NTSC;
+	// SetRegion swaps for PAL / Dendy carts.
+	cpuClockHz         int
+	quarterFrameCycles int
 }
 
 // New constructs an APU with the standard NTSC sample rate + a
@@ -125,14 +132,25 @@ func New() *APU {
 		pulse2:    pulse2,
 		noise:     noiseChannel{lfsr: 1},
 		mode4Step: true,
-		// First quarter-frame fires at the 7457-cycle mark, not at
-		// cycle 0. Initialize the timer so stepCPU drains down to
-		// the boundary correctly.
-		frameTimer: quarterFrameCycles,
-		samplesMax: SampleRate / 4, // ~250 ms of buffered audio
+		// First quarter-frame fires at the step mark, not at cycle 0.
+		// Initialize the timer so stepCPU drains down to the boundary
+		// correctly.
+		frameTimer:         quarterFrameCycles,
+		samplesMax:         SampleRate / 4, // ~250 ms of buffered audio
+		cpuClockHz:         cpuClockHz,
+		quarterFrameCycles: quarterFrameCycles,
 	}
 	a.samples = make([]int16, 0, a.samplesMax)
 	return a
+}
+
+// SetRegion swaps the APU's clock + frame-counter step for PAL /
+// Dendy carts. Re-seats the running frame timer onto the new step
+// length. Call before stepping.
+func (a *APU) SetRegion(t nes.Timing) {
+	a.cpuClockHz = t.CPUClockHz
+	a.quarterFrameCycles = t.QuarterFrameCycles
+	a.frameTimer = t.QuarterFrameCycles
 }
 
 // Range claims $4000-$4013 — the channel-register window. $4014 is
@@ -317,7 +335,7 @@ func (a *APU) SetFrameCounter(v byte) {
 	a.mode4Step = v&0x80 == 0
 	a.irqInhibit = v&0x40 != 0
 	a.frameStep = 0
-	a.frameTimer = quarterFrameCycles
+	a.frameTimer = a.quarterFrameCycles
 	if a.irqInhibit {
 		// Inhibit set clears any pending IRQ + drops the line.
 		a.frameIRQFlag = false
@@ -376,7 +394,7 @@ func (a *APU) stepCPU() {
 	// accumulate in units of 1e6 to avoid drift over long horizons.
 	const accumPerCycle = 1_000_000
 	a.sampleAccum += accumPerCycle
-	cyclesPerSample := cpuClockHz * 1_000_000 / SampleRate
+	cyclesPerSample := a.cpuClockHz * 1_000_000 / SampleRate
 	if a.sampleAccum >= cyclesPerSample {
 		a.sampleAccum -= cyclesPerSample
 		a.emitSample()
@@ -387,7 +405,7 @@ func (a *APU) stepCPU() {
 // frame ticks for the current step + mode, then advances to the
 // next step boundary.
 func (a *APU) advanceFrameStep() {
-	a.frameTimer += quarterFrameCycles
+	a.frameTimer += a.quarterFrameCycles
 	if a.mode4Step {
 		// 4-step pattern (q = quarter, h = half + quarter):
 		//   step 0: q

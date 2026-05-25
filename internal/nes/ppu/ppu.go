@@ -31,9 +31,10 @@ const (
 	ScreenWidth  = 256
 	ScreenHeight = 240
 
-	dotsPerScanline   = 341
-	scanlinesPerFrame = 262
-	vblankScanline    = 241
+	// preRenderScanline is the NTSC pre-render line index — kept as a
+	// const because the PPU's odd-frame + register tests pin against
+	// it. Runtime reads p.timing.PreRenderScanline (defaults to this
+	// value via nes.NTSC; PAL/Dendy override).
 	preRenderScanline = 261
 )
 
@@ -113,6 +114,12 @@ type PPU struct {
 	dot        int
 	frameCount uint64
 
+	// timing holds the region-specific frame geometry (NTSC / PAL /
+	// Dendy). Defaults to NTSC in New so existing callers + the
+	// SHA-pinned demos render byte-identically; buildNES calls
+	// SetRegion when a PAL/Dendy cart loads.
+	timing nes.Timing
+
 	// Framebuffer pair. `frame` is the back / work buffer that
 	// per-scanline render writes to. `displayFrame` is the
 	// presentation buffer Ebiten's Draw goroutine reads from via
@@ -161,9 +168,18 @@ type scrollSnapshot struct {
 // access + nametable mirroring) and an NMI sink (the CPU). Both may be
 // nil for register-level tests that don't exercise rendering or NMI.
 func New(cart Cart, nmi NMI) *PPU {
-	p := &PPU{cart: cart, nmi: nmi}
+	p := &PPU{cart: cart, nmi: nmi, timing: nes.NTSC}
 	p.Reset()
 	return p
+}
+
+// SetRegion swaps the PPU's frame geometry (NTSC / PAL / Dendy).
+// Call before stepping; mid-frame swaps aren't meaningful. The
+// pre-render scanline index changes with the region, so re-seat
+// the scanline cursor onto it to stay consistent.
+func (p *PPU) SetRegion(t nes.Timing) {
+	p.timing = t
+	p.scanline, p.dot, p.frameCount = t.PreRenderScanline, 0, 0
 }
 
 // Reset clears the PPU to a deterministic post-power state. Real
@@ -171,10 +187,13 @@ func New(cart Cart, nmi NMI) *PPU {
 // short window, etc.) — chippy follows the convention emulators settle
 // on.
 func (p *PPU) Reset() {
+	if p.timing.ScanlinesPerFrame == 0 {
+		p.timing = nes.NTSC // defensive: zero-value PPU (direct struct literal in a test)
+	}
 	p.ctrl, p.mask, p.status, p.oamAddr = 0, 0, 0, 0
 	p.v, p.t, p.x, p.w, p.readBuf = 0, 0, 0, false, 0
 	p.scrollX, p.scrollY, p.scrollHi = 0, 0, false
-	p.scanline, p.dot, p.frameCount = preRenderScanline, 0, 0
+	p.scanline, p.dot, p.frameCount = p.timing.PreRenderScanline, 0, 0
 	for i := range p.vram {
 		p.vram[i] = 0
 	}
@@ -572,14 +591,14 @@ func (p *PPU) stepDot() {
 	// frame, skipping dot 340. Games like SMB1 are timing-sensitive
 	// to this: the missing dot keeps the 240-line visible scroll in
 	// phase with the audio frame rate over the long horizon.
-	boundary := dotsPerScanline
-	if p.scanline == preRenderScanline && p.renderingEnabled() && p.frameCount&1 == 1 {
-		boundary = dotsPerScanline - 1
+	boundary := p.timing.DotsPerScanline
+	if p.timing.OddFrameSkip && p.scanline == p.timing.PreRenderScanline && p.renderingEnabled() && p.frameCount&1 == 1 {
+		boundary = p.timing.DotsPerScanline - 1
 	}
 	if p.dot >= boundary {
 		p.dot = 0
 		p.scanline++
-		if p.scanline >= scanlinesPerFrame {
+		if p.scanline >= p.timing.ScanlinesPerFrame {
 			p.scanline = 0
 			p.frameCount++
 			// New frame begins. Snapshot the current scroll values so
@@ -622,7 +641,7 @@ func (p *PPU) stepDot() {
 	// scanlines + pre-render scanline run the same fetch state
 	// machine; vblank scanlines do nothing.
 	if p.renderingEnabled() &&
-		(p.scanline < ScreenHeight || p.scanline == preRenderScanline) {
+		(p.scanline < ScreenHeight || p.scanline == p.timing.PreRenderScanline) {
 		switch {
 		case p.dot >= 1 && p.dot <= 256 && p.dot%8 == 0:
 			// Tile fetch boundary — coarse-X bumps every 8 dots
@@ -638,7 +657,7 @@ func (p *PPU) stepDot() {
 			// copy into v so the next scanline's tile fetches start
 			// from the freshly-set scroll-X.
 			p.copyXFromT()
-		case p.scanline == preRenderScanline && p.dot >= 280 && p.dot <= 304:
+		case p.scanline == p.timing.PreRenderScanline && p.dot >= 280 && p.dot <= 304:
 			// Vertical reload: t's fine-Y + coarse-Y + vertical NT
 			// bit copy into v during pre-render. Real silicon
 			// repeats the copy across 25 dots; the result is
@@ -647,7 +666,7 @@ func (p *PPU) stepDot() {
 		}
 	}
 	switch {
-	case p.scanline == vblankScanline && p.dot == 1:
+	case p.scanline == p.timing.VBlankScanline && p.dot == 1:
 		// Per-scanline render already painted every visible scanline
 		// at its dot 256. At vblank entry we publish the back buffer
 		// to the presentation buffer (atomic copy under displayMu)
@@ -659,7 +678,7 @@ func (p *PPU) stepDot() {
 		if p.ctrl&0x80 != 0 && p.nmi != nil {
 			p.nmi.TriggerNMI()
 		}
-	case p.scanline == preRenderScanline && p.dot == 1:
+	case p.scanline == p.timing.PreRenderScanline && p.dot == 1:
 		// End of vblank / start of pre-render: clear vblank, sprite-0
 		// hit, sprite overflow. v0.1 doesn't model the latter two so
 		// they're always clear, but the mask covers their bits for

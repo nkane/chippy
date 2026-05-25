@@ -21,14 +21,15 @@ import (
 // (battery PRG-RAM); ram is the 2 KiB internal RAM mirrored at $0000-
 // $1FFF on the CPU bus.
 type nesBus struct {
-	cpu  *cpu.CPU
-	ppu  *ppu.PPU
-	joy  *joypad.Port
-	dma  *dma.OAMDMA
-	apu  *apu.APU
-	mmio *cpu.MMIO
-	ram  *cpu.RAM
-	cart cart.Cartridge
+	cpu    *cpu.CPU
+	ppu    *ppu.PPU
+	joy    *joypad.Port
+	dma    *dma.OAMDMA
+	apu    *apu.APU
+	mmio   *cpu.MMIO
+	ram    *cpu.RAM
+	cart   cart.Cartridge
+	timing nes.Timing // region clock + frame geometry (NTSC default)
 }
 
 // buildNES wires the CPU, PPU, joypad port, and cart into a runnable
@@ -133,6 +134,13 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 		return nil, err
 	}
 
+	// Region timing (NTSC / PAL / Dendy) from the cart's TV-system
+	// hint. NTSC carts (the overwhelming majority + every demo) keep
+	// the default, so their render + audio stay byte-identical.
+	timing := nes.TimingFor(rom.TVSystem)
+	pp.SetRegion(timing)
+	ap.SetRegion(timing)
+
 	// Re-run reset now that the PPU is registered. Some ROMs touch PPU
 	// registers in their very first instructions, so we want those to
 	// hit the PPU rather than fall through to RAM during the moments
@@ -140,14 +148,15 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 	processor.Reset()
 
 	return &nesBus{
-		cpu:  processor,
-		ppu:  pp,
-		joy:  jp,
-		dma:  oam,
-		apu:  ap,
-		mmio: mmio,
-		ram:  ram,
-		cart: c,
+		cpu:    processor,
+		ppu:    pp,
+		joy:    jp,
+		dma:    oam,
+		apu:    ap,
+		mmio:   mmio,
+		ram:    ram,
+		cart:   c,
+		timing: timing,
 	}, nil
 }
 
