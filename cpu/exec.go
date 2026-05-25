@@ -78,24 +78,38 @@ func (c *CPU) Step() int {
 	in := c.opcodes[op]
 	addr, pageCrossed := c.resolve(in.Mode)
 	c.extraCycles = 0
+	// Per-cycle PPU sync for the NES variant (#342). The 2C02 needs a
+	// $2002 read to sample the PPU at the instruction's data-access
+	// cycle — the operand read/write lands on the final cycle for the
+	// load/store + RMW modes that reach PPU registers. So advance the
+	// bus ticker by the base instruction length BEFORE running the
+	// opcode body; the branch + page-cross extras (which never touch
+	// $2000/$2002) tick afterward. Other CPU variants keep the simpler
+	// post-instruction batch tick — the chippy debugger doesn't drive
+	// a dot-accurate PPU, so its byte-for-byte behavior is unchanged.
+	//
+	// This makes Blargg ppu_vbl_nmi tests 2 (vbl_set_time) + 3
+	// (vbl_clear_time) pass alongside the PPU's vbl-flag set/clear race
+	// (see ppu.go). The remaining sub-tests (4+: nmi_control, nmi_timing,
+	// suppression) need cycle-accurate NMI *edge polling* — the line is
+	// sampled before an instruction's final cycle, so an NMI asserted on
+	// that cycle is recognised one instruction later. That's a deeper
+	// CPU-core change still scoped to #342.
+	nesSync := c.Variant == VariantNES && c.busTicker != nil
+	if nesSync {
+		c.busTicker.Tick(in.Cycles)
+	}
 	in.Exec(c, addr, in.Mode)
 	cycles := in.Cycles + c.extraCycles
 	if in.PageAdd && pageCrossed {
 		cycles++
 	}
 	c.Cycles += uint64(cycles)
-	// Per-instruction bus tick. Peripherals that need time-based state
-	// (PPU, APU, future VIA timers) implement Ticker and receive the
-	// cycle delta after each instruction. The Ticker assertion is
-	// cached on c.busTicker at SetBus time so the no-ticker fast path
-	// is one nil-check; perfgate ceiling holds.
-	//
-	// NOTE (#342): this batches the PPU tick at instruction granularity,
-	// so a $2002 read sees the PPU lagging up to one instruction. Single-
-	// dot-accurate vblank timing (Blargg ppu_vbl_nmi test 2) needs per-
-	// CPU-cycle PPU stepping with register reads resolving at their exact
-	// cycle — a larger architecture change scoped separately.
-	if c.busTicker != nil {
+	if nesSync {
+		if rem := cycles - in.Cycles; rem > 0 {
+			c.busTicker.Tick(rem)
+		}
+	} else if c.busTicker != nil {
 		c.busTicker.Tick(cycles)
 	}
 	// Self-jump detection: a `JMP self` (or any instruction that leaves PC
