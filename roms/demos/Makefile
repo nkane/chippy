@@ -16,7 +16,7 @@
 
 DEMOS := hello-bg input-echo vblank-bounce audio-test \
          triangle-arpeggio noise-drum all-channels dmc-sample \
-         mmc1-banks oam-grid
+         mmc1-banks oam-grid state-counter
 
 CA65      := ca65
 LD65      := ld65

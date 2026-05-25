@@ -203,6 +203,7 @@ or audio-presence regression test under `cmd/nessy/demo_*_test.go`:
 | [`dmc-sample`](roms/demos/dmc-sample/) | DMC channel DMA fetch + delta-PCM + loop bit | 65-byte alternating-bit sample looped (audio only) |
 | [`mmc1-banks`](roms/demos/mmc1-banks/) | MMC1 serial-shift PRG bank switching (prgMode 3) | Background flashes between two colours twice per second |
 | [`oam-grid`](roms/demos/oam-grid/) | $4014 OAMDMA + 64-sprite OAM walk + sprite priority | 8×8 grid of solid squares centred on the playfield |
+| [`state-counter`](roms/demos/state-counter/) | Save-state round-trip probe (frame_cnt → $3F00) | BG colour cycles through the palette as frame_cnt advances |
 
 Run any of them:
 
