@@ -29,6 +29,7 @@ type FullState struct {
 	ExtraCycles    int
 	IRQLine        bool
 	NMIPending     bool
+	NMIDue         bool // NES interrupt-poll latch (#342)
 	PendingStall   int
 	IRQSources     []string // sorted for deterministic round-trip
 }
@@ -51,6 +52,7 @@ func (c *CPU) SaveFullState() FullState {
 		ExtraCycles:  c.extraCycles,
 		IRQLine:      c.irqLine,
 		NMIPending:   c.nmiPending,
+		NMIDue:       c.nmiDue,
 		PendingStall: c.pendingStall,
 	}
 	if len(c.irqSources) > 0 {
@@ -80,6 +82,7 @@ func (c *CPU) LoadFullState(s FullState) {
 	c.extraCycles = s.ExtraCycles
 	c.irqLine = s.IRQLine
 	c.nmiPending = s.NMIPending
+	c.nmiDue = s.NMIDue
 	c.pendingStall = s.PendingStall
 	c.irqSources = nil
 	if len(s.IRQSources) > 0 {

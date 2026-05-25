@@ -30,12 +30,24 @@ func (c *CPU) Step() int {
 	// itself a 7-cycle operation; we do NOT also execute an instruction in
 	// the same Step. The next call to Step will fetch the first opcode of
 	// the handler.
-	if c.nmiPending {
+	//
+	// NMI recognition differs by variant. NES (#342) uses nmiDue, the
+	// poll latch set before the previous instruction's final cycle, so an
+	// NMI asserted on that last cycle (e.g. a $2000 write that enables NMI
+	// while the vblank flag is already set) is delayed one instruction —
+	// matching the 6502's interrupt-poll timing. NMOS/CMOS keep the
+	// immediate edge-service path.
+	nmiTake := c.nmiPending
+	if c.Variant == VariantNES {
+		nmiTake = c.nmiDue
+	}
+	if nmiTake {
 		c.Halted = false
 		if c.Tracer != nil {
 			c.Tracer.LogInterrupt(c, "NMI", VecNMI)
 		}
 		before := c.Cycles
+		c.nmiDue = false
 		c.serviceNMI()
 		return int(c.Cycles - before)
 	}
@@ -88,16 +100,33 @@ func (c *CPU) Step() int {
 	// post-instruction batch tick — the chippy debugger doesn't drive
 	// a dot-accurate PPU, so its byte-for-byte behavior is unchanged.
 	//
-	// This makes Blargg ppu_vbl_nmi tests 2 (vbl_set_time) + 3
-	// (vbl_clear_time) pass alongside the PPU's vbl-flag set/clear race
-	// (see ppu.go). The remaining sub-tests (4+: nmi_control, nmi_timing,
-	// suppression) need cycle-accurate NMI *edge polling* — the line is
-	// sampled before an instruction's final cycle, so an NMI asserted on
-	// that cycle is recognised one instruction later. That's a deeper
-	// CPU-core change still scoped to #342.
+	// Together with the NMI interrupt-poll latch (nmiDue, sampled at the
+	// penultimate cycle just below) this passes Blargg ppu_vbl_nmi tests
+	// 2-5 (vbl_set_time, vbl_clear_time, nmi_control, nmi_timing). The
+	// remaining sub-tests (6+: suppression) need a $2002 read to race the
+	// /NMI edge at sub-cycle resolution — the read must land *between* the
+	// PPU's flag-set and the CPU's edge-sample — which this instruction-
+	// stepped, pre-tick model can't represent. That needs true per-cycle
+	// CPU↔PPU interleave; still scoped to #342.
 	nesSync := c.Variant == VariantNES && c.busTicker != nil
-	if nesSync {
-		c.busTicker.Tick(in.Cycles)
+	switch {
+	case nesSync:
+		// Advance the PPU to the penultimate cycle, poll the NMI line,
+		// then tick the final cycle. The 6502 samples interrupts before
+		// the last cycle, so an NMI raised on that cycle (or by the
+		// opcode body, the final-cycle bus operation) is serviced one
+		// instruction later — Blargg 05-nmi_timing pins this. The full
+		// base length still ticks before the body, so a $2002 read in the
+		// body samples the PPU at its true data-access dot (#342).
+		if in.Cycles > 1 {
+			c.busTicker.Tick(in.Cycles - 1)
+		}
+		c.nmiDue = c.nmiPending
+		c.busTicker.Tick(1)
+	case c.Variant == VariantNES:
+		// NES without a bus ticker still polls so the nmiDue latch
+		// advances and NMIs get serviced.
+		c.nmiDue = c.nmiPending
 	}
 	in.Exec(c, addr, in.Mode)
 	cycles := in.Cycles + c.extraCycles
