@@ -13,10 +13,11 @@ func TestOddFrame_DotSkipWhenRenderingEnabled(t *testing.T) {
 	// 3 + 4; either being set counts.
 	p.mask = 0x08
 	p.scanline = preRenderScanline
-	p.dot = 339
+	p.dot = 338
 	p.frameCount = 1 // odd
 
-	p.stepDot()
+	p.stepDot() // 338 -> 339: arms the skip latch from rendering state
+	p.stepDot() // 339 -> skip to (0,0)
 
 	if p.scanline != 0 || p.dot != 0 {
 		t.Fatalf("odd-frame skip didn't fire: (s,d)=(%d,%d); want (0,0)", p.scanline, p.dot)
@@ -32,10 +33,11 @@ func TestOddFrame_NoSkipOnEvenFrame(t *testing.T) {
 
 	p.mask = 0x08 // BG show
 	p.scanline = preRenderScanline
-	p.dot = 339
+	p.dot = 338
 	p.frameCount = 0 // even
 
-	p.stepDot()
+	p.stepDot() // 338 -> 339
+	p.stepDot() // 339 -> 340 (no skip on even frame)
 
 	if p.scanline != preRenderScanline || p.dot != 340 {
 		t.Fatalf("even frame: (s,d)=(%d,%d); want (%d,340)", p.scanline, p.dot, preRenderScanline)
@@ -51,10 +53,11 @@ func TestOddFrame_NoSkipWhenRenderingDisabled(t *testing.T) {
 
 	p.mask = 0 // rendering off
 	p.scanline = preRenderScanline
-	p.dot = 339
+	p.dot = 338
 	p.frameCount = 1 // odd
 
-	p.stepDot()
+	p.stepDot() // 338 -> 339: latch sees rendering off
+	p.stepDot() // 339 -> 340 (no skip)
 
 	if p.scanline != preRenderScanline || p.dot != 340 {
 		t.Fatalf("rendering off: (s,d)=(%d,%d); want (%d,340)", p.scanline, p.dot, preRenderScanline)
