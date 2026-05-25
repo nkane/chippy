@@ -68,10 +68,10 @@ type bus struct {
 // share types directly without a refactor.
 type cartPeripheral struct{ cart cart.Cartridge }
 
-func (w *cartPeripheral) Range() (uint16, uint16)    { return 0x4020, 0xFFFF }
-func (w *cartPeripheral) Read(addr uint16) byte      { return w.cart.CPURead(addr) }
-func (w *cartPeripheral) Write(addr uint16, v byte)  { w.cart.CPUWrite(addr, v) }
-func (w *cartPeripheral) Peek(addr uint16) byte      { return w.cart.CPURead(addr) }
+func (w *cartPeripheral) Range() (uint16, uint16)   { return 0x4020, 0xFFFF }
+func (w *cartPeripheral) Read(addr uint16) byte     { return w.cart.CPURead(addr) }
+func (w *cartPeripheral) Write(addr uint16, v byte) { w.cart.CPUWrite(addr, v) }
+func (w *cartPeripheral) Peek(addr uint16) byte     { return w.cart.CPURead(addr) }
 func (w *cartPeripheral) Tick(cycles int) {
 	if t, ok := w.cart.(cpu.Ticker); ok {
 		t.Tick(cycles)
