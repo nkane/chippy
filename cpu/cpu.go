@@ -87,6 +87,15 @@ type CPU struct {
 	irqLine    bool
 	nmiPending bool
 
+	// nmiDue is the NES-variant interrupt-poll latch (#342). The 6502
+	// samples the NMI line before an instruction's final cycle, so an
+	// edge asserted on that last cycle is recognised one instruction
+	// later. Step polls nmiPending after the per-cycle PPU sync but
+	// before the opcode body and stores the result here; the *next*
+	// Step services it. NMOS/CMOS keep the simpler immediate-service
+	// path. Blargg ppu_vbl_nmi 04-nmi_control #11 pins this delay.
+	nmiDue bool
+
 	// irqSources holds the set of named IRQ sources currently asserting
 	// the line. The CPU sees a wired-OR — irqLine is true iff the set
 	// is non-empty. Populated lazily by AssertIRQSource so a CPU that
