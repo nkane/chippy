@@ -10,10 +10,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/loader"
-	"github.com/nkane/chippy/internal/peripheral"
-	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/loader"
+	"github.com/nkane/chippy/peripheral"
+	"github.com/nkane/chippy/symbols"
 )
 
 // Server is a single DAP session. It owns the transport, the message-frame

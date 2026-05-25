@@ -5,7 +5,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/nkane/chippy/internal/dap"
+	"github.com/nkane/chippy/dap"
 )
 
 // cmdDAP implements `:dap PORT` — spawn a DAP server in attach mode

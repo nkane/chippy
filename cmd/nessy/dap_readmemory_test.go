@@ -10,7 +10,7 @@ import (
 
 	"os"
 
-	"github.com/nkane/chippy/internal/dap"
+	"github.com/nkane/chippy/dap"
 	"github.com/nkane/chippy/internal/nes"
 )
 

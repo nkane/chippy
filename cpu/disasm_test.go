@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 )
 
 // TestDisasm_NMOSDefault confirms the legacy Disasm function still routes

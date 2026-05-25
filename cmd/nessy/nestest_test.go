@@ -38,7 +38,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 	"github.com/nkane/chippy/internal/nes"
 )
 

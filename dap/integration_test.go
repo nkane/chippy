@@ -28,9 +28,9 @@ import (
 // dapClient is a minimal in-test DAP wire driver. Frames JSON in/out via
 // Content-Length headers and exposes a request/response/event API.
 type dapClient struct {
-	cmd   *exec.Cmd
-	stdin io.WriteCloser
-	r     *bufio.Reader
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	r      *bufio.Reader
 	stderr *strings.Builder
 
 	mu      sync.Mutex
@@ -187,6 +187,7 @@ func buildChippy(t *testing.T) string {
 //	$8002 A9 77    LDA #$77    <- bp target
 //	$8004 A9 00    LDA #$00
 //	$8006 4C 00 80 JMP $8000
+//
 // writeFixtureROM emits a bare-bones .bin containing just the program
 // bytes. The loader places them at args.LoadAddr; the reset vector
 // resolution falls back to the load address since the .bin doesn't

@@ -18,8 +18,8 @@ import (
 	"strings"
 	"syscall/js"
 
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/peripheral"
+	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/peripheral"
 )
 
 var (

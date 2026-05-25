@@ -3,7 +3,7 @@ package dap
 import (
 	"fmt"
 
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 )
 
 // Step controls — continue / next / stepIn / stepOut / pause — plus the

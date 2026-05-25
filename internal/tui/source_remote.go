@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/dap"
+	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/dap"
 )
 
 // remoteThreadID is the conventional DAP thread ID chippy's server

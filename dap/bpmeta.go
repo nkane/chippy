@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/nkane/chippy/internal/expr"
+	"github.com/nkane/chippy/expr"
 )
 
 // bpMeta carries the condition / hit / log modifiers attached to a single

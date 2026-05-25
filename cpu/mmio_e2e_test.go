@@ -5,9 +5,9 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/loader"
-	"github.com/nkane/chippy/internal/peripheral"
+	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/loader"
+	"github.com/nkane/chippy/peripheral"
 )
 
 // TestMMIOHelloDemo_E2E loads example/hello.bin under a MMIO bus that

@@ -8,12 +8,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/loader"
-	"github.com/nkane/chippy/internal/peripheral"
-	"github.com/nkane/chippy/internal/symbols"
-	"github.com/nkane/chippy/internal/trace"
+	"github.com/nkane/chippy/cpu"
 	"github.com/nkane/chippy/internal/tui"
+	"github.com/nkane/chippy/loader"
+	"github.com/nkane/chippy/peripheral"
+	"github.com/nkane/chippy/symbols"
+	"github.com/nkane/chippy/trace"
 )
 
 func main() {

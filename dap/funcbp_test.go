@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/symbols"
 )
 
 // buildSyms writes a minimal cc65-style .dbg file and loads it. Same

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 )
 
 func newTracedCPUForIRQ(t *testing.T) (*cpu.CPU, *cpu.FileTracer, string) {

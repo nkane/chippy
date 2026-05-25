@@ -24,14 +24,25 @@ A debugger-first emulator. Run a binary from ca65, see source lines beside disas
 ## 2. Architecture
 
 ### Package layout
+Public packages (importable by external modules incl. the future
+nessy repo — promoted out of internal/ in #349):
 ```
-cmd/chippy/             # main binary entry point
-internal/cpu/           # 6502 / 65C02 core, opcode tables, addressing, interrupts
-internal/loader/        # .bin/.prg/.hex/.o loaders; invokes ld65 when needed
-internal/symbols/       # cc65 .dbg parser (symbol table + source map)
-internal/tui/           # Bubble Tea model, panels, breakpoints, watchpoints
-internal/peripheral/    # MMIO peripherals (TextOutput @ $F001, KeyboardInput @ $F004/$F005)
+cpu/                    # 6502 / 65C02 / 2A03 core, opcode tables, addressing, interrupts
+loader/                 # .bin/.prg/.hex/.o loaders; invokes ld65 when needed
+symbols/                # cc65 .dbg parser (symbol table + source map)
+peripheral/             # MMIO peripherals (TextOutput @ $F001, KeyboardInput @ $F004/$F005)
+expr/                   # watch / condition expression compiler (shared by TUI + DAP)
+trace/                  # -trace output parser for replay mode
+dap/                    # Debug Adapter Protocol server
+```
+Private (module-internal):
+```
+cmd/chippy/             # chippy binary entry point
+cmd/nessy{,-wasm,-record}/ # nessy binaries (move to the nessy repo at #351)
+internal/tui/           # Bubble Tea model, panels, breakpoints, watchpoints (chippy-only)
+internal/nes/           # NES PPU / APU / cart / dma / joypad (nessy-only; moves at #351)
 example/                # ca65 sample programs + Makefile
+roms/demos/             # nessy homebrew demo ROMs
 docs/                   # mascot prompts, this file
 .github/workflows/      # CI + release
 ```
@@ -48,8 +59,8 @@ docs/                   # mascot prompts, this file
 - `symbols.Table` / `symbols.SourceMap` — parsed cc65 `.dbg` data
 
 ### Opcode tables
-- `Opcodes [256]Instr` — NMOS, authoritative (`internal/cpu/opcodes.go`)
-- `OpcodesCMOS [256]Instr` — initialised from `Opcodes` then overridden (`internal/cpu/opcodes_cmos.go`)
+- `Opcodes [256]Instr` — NMOS, authoritative (`cpu/opcodes.go`)
+- `OpcodesCMOS [256]Instr` — initialised from `Opcodes` then overridden (`cpu/opcodes_cmos.go`)
 - Illegals patched into NMOS table by `opcodes_illegal.go` (runs after CMOS init due to lex file order)
 - CPU dispatch goes through `c.opcodes[op]` so variant switching is free
 
@@ -132,6 +143,7 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - #1, #2, #3, #7, #8 (cycle audit), #9 (65C02), #10 (IRQ/NMI), #11–#15
 
 ### Merged PRs of note
+- Publicize shared core (issue #349, nessy v0.9): moved the 6502 core packages out of `internal/` to public top-level paths so the future standalone nessy repo (#351) can import them — Go's `internal/` blocks external modules. `internal/{cpu,dap,symbols,peripheral,expr,loader,trace}` → `github.com/nkane/chippy/{cpu,dap,...}`. `internal/tui` (chippy-only) + `internal/nes/*` (nessy-only, moves at #351) stay private. Pure `git mv` + import-path rewrite across every package + the build-tagged nessy / wasm / record / accuracy / nestest sources; no behaviour change. The opcode-init lex-order invariant (`opcodes.go` < `opcodes_cmos.go` < `opcodes_illegal.go`) is preserved — the files moved as a unit inside `cpu/`. First v0.9 item; unblocks the repo split (#351) + the public-API doc (#350).
 - #23, #24, #26, #27, #28, #29 — earlier infra / features
 - #30 — Klaus functional test harness (GPL ROM, downloaded on demand, sha256 verified)
 - #31 — Cycle audit; introduced `extraCycles` side channel; fixes taken-branch undercount in `Step()` return

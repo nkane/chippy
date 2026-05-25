@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/nkane/chippy/internal/expr"
+	"github.com/nkane/chippy/expr"
 )
 
 // handleEvaluate compiles + evaluates a single expression against current

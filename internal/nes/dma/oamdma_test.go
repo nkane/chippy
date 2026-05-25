@@ -3,7 +3,7 @@ package dma
 import (
 	"testing"
 
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 )
 
 // fakePPU records every OAM write in order. Mirrors the surface

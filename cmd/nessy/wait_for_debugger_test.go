@@ -33,7 +33,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nkane/chippy/internal/dap"
+	"github.com/nkane/chippy/dap"
 )
 
 func nessyBinaryPath(t *testing.T) string {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 )
 
 // spinUpServer wires a Server against an in-process net.Pipe and returns

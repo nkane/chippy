@@ -16,7 +16,7 @@
 //   - Hot-path branch: if the map is empty we skip the lookup entirely.
 package tui
 
-import "github.com/nkane/chippy/internal/cpu"
+import "github.com/nkane/chippy/cpu"
 
 // MemHit is one recorded access to a watched address.
 type MemHit struct {

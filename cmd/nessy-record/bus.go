@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 	"github.com/nkane/chippy/internal/nes"
 	"github.com/nkane/chippy/internal/nes/apu"
 	"github.com/nkane/chippy/internal/nes/cart"

@@ -3,7 +3,7 @@
 // (audio side, $4011 / $4015) lands with the APU in v0.3.
 package dma
 
-import "github.com/nkane/chippy/internal/cpu"
+import "github.com/nkane/chippy/cpu"
 
 // PPU is the subset of the NES PPU's surface that OAMDMA needs. We
 // avoid importing internal/nes/ppu directly so the dma package stays

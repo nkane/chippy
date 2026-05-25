@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/symbols"
 )
 
 func TestBP_SetInstructionBreakpoints(t *testing.T) {
