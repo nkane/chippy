@@ -77,17 +77,17 @@ func init() {
 	for bit := 0; bit < 8; bit++ {
 		b := bit
 		set(byte(0x07+bit*0x10), "RMB", ZP, 2, 5, false, func(c *CPU, addr uint16, _ AddrMode) {
-			c.Bus.Write(addr, c.Bus.Read(addr)&^(1<<b))
+			c.write(addr, c.read(addr)&^(1<<b))
 		})
 		set(byte(0x87+bit*0x10), "SMB", ZP, 2, 5, false, func(c *CPU, addr uint16, _ AddrMode) {
-			c.Bus.Write(addr, c.Bus.Read(addr)|(1<<b))
+			c.write(addr, c.read(addr)|(1<<b))
 		})
 		set(byte(0x0F+bit*0x10), "BBR", ZPR, 3, 5, false, func(c *CPU, _ uint16, _ AddrMode) {
-			zp := c.Bus.Read(c.PC)
-			off := int8(c.Bus.Read(c.PC + 1))
+			zp := c.read(c.PC)
+			off := int8(c.read(c.PC + 1))
 			c.PC += 2
 			target := uint16(int32(c.PC) + int32(off))
-			if c.Bus.Read(uint16(zp))&(1<<b) == 0 {
+			if c.read(uint16(zp))&(1<<b) == 0 {
 				c.extraCycles++
 				if (c.PC & 0xFF00) != (target & 0xFF00) {
 					c.extraCycles++
@@ -96,11 +96,11 @@ func init() {
 			}
 		})
 		set(byte(0x8F+bit*0x10), "BBS", ZPR, 3, 5, false, func(c *CPU, _ uint16, _ AddrMode) {
-			zp := c.Bus.Read(c.PC)
-			off := int8(c.Bus.Read(c.PC + 1))
+			zp := c.read(c.PC)
+			off := int8(c.read(c.PC + 1))
 			c.PC += 2
 			target := uint16(int32(c.PC) + int32(off))
-			if c.Bus.Read(uint16(zp))&(1<<b) != 0 {
+			if c.read(uint16(zp))&(1<<b) != 0 {
 				c.extraCycles++
 				if (c.PC & 0xFF00) != (target & 0xFF00) {
 					c.extraCycles++
@@ -190,17 +190,17 @@ func opPHY(c *CPU, _ uint16, _ AddrMode) { c.push(c.Y) }
 func opPLX(c *CPU, _ uint16, _ AddrMode) { c.X = c.pop(); c.setZN(c.X) }
 func opPLY(c *CPU, _ uint16, _ AddrMode) { c.Y = c.pop(); c.setZN(c.Y) }
 
-func opSTZ(c *CPU, addr uint16, _ AddrMode) { c.Bus.Write(addr, 0) }
+func opSTZ(c *CPU, addr uint16, _ AddrMode) { c.write(addr, 0) }
 
 func opTRB(c *CPU, addr uint16, _ AddrMode) {
-	v := c.Bus.Read(addr)
+	v := c.read(addr)
 	c.setFlag(FlagZ, v&c.A == 0)
-	c.Bus.Write(addr, v&^c.A)
+	c.write(addr, v&^c.A)
 }
 func opTSB(c *CPU, addr uint16, _ AddrMode) {
-	v := c.Bus.Read(addr)
+	v := c.read(addr)
 	c.setFlag(FlagZ, v&c.A == 0)
-	c.Bus.Write(addr, v|c.A)
+	c.write(addr, v|c.A)
 }
 
 func opINA(c *CPU, _ uint16, _ AddrMode) { c.A++; c.setZN(c.A) }
@@ -208,7 +208,7 @@ func opDEA(c *CPU, _ uint16, _ AddrMode) { c.A--; c.setZN(c.A) }
 
 // BIT immediate on 65C02 only updates Z (does NOT touch N or V).
 func opBITimm(c *CPU, addr uint16, _ AddrMode) {
-	v := c.Bus.Read(addr)
+	v := c.read(addr)
 	c.setFlag(FlagZ, c.A&v == 0)
 }
 

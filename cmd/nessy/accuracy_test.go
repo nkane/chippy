@@ -64,8 +64,8 @@ var accuracyROMs = []accuracyROM{
 		url:       "https://github.com/christopherpow/nes-test-roms/raw/master/ppu_vbl_nmi/ppu_vbl_nmi.nes",
 		sha:       "8dbab1be785585c399cf055ef02147b788ab75fd80e81cf9568a2feafc03fb7d",
 		pathEnv:   "CHIPPY_ACCURACY_VBL_NMI_BIN",
-		maxFrames: 1200, // ~20 s emulated; the suite finishes well under
-		knownFail: "NMI/vbl suppression race (test 6/10) — vbl set+clear + nmi_control + nmi_timing (2-5) pass; suppression needs sub-cycle CPU↔PPU interleave; tracked in #342",
+		maxFrames: 2200, // ~37 s emulated; suite reports test 10 near frame 1550
+		knownFail: "even/odd-frame dot-skip timing vs BG-enable (test 10/10) — tests 2-9 pass after the per-cycle CPU↔PPU rewrite; tracked in #342",
 	},
 }
 

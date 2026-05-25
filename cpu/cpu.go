@@ -90,11 +90,29 @@ type CPU struct {
 	// nmiDue is the NES-variant interrupt-poll latch (#342). The 6502
 	// samples the NMI line before an instruction's final cycle, so an
 	// edge asserted on that last cycle is recognised one instruction
-	// later. Step polls nmiPending after the per-cycle PPU sync but
-	// before the opcode body and stores the result here; the *next*
-	// Step services it. NMOS/CMOS keep the simpler immediate-service
-	// path. Blargg ppu_vbl_nmi 04-nmi_control #11 pins this delay.
-	nmiDue bool
+	// later. With the per-cycle interleave, every tick advances the poll
+	// by one cycle via nmiPollPrev (a 1-cycle delay), so nmiDue ends an
+	// instruction holding the line state as of its penultimate cycle.
+	// The *next* Step services it. NMOS/CMOS keep the immediate path.
+	nmiDue      bool
+	nmiPollPrev bool
+
+	// /NMI level model (#342). The PPU drives nmiLineLevel via SetNMILine
+	// (= vblank-flag AND PPUCTRL.7). The CPU edge-detects a low→asserted
+	// transition into nmiPending after each cycle's bus op (sampleNMI),
+	// so a $2002 read that drops the line in the same cycle it would rise
+	// is never latched — the 2C02 NMI suppression race, for free.
+	nmiLineLevel bool
+	nmiLinePrev  bool
+
+	// Per-cycle interleave state (#342, VariantNES). nesCycle caches
+	// "Variant==NES && a bus ticker is wired"; when set, each bus access
+	// ticks the whole chain (PPU/APU/cart) one cycle *before* the access
+	// so a $2002 read samples the PPU at its true dot and the /NMI race
+	// interleaves. instrCycles counts the ticks issued this instruction;
+	// Step asserts it equals the instruction's accounted cycle total.
+	nesCycle    bool
+	instrCycles int
 
 	// irqSources holds the set of named IRQ sources currently asserting
 	// the line. The CPU sees a wired-OR — irqLine is true iff the set
@@ -155,6 +173,7 @@ func (c *CPU) SetBus(b Bus) {
 	} else {
 		c.busTicker = nil
 	}
+	c.nesCycle = c.Variant == VariantNES && c.busTicker != nil
 }
 
 func (c *CPU) bindTable() {
@@ -197,13 +216,79 @@ func (c *CPU) setZN(v byte) {
 }
 
 // stack
+// tick advances the bus chain one CPU cycle for the NES variant and
+// counts it against the instruction's cycle budget. The /NMI poll runs
+// here with a one-cycle delay (nmiPollPrev), so nmiDue lands holding the
+// line state as of the penultimate cycle (#342).
+func (c *CPU) tick() {
+	c.instrCycles++
+	c.busTicker.Tick(1) // advance PPU/APU/cart; the PPU may move /NMI
+}
+
+// sampleNMI runs at the end of a cycle, after the bus op. It edge-detects
+// the /NMI line into nmiPending, then advances the penultimate-poll latch
+// (nmiDue) with a one-cycle delay so that at an instruction's last cycle
+// nmiDue holds the pending state as of its penultimate cycle. Because the
+// edge is sampled *after* the bus op, a $2002 read that drops the line in
+// the same cycle it rose leaves no rising edge — the suppression race.
+func (c *CPU) sampleNMI() {
+	if c.nmiLineLevel && !c.nmiLinePrev {
+		c.nmiPending = true
+	}
+	c.nmiLinePrev = c.nmiLineLevel
+	c.nmiDue = c.nmiPollPrev
+	c.nmiPollPrev = c.nmiPending
+}
+
+// SetNMILine sets the /NMI line level the CPU sees. The NES PPU drives it
+// from (vblank-flag AND PPUCTRL.7); the CPU edge-detects in sampleNMI.
+func (c *CPU) SetNMILine(level bool) { c.nmiLineLevel = level }
+
+// read / write perform one bus cycle: for NES, tick the chain (advancing
+// the PPU to this cycle), do the access, then sample /NMI. Other variants
+// access directly and keep the post-instruction batch tick. The 6502
+// latches the bus at the end of the cycle, so the tick (which advances
+// the PPU through the cycle) precedes the access and the interrupt sample
+// follows it.
+func (c *CPU) read(addr uint16) byte {
+	if c.nesCycle {
+		c.tick()
+		v := c.Bus.Read(addr)
+		c.sampleNMI()
+		return v
+	}
+	return c.Bus.Read(addr)
+}
+
+func (c *CPU) write(addr uint16, v byte) {
+	if c.nesCycle {
+		c.tick()
+		c.Bus.Write(addr, v)
+		c.sampleNMI()
+		return
+	}
+	c.Bus.Write(addr, v)
+}
+
+// idle burns one cycle the way the 6502 does on internal / fix-up /
+// dummy cycles: it performs a real (discarded) bus read at addr — the
+// chip always drives the bus — so MMIO side effects are faithful. A
+// no-op for non-NES variants, which don't model per-cycle timing.
+func (c *CPU) idle(addr uint16) {
+	if c.nesCycle {
+		c.tick()
+		_ = c.Bus.Read(addr)
+		c.sampleNMI()
+	}
+}
+
 func (c *CPU) push(v byte) {
-	c.Bus.Write(0x100|uint16(c.SP), v)
+	c.write(0x100|uint16(c.SP), v)
 	c.SP--
 }
 func (c *CPU) pop() byte {
 	c.SP++
-	return c.Bus.Read(0x100 | uint16(c.SP))
+	return c.read(0x100 | uint16(c.SP))
 }
 func (c *CPU) push16(v uint16) {
 	c.push(byte(v >> 8))
@@ -260,8 +345,27 @@ func (c *CPU) IRQAsserted() bool { return c.irqLine }
 // single NMI.
 func (c *CPU) TriggerNMI() { c.nmiPending = true }
 
-// serviceNMI performs the 7-cycle NMI vector dispatch.
+// serviceNMI performs the 7-cycle NMI vector dispatch. The two leading
+// idle cycles + the ticked pushes / vector reads keep the PPU in lockstep
+// through interrupt entry on the NES variant (#342); other variants take
+// the no-op idle path and the post-instruction batch tick.
 func (c *CPU) serviceNMI() {
+	// Clear the edge latch *before* the 7 service cycles so the sampleNMI
+	// calls inside serviceVector don't re-arm nmiDue from the still-
+	// pending edge and trigger a spurious second NMI (#342). The line
+	// itself may stay asserted (flag + bit 7); nmiLinePrev holds, so no
+	// new edge fires until the line drops and rises again.
+	c.nmiPending = false
+	c.serviceVector(VecNMI)
+}
+
+// serviceVector runs the shared 7-cycle interrupt dispatch (NMI/IRQ).
+// For the per-cycle NES path it ticks all seven cycles so the PPU stays
+// in lockstep through interrupt entry (#342); other variants take the
+// no-op idle path and the post-instruction batch tick.
+func (c *CPU) serviceVector(vec uint16) {
+	c.idle(c.PC) // two internal cycles
+	c.idle(c.PC)
 	c.push16(c.PC)
 	c.push((c.P | FlagU) &^ FlagB)
 	c.setFlag(FlagI, true)
@@ -270,24 +374,14 @@ func (c *CPU) serviceNMI() {
 	if c.Variant == VariantCMOS65C02 {
 		c.setFlag(FlagD, false)
 	}
-	lo := uint16(c.Bus.Read(VecNMI))
-	hi := uint16(c.Bus.Read(VecNMI + 1))
+	lo := uint16(c.read(vec))
+	hi := uint16(c.read(vec + 1))
 	c.PC = lo | hi<<8
 	c.Cycles += 7
-	c.nmiPending = false
 }
 
 // serviceIRQ performs the 7-cycle IRQ vector dispatch. Caller must have
 // already verified FlagI is clear.
 func (c *CPU) serviceIRQ() {
-	c.push16(c.PC)
-	c.push((c.P | FlagU) &^ FlagB)
-	c.setFlag(FlagI, true)
-	if c.Variant == VariantCMOS65C02 {
-		c.setFlag(FlagD, false)
-	}
-	lo := uint16(c.Bus.Read(VecIRQ))
-	hi := uint16(c.Bus.Read(VecIRQ + 1))
-	c.PC = lo | hi<<8
-	c.Cycles += 7
+	c.serviceVector(VecIRQ)
 }

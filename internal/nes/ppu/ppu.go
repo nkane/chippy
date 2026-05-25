@@ -46,11 +46,15 @@ type Cart interface {
 	Mirroring() nes.Mirroring
 }
 
-// NMI is the CPU's edge-triggered non-maskable-interrupt line. *cpu.CPU
-// satisfies it via TriggerNMI(). Kept as an interface so tests can
-// assert NMI was raised without spinning up a full CPU.
+// NMI is the CPU's non-maskable-interrupt line. The PPU drives it as a
+// level via SetNMILine (= vblank-flag AND PPUCTRL.7); the CPU edge-detects
+// it per cycle, which makes the 2C02 NMI-suppression race fall out (#342).
+// TriggerNMI is retained for callers that want a one-shot edge. *cpu.CPU
+// satisfies both. Kept as an interface so tests can observe NMI without a
+// full CPU.
 type NMI interface {
 	TriggerNMI()
+	SetNMILine(level bool)
 }
 
 // PPU is the Peripheral that claims $2000-$3FFF on the CPU bus. The
@@ -228,6 +232,14 @@ func (p *PPU) Range() (uint16, uint16) { return 0x2000, 0x3FFF }
 // updates the open-bus latch with whatever value gets returned (the
 // 2C02 places the result on the shared PPU bus). Reads from
 // write-only registers return the latch as-is.
+// updateNMI drives the CPU's /NMI line from the current (vblank-flag AND
+// PPUCTRL.7). Called whenever the flag or PPUCTRL bit 7 changes (#342).
+func (p *PPU) updateNMI() {
+	if p.nmi != nil {
+		p.nmi.SetNMILine(p.status&0x80 != 0 && p.ctrl&0x80 != 0)
+	}
+}
+
 func (p *PPU) Read(addr uint16) byte {
 	switch 0x2000 | (addr & 0x0007) {
 	case 0x2002:
@@ -251,6 +263,10 @@ func (p *PPU) Read(addr uint16) byte {
 		p.status &^= 0x80
 		p.w = false
 		p.scrollHi = false
+		// Clearing the flag drops /NMI; if this read coincides with the
+		// set cycle the line never stays high long enough for the CPU to
+		// latch the edge — the suppression race (#342).
+		p.updateNMI()
 		// Only the high 3 bits leave on the bus; latch's high 3
 		// bits get the status, low 5 unchanged.
 		p.openBus = (p.openBus & 0x1F) | (p.status & 0xE0)
@@ -296,11 +312,12 @@ func (p *PPU) Write(addr uint16, v byte) {
 	case 0x2000:
 		prev := p.ctrl
 		p.ctrl = v
-		// 2C02 quirk: setting PPUCTRL bit 7 while vblank is already
-		// pending triggers an immediate NMI. Important for some games
-		// (and a known nestest probe).
-		if prev&0x80 == 0 && v&0x80 != 0 && p.status&0x80 != 0 && p.nmi != nil {
-			p.nmi.TriggerNMI()
+		// Drive /NMI from the new (flag AND bit 7). Enabling NMI while
+		// the vblank flag is set raises the line → the CPU takes an NMI;
+		// the level model also means re-writing $80 while already enabled
+		// raises no new edge (no duplicate NMI).
+		if prev&0x80 != v&0x80 {
+			p.updateNMI()
 		}
 		// Per nesdev: $2000 writes update t's nametable-select bits
 		// (10-11) from data bits 0-1.
@@ -718,11 +735,9 @@ func (p *PPU) stepDot() {
 		p.scrollEvents = p.scrollEvents[:0]
 		p.status |= 0x80
 		// Record the dot of the set so a $2002 read landing on it loses
-		// the race (#342).
+		// the race (#342), then raise /NMI if enabled.
 		p.vblSetAtDots = p.dots
-		if p.ctrl&0x80 != 0 && p.nmi != nil {
-			p.nmi.TriggerNMI()
-		}
+		p.updateNMI()
 	case p.scanline == p.timing.PreRenderScanline && p.dot == 1:
 		// End of vblank / start of pre-render: clear vblank, sprite-0
 		// hit, sprite overflow. v0.1 doesn't model the latter two so
@@ -730,8 +745,9 @@ func (p *PPU) stepDot() {
 		// when they land.
 		p.status &^= 0xE0
 		// Record the auto-clear dot so a $2002 read landing on it wins
-		// the race and still reads the flag set (#342).
+		// the race and still reads the flag set (#342); drop /NMI.
 		p.vblClearAtDots = p.dots
+		p.updateNMI()
 	}
 }
 

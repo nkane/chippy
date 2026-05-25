@@ -144,19 +144,24 @@ same per-cycle poll (keep MMC3 IRQ working — verify the split-bar demo).
 
 ## Phasing (each phase: build + nestest + demos green, its own PR)
 
-- **P0 — Safety net.** Capture demo ascii references + add the per-cycle
-  assertion harness. No behavior change. *(small)*
-- **P1 — Ticked bus accesses + dummy cycles.** `c.read`/`c.write`/`c.idle`,
-  the mechanical rename, dummy-cycle templates per addressing mode, drop
-  the NES per-instruction batch tick. Gate: nestest byte-identical, total
-  cycles match. Demos re-pinned + ascii-verified. *(largest — the core)*
-- **P2 — /NMI level model + per-cycle poll.** PPU drives the line; CPU
-  samples per cycle; remove the edge pulse. Gate: tests 2-5 stay green.
-- **P3 — Land tests 6-10.** Verify suppression/timing fall out; tune any
-  residual phase; remove the vbl race dot-hacks made redundant by the
-  interleave. Update `knownFail` → cleared (or next ROM).
-- **P4 — Cleanup + docs.** README/context/CLAUDE invariants; perf check;
-  fold `even_odd_frames` etc. into the harness.
+- **P0 — Safety net.** ✅ Done (PR #365). Demo ascii references +
+  the plan doc. No behavior change.
+- **P1 — Ticked bus accesses + dummy cycles + /NMI level model.** ✅ Done.
+  Folded P2 in: the per-cycle interleave shifts NMI timing, so the level
+  model had to land together to avoid regressing tests 4-5. Result:
+  `ppu_vbl_nmi` 5/10 → **9/10** (2-9 pass). nestest byte-identical;
+  demos unchanged (correct NMI timing realigned them — no re-pin needed);
+  perfgate holds. The vbl-flag dot-race (`vblSetAtDots`/`vblClearAtDots`)
+  stayed — it's the flag *read value* race, orthogonal to the /NMI edge.
+- **P2 — folded into P1.** (Was: /NMI level model.)
+- **P3 — test 10 `even_odd_timing`.** The odd-frame pre-render dot-skip
+  must observe BG-enable (`$2001`) at the exact dot. Our skip checks
+  `renderingEnabled()` at the pre-render scanline; the timing of a
+  mid-scanline `$2001` write vs the dot-340→0 skip decision is off by a
+  few dots. PPU-side only (no CPU change). Then clear `knownFail`.
+- **P4 — Cleanup + docs.** Revisit the `instrCycles` panic (keep as an
+  invariant guard vs soften); README/CLAUDE notes; fold `even_odd_frames`
+  / `vbl_nmi_timing` ROMs into the harness.
 
 ## Rollback
 
