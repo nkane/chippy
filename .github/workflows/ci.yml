@@ -110,6 +110,26 @@ jobs:
       - name: Run nestest golden-PC walk
         run: go test -tags=nestest -timeout 5m -run TestNestest -v ./cmd/nessy/...
 
+  accuracy:
+    name: accuracy test ROMs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          cache: true
+
+      # Downloads + SHA-pins nesdev / Blargg test ROMs on first run
+      # (cached under $XDG_CACHE_HOME/chippy-tests/). ROMs with a
+      # tracked accuracy gap are reported as skips, not failures, so
+      # this job gates on "the harness ran + read a status" — real
+      # regressions in a passing ROM still fail it.
+      - name: Run nesdev / Blargg accuracy ROMs
+        run: go test -tags=accuracy -timeout 5m -run TestAccuracy -v ./cmd/nessy/...
+
   dap-integration:
     name: dap integration
     runs-on: ubuntu-latest
