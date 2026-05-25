@@ -1,0 +1,13 @@
+# Golden / fixture files are byte-compared in tests (e.g. the DAP
+# transcript goldens). Force LF on every platform so Windows checkouts
+# — GitHub runners default to core.autocrlf=true — don't inject CRLF
+# and break the comparison.
+*.golden text eol=lf
+
+# Binary fixtures must never be line-ending-converted. The demo ROMs are
+# SHA-pinned; a stray CRLF conversion would corrupt them.
+*.nes binary
+*.bin binary
+*.gif binary
+*.mp4 binary
+*.png binary
