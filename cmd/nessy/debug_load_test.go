@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/symbols"
 )
 
 // hello-bg ships a built `.dbg` next to its `.nes` (issue #211). nessy

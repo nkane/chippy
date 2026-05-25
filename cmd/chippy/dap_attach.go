@@ -8,10 +8,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/dap"
-	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/dap"
 	"github.com/nkane/chippy/internal/tui"
+	"github.com/nkane/chippy/symbols"
 )
 
 // runDAPAttach connects out to a remote DAP server (typically nessy),

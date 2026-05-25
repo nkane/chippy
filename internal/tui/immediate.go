@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/nkane/chippy/internal/expr"
+	"github.com/nkane/chippy/expr"
 )
 
 // ImmediateEntry is one row in the immediate-window scrollback. Result is

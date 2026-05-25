@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/symbols"
 )
 
 // runNessyLauncher spawns a nessy child process, waits for its DAP

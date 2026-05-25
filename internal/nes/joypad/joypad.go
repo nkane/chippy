@@ -26,7 +26,7 @@
 // 1, so we return 0 for those bits.
 package joypad
 
-import "github.com/nkane/chippy/internal/cpu"
+import "github.com/nkane/chippy/cpu"
 
 // Button names a logical NES controller button. Values are the shift-out
 // order so `1 << Button` lines up with the live-state bitmap and the

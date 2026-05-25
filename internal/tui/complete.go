@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/symbols"
 )
 
 // defaultVerbs is the static set of prompt commands. Kept in sync with the

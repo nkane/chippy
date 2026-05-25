@@ -10,11 +10,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/dap"
-	"github.com/nkane/chippy/internal/peripheral"
-	"github.com/nkane/chippy/internal/symbols"
-	"github.com/nkane/chippy/internal/trace"
+	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/dap"
+	"github.com/nkane/chippy/peripheral"
+	"github.com/nkane/chippy/symbols"
+	"github.com/nkane/chippy/trace"
 )
 
 // Theme-driven styles. applyTheme() in theme.go reassigns these; the

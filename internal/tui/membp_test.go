@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 )
 
 // progStaThenLda assembles `LDA #$05; STA $0210; LDA $0210; BRK` at $0200

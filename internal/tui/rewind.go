@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/nkane/chippy/internal/cpu"
+import "github.com/nkane/chippy/cpu"
 
 // Thin wrappers around cpu.SnapshotRing so existing tui code that
 // references `rewindRing` / `newRewindRing` / `defaultRewindCap` keeps

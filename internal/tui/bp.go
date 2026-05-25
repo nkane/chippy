@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 )
 
 // Breakpoint describes a single execution breakpoint. Memory watchpoints have

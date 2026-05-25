@@ -1,9 +1,9 @@
 package tui
 
 import (
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/expr"
-	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/expr"
+	"github.com/nkane/chippy/symbols"
 )
 
 // condFn is the bool-returning evaluator the breakpoint check loop calls.

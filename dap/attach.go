@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/peripheral"
-	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/peripheral"
+	"github.com/nkane/chippy/symbols"
 )
 
 // AttachConfig is the externally-supplied debuggee a hosting process

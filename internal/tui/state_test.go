@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 )
 
 // stateTestModel constructs a fresh Model wired enough to call

@@ -3,7 +3,7 @@ package expr
 import (
 	"testing"
 
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 )
 
 // evalStr is a tiny helper: compile src, run against a fresh NMOS CPU

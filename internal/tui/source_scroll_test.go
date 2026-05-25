@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/symbols"
 )
 
 // buildModelWithSource constructs a Model wired up with a fake source

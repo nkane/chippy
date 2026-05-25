@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 )
 
 // Result describes what was loaded and where.

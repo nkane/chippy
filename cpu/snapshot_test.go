@@ -3,7 +3,7 @@ package cpu_test
 import (
 	"testing"
 
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 )
 
 func TestSnapshotRestore_RoundTrip(t *testing.T) {

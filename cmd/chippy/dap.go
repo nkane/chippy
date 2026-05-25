@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/nkane/chippy/internal/dap"
+	"github.com/nkane/chippy/dap"
 )
 
 // runDAP starts a Debug Adapter Protocol server in the requested transport

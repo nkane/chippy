@@ -23,7 +23,7 @@ package ppu
 import (
 	"sync"
 
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 	"github.com/nkane/chippy/internal/nes"
 )
 

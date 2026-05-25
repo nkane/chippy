@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/loader"
+	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/loader"
 )
 
 // TestCMOSDemo_E2E loads the ca65-built example/cmos_demo.bin and runs it

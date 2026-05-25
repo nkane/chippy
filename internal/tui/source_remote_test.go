@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/dap"
+	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/dap"
 )
 
 // spinUpServerCPU builds an in-process DAP server attached to a fresh

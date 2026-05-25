@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/symbols"
 )
 
 // buildModelWithSyms constructs a Model with a handful of fake

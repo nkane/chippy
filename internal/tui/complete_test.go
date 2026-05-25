@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/symbols"
 )
 
 func TestComplete_VerbExactlyOne(t *testing.T) {

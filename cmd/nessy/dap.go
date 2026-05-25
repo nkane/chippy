@@ -9,8 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/nkane/chippy/internal/dap"
-	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/dap"
+	"github.com/nkane/chippy/symbols"
 )
 
 // dapAttached counts active DAP sessions. The game loop checks this

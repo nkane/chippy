@@ -41,8 +41,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/symbols"
+	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/symbols"
 )
 
 // EvalFn computes a 32-bit value from current CPU + bus state. Used as a

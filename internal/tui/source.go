@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"github.com/nkane/chippy/internal/cpu"
-	"github.com/nkane/chippy/internal/dap"
+	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/dap"
 )
 
 // Source abstracts the CPU + bus pair the TUI drives. LocalSource (this

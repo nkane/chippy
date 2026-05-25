@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nkane/chippy/internal/cpu"
+	"github.com/nkane/chippy/cpu"
 )
 
 // newTracedCPU builds a CPU executing `code` from $8000 with a FileTracer
