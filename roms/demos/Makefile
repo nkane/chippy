@@ -17,7 +17,7 @@
 DEMOS := hello-bg input-echo vblank-bounce audio-test \
          triangle-arpeggio noise-drum all-channels dmc-sample \
          mmc1-banks oam-grid state-counter vrc6-chord \
-         sunsoft5b-chord
+         sunsoft5b-chord scroll-split
 
 CA65      := ca65
 LD65      := ld65
