@@ -144,6 +144,11 @@ the v0.2+ roadmap.
 
 Controls: Arrows = D-pad, Z = A, X = B, Enter = Start, Right Shift = Select.
 
+Gamepad support: any standard-layout controller (Xbox / DualSense /
+8BitDo / etc.) auto-routes to P1. D-pad + left analog stick both
+drive the D-pad; bottom face button = A, right face button = B,
+Start / Select = the centre buttons. Hot-plug notified on stderr.
+
 Player hotkeys: Tab (hold) = 4× fast-forward, F11 = fullscreen toggle,
 F12 = save a PNG of the current frame to `~/.nessy/screenshots/`.
 

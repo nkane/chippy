@@ -59,13 +59,14 @@ type game struct {
 	audio          *audioSink // optional; nil when -mute set or audio init failed
 	titleBase      string     // window title prefix; FPS appended every ~0.5 s
 	frameNum       uint64
-	frameDumpEvery int           // 0 = off; N = write framebuffer PNG every N frames
-	oamTrace       bool          // -oam-trace: dump visible-sprite OAM every frame
-	states         *saveStateMgr // F1-F4 = save slots 1-4; F5-F8 = load slots 1-4
+	frameDumpEvery int               // 0 = off; N = write framebuffer PNG every N frames
+	oamTrace       bool              // -oam-trace: dump visible-sprite OAM every frame
+	states         *saveStateMgr     // F1-F4 = save slots 1-4; F5-F8 = load slots 1-4
+	gamepads       *gamepadConnState // tracks connect/disconnect notifications
 }
 
 func newGame(bus *nesBus, cpuMu *sync.Mutex, titleBase string) *game {
-	return &game{bus: bus, cpuMu: cpuMu, titleBase: titleBase}
+	return &game{bus: bus, cpuMu: cpuMu, titleBase: titleBase, gamepads: &gamepadConnState{}}
 }
 
 // loopSteppedBanner is a one-shot diagnostic: prints to stderr the
@@ -167,6 +168,13 @@ func (g *game) Layout(outsideWidth, outsideHeight int) (int, int) {
 func (g *game) pollInput() {
 	for _, m := range keyMap {
 		g.bus.joy.P1.Set(m.btn, ebiten.IsKeyPressed(m.key))
+	}
+	// Standard-layout gamepad input ORs into whatever the keyboard
+	// already set so a player can use either or both. Skipped on
+	// the rare paths where the gamepad-state tracker isn't wired
+	// (unit tests).
+	if g.gamepads != nil {
+		g.gamepads.pollGamepad(&g.bus.joy.P1)
 	}
 	// Player-UX hotkeys (edge-triggered; held keys don't re-fire).
 	if inpututil.IsKeyJustPressed(ebiten.KeyF11) {
