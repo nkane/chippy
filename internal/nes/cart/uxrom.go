@@ -19,15 +19,18 @@ import (
 //	Writes to $8000-$FFFF set the PRG bank directly (no shift
 //	register — value bits 0-3 select the bank).
 //
-// Real silicon has a bus-conflict variant (UNROM): the written
-// value is ANDed with the read value from the ROM. v0.4 ships the
-// simple correct version; bus-conflict modeling is a v0.5+ stretch
-// for the handful of ROMs that depend on it.
+// Real UNROM silicon has a bus conflict: the written value gets
+// ANDed with whatever byte the ROM has at the same address before
+// committing to the bank-select register. Most authored ROMs work
+// around this by writing through ROM addresses that read \$FF (so
+// the AND is a no-op), but a handful test the quirk explicitly.
+// Selected via iNES 2.0 sub-mapper 2 (#319).
 type UxROM struct {
 	prg       []byte
 	chr       []byte // 8 KiB CHR-RAM
 	mirroring nes.Mirroring
 	prgBank   byte // active bank at $8000-$BFFF
+	busConfl  bool // iNES 2.0 sub-mapper 2 → ANDs writes with ROM byte
 }
 
 // NewUxROM constructs a UxROM cart from a parsed iNES ROM. PRG must
@@ -40,6 +43,7 @@ func NewUxROM(rom *nes.ROM) (*UxROM, error) {
 		prg:       rom.PRG,
 		chr:       make([]byte, 8*1024),
 		mirroring: rom.Mirroring,
+		busConfl:  rom.SubMapper == 2,
 	}
 	// If the ROM ships CHR-ROM (rare for UxROM), copy it into the
 	// CHR-RAM slot so PPU reads still work. Writes from the game
@@ -74,9 +78,18 @@ func (c *UxROM) CPURead(addr uint16) byte {
 // only 3-4 bits depending on cart-size variant; we accept the full
 // nibble + modulo by the actual bank count in CPURead to handle
 // either case.
+//
+// UNROM bus-conflict variant (sub-mapper 2): ANDs the written byte
+// with the ROM byte at the same address before committing. ROMs
+// that depend on this almost always write through pages reading
+// $FF so the AND is a no-op; the path matters only for ROMs that
+// explicitly test the quirk.
 func (c *UxROM) CPUWrite(addr uint16, v byte) {
 	if addr < 0x8000 {
 		return
+	}
+	if c.busConfl {
+		v &= c.CPURead(addr)
 	}
 	c.prgBank = v & 0x0F
 }

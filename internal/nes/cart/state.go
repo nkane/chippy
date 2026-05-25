@@ -71,10 +71,11 @@ type NROMState struct {
 	CHRRAM []byte // nil if CHR-ROM
 }
 
-// UxROMState — bank reg + CHR-RAM.
+// UxROMState — bank reg + CHR-RAM + bus-conflict variant flag.
 type UxROMState struct {
-	PrgBank byte
-	CHRRAM  []byte
+	PrgBank  byte
+	CHRRAM   []byte
+	BusConfl bool
 }
 
 // CNROMState — CHR bank reg + CHR-RAM (rare).
@@ -249,13 +250,14 @@ func (c *NROM) loadState(s NROMState) error {
 // --- UxROM ---
 
 func (c *UxROM) saveState() *UxROMState {
-	s := &UxROMState{PrgBank: c.prgBank}
+	s := &UxROMState{PrgBank: c.prgBank, BusConfl: c.busConfl}
 	s.CHRRAM = append(s.CHRRAM, c.chr...)
 	return s
 }
 
 func (c *UxROM) loadState(s UxROMState) error {
 	c.prgBank = s.PrgBank
+	c.busConfl = s.BusConfl
 	if len(s.CHRRAM) != len(c.chr) {
 		return fmt.Errorf("uxrom: CHR-RAM length mismatch (have %d, got %d)", len(c.chr), len(s.CHRRAM))
 	}

@@ -52,6 +52,52 @@ func TestUxROM_BankSwitch(t *testing.T) {
 	}
 }
 
+// UNROM bus-conflict variant: writes get ANDed with the ROM byte
+// at the same address before committing the bank. Selected via
+// iNES 2.0 sub-mapper 2 (#319).
+func TestUxROM_BusConflict(t *testing.T) {
+	// Build a ROM whose bank 7 (the last bank, fixed at $C000) has
+	// $03 at every address — so any write through $C000 commits
+	// (write & $03).
+	rom := fillUxromRom(t, 8)
+	for i := range 16 * 1024 {
+		rom.PRG[7*16*1024+i] = 0x03
+	}
+	rom.SubMapper = 2 // UNROM bus-conflict variant
+	c, err := NewUxROM(rom)
+	if err != nil {
+		t.Fatalf("NewUxROM: %v", err)
+	}
+	// Write $05 through $C000 (reads $03) → bank-select latches
+	// $05 & $03 = $01.
+	c.CPUWrite(0xC000, 0x05)
+	if got := c.CPURead(0x8000); got != 1 {
+		t.Errorf("post-conflict bank = %d; want 1 (write $05 ANDed with ROM $03)", got)
+	}
+	// Write $07 through $C000 → $07 & $03 = $03.
+	c.CPUWrite(0xC000, 0x07)
+	if got := c.CPURead(0x8000); got != 3 {
+		t.Errorf("post-conflict bank = %d; want 3", got)
+	}
+}
+
+// Non-conflict variant (default sub-mapper) commits the raw write.
+func TestUxROM_NoBusConflict_Default(t *testing.T) {
+	rom := fillUxromRom(t, 8)
+	for i := range 16 * 1024 {
+		rom.PRG[7*16*1024+i] = 0x03
+	}
+	rom.SubMapper = 0 // default = simple-correct
+	c, err := NewUxROM(rom)
+	if err != nil {
+		t.Fatalf("NewUxROM: %v", err)
+	}
+	c.CPUWrite(0xC000, 0x05)
+	if got := c.CPURead(0x8000); got != 5 {
+		t.Errorf("non-conflict bank = %d; want 5 (raw write)", got)
+	}
+}
+
 // CHR-RAM round-trips.
 func TestUxROM_CHRRAMRoundTrip(t *testing.T) {
 	c, err := NewUxROM(fillUxromRom(t, 2))
