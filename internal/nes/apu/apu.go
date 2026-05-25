@@ -95,9 +95,8 @@ type APU struct {
 	// VRC6 cart (mappers 24/26). Same pattern as sunsoft5b.
 	vrc6Audio *VRC6Audio
 
-	// vrc7Audio (optional) is the YM2413 / OPLL stub on Konami's
-	// VRC7 cart (mapper 85). v0.6 captures register writes but
-	// outputs silence — full FM synth is v0.7 work.
+	// vrc7Audio (optional) is the YM2413 / OPLL FM-synth chip on
+	// Konami's VRC7 cart (mapper 85) — 6-channel 2-op FM (#315).
 	vrc7Audio *VRC7Audio
 
 	// irqSink (optional) is the CPU's IRQ line. nil means
@@ -510,6 +509,12 @@ func (a *APU) emitSample() {
 	// VRC6 expansion mix-in. Output range 0..61; scale similarly.
 	if a.vrc6Audio != nil {
 		sample += int16(a.vrc6Audio.Output() * 150)
+	}
+	// VRC7 OPLL mix-in (#315). Output() advances the FM synth one
+	// sample + returns the summed carrier output (already scaled).
+	// Called exactly once per emitted sample here.
+	if a.vrc7Audio != nil {
+		sample += int16(a.vrc7Audio.Output())
 	}
 	a.samples = append(a.samples, sample)
 }
