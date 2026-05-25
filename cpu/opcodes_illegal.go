@@ -200,6 +200,56 @@ func opSBX(c *CPU, addr uint16, _ AddrMode) {
 func opNOP2(c *CPU, addr uint16, _ AddrMode) { _ = c.read(addr) }
 func opNOP3(c *CPU, addr uint16, _ AddrMode) { _ = c.read(addr) }
 
+// --- unstable illegals ($8B $93 $9B $9C $9E $9F $AB $BB) ---
+//
+// Silicon-dependent on bus capacitance + a "high byte of address + 1"
+// AND. Their *behaviour* is unstable on real NMOS, but their cycle
+// counts are well-defined — instr_timing checks the timing. We implement
+// the common stable approximation: the immediate forms use the 0xEE
+// "magic constant" model; the store forms AND the source register with
+// (target high byte + 1).
+
+// opXAA / ANE ($8B, imm): A = (A | magic) & X & imm.
+func opXAA(c *CPU, addr uint16, _ AddrMode) {
+	c.A = (c.A | 0xEE) & c.X & c.read(addr)
+	c.setZN(c.A)
+}
+
+// opLXA / LAX#imm ($AB): A = X = (A | magic) & imm.
+func opLXA(c *CPU, addr uint16, _ AddrMode) {
+	v := (c.A | 0xEE) & c.read(addr)
+	c.A, c.X = v, v
+	c.setZN(v)
+}
+
+// opSHA / AHX ($93 izy, $9F aby): M = A & X & (high+1).
+func opSHA(c *CPU, addr uint16, _ AddrMode) {
+	c.write(addr, c.A&c.X&byte((addr>>8)+1))
+}
+
+// opSHX / SXA ($9E aby): M = X & (high+1).
+func opSHX(c *CPU, addr uint16, _ AddrMode) {
+	c.write(addr, c.X&byte((addr>>8)+1))
+}
+
+// opSHY / SYA ($9C abx): M = Y & (high+1).
+func opSHY(c *CPU, addr uint16, _ AddrMode) {
+	c.write(addr, c.Y&byte((addr>>8)+1))
+}
+
+// opTAS / SHS ($9B aby): SP = A & X; M = A & X & (high+1).
+func opTAS(c *CPU, addr uint16, _ AddrMode) {
+	c.SP = c.A & c.X
+	c.write(addr, c.A&c.X&byte((addr>>8)+1))
+}
+
+// opLAS / LAR ($BB aby): A = X = SP = M & SP.
+func opLAS(c *CPU, addr uint16, _ AddrMode) {
+	v := c.read(addr) & c.SP
+	c.A, c.X, c.SP = v, v, v
+	c.setZN(v)
+}
+
 // --- table installation ---
 
 func init() {
@@ -312,15 +362,18 @@ func init() {
 		set(op, "NOP", ABX, 3, 4, true, opNOP3)
 	}
 
-	// Unstable opcodes — explicitly left as 1-byte NOPs (the default fill).
-	// Listing them here documents the decision:
-	//   $93 AHX (zp),Y     $9F AHX abs,Y
-	//   $9C SHY abs,X
-	//   $9E SHX abs,Y
-	//   $9B TAS abs,Y
-	//   $BB LAS abs,Y
-	//   $8B XAA #imm       $AB LAX #imm  (XAA-family)
-	//   $02 $12 $22 $32 $42 $52 $62 $72 $92 $B2 $D2 $F2  KIL/JAM
-	// These either depend on bus capacitance or halt the CPU; the default
-	// 2-cycle NOP fill is the safest stub.
+	// Unstable opcodes. Behaviour is silicon-dependent, but the cycle
+	// counts are fixed (no page-add on the store forms) and instr_timing
+	// checks them. Stores are write-style (PageAdd false → resolve's
+	// indexed dummy always fires); LAS is a read (PageAdd true).
+	set(0x8B, "XAA", IMM, 2, 2, false, opXAA)
+	set(0xAB, "LXA", IMM, 2, 2, false, opLXA)
+	set(0x93, "SHA", IZY, 2, 6, false, opSHA)
+	set(0x9F, "SHA", ABY, 3, 5, false, opSHA)
+	set(0x9C, "SHY", ABX, 3, 5, false, opSHY)
+	set(0x9E, "SHX", ABY, 3, 5, false, opSHX)
+	set(0x9B, "TAS", ABY, 3, 5, false, opTAS)
+	set(0xBB, "LAS", ABY, 3, 4, true, opLAS)
+	// KIL/JAM ($02 $12 $22 $32 $42 $52 $62 $72 $92 $B2 $D2 $F2) halt the
+	// CPU; left as the default 2-cycle NOP fill (instr_timing skips them).
 }
