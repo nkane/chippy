@@ -78,15 +78,27 @@ reset:
 
 ; IRQ: mid-frame split. Rewrite $3F00 = green ($1A), ack + re-enable
 ; the MMC3 IRQ for the next frame.
+;
+; The $2001=$00 / $2001=$08 brackets are essential: with rendering on,
+; the PPU's loopy-v auto-increments every 8 dots during the visible
+; scanlines and would clobber the v we just set with $2006, sending the
+; $2007 write to the wrong palette slot. Disabling BG briefly stops the
+; fetches → v stays put → the palette write lands at $3F00. The disable
+; is short (hblank-ish on the IRQ scanline), so the visible artifact is
+; a narrow band of backdrop colour on the split row.
 irq:
         pha
+        lda     #$00
+        sta     $2001           ; disable BG — freeze v
         lda     #$3F
         sta     $2006
         lda     #$00
         sta     $2006
         lda     #$1A            ; green
-        sta     $2007
-        ; Ack + re-enable.
+        sta     $2007           ; palette[0] = green
+        lda     #$08
+        sta     $2001           ; re-enable BG
+        ; Ack + re-enable IRQ.
         sta     $E000           ; disable + acknowledge
         sta     $E001           ; re-enable
         ; Reset scroll latch (the $2006 writes moved the address).

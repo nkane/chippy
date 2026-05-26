@@ -97,6 +97,14 @@ type CPU struct {
 	nmiDue      bool
 	nmiPollPrev bool
 
+	// irqDue is the IRQ analogue of nmiDue (#369). IRQ is level + mask:
+	// (irqLine AND !FlagI) sampled at the penultimate cycle. CLI/SEI/PLP
+	// change FlagI in their final cycle — after the poll — so the new
+	// mask state only affects interrupts one instruction later, which
+	// cpu_interrupts_v2 cli_latency pins.
+	irqDue      bool
+	irqPollPrev bool
+
 	// /NMI level model (#342). The PPU drives nmiLineLevel via SetNMILine
 	// (= vblank-flag AND PPUCTRL.7). The CPU edge-detects a low→asserted
 	// transition into nmiPending after each cycle's bus op (sampleNMI),
@@ -238,6 +246,8 @@ func (c *CPU) sampleNMI() {
 	c.nmiLinePrev = c.nmiLineLevel
 	c.nmiDue = c.nmiPollPrev
 	c.nmiPollPrev = c.nmiPending
+	c.irqDue = c.irqPollPrev
+	c.irqPollPrev = c.irqLine && !c.hasFlag(FlagI)
 }
 
 // SetNMILine sets the /NMI line level the CPU sees. The NES PPU drives it
@@ -373,6 +383,16 @@ func (c *CPU) serviceVector(vec uint16) {
 	// on binary mode. NMOS leaves D alone.
 	if c.Variant == VariantCMOS65C02 {
 		c.setFlag(FlagD, false)
+	}
+	// Vector hijacking (#369): an NMI raised during interrupt entry
+	// steals the dispatched vector. Applies to IRQ entry (NMI > IRQ
+	// priority); NMI entry to NMI just stays NMI. The NMI is then
+	// consumed.
+	if c.Variant == VariantNES && vec == VecIRQ && c.nmiPending {
+		vec = VecNMI
+		c.nmiPending = false
+		c.nmiDue = false
+		c.nmiPollPrev = false
 	}
 	lo := uint16(c.read(vec))
 	hi := uint16(c.read(vec + 1))

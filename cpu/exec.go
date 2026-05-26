@@ -53,12 +53,19 @@ func (c *CPU) Step() int {
 		c.serviceNMI()
 		return int(c.Cycles - before)
 	}
-	if c.irqLine && !c.hasFlag(FlagI) {
+	irqTake := c.irqLine && !c.hasFlag(FlagI)
+	if c.Variant == VariantNES {
+		// Penultimate-cycle poll: CLI/SEI/PLP delay the mask change one
+		// instruction. cpu_interrupts_v2 cli_latency (#369).
+		irqTake = c.irqDue
+	}
+	if irqTake {
 		c.Halted = false
 		if c.Tracer != nil {
 			c.Tracer.LogInterrupt(c, "IRQ", VecIRQ)
 		}
 		before := c.Cycles
+		c.irqDue = false
 		c.serviceIRQ()
 		return int(c.Cycles - before)
 	}
@@ -471,6 +478,17 @@ func opBRK(c *CPU, _ uint16, _ AddrMode) {
 	c.idle(c.PC) // dummy read of the padding byte
 	c.PC++
 	c.push16(c.PC)
+	// Interrupt vector hijacking (#369, cpu_interrupts_v2 nmi_and_brk):
+	// the NMI poll for BRK runs at cycle 4 — after pushing PC, before
+	// pushing P. If NMI is pending by then, the NMI vector is used and
+	// the BRK is consumed by the NMI service.
+	vec := uint16(VecIRQ)
+	if c.Variant == VariantNES && c.nmiPending {
+		vec = VecNMI
+		c.nmiPending = false
+		c.nmiDue = false
+		c.nmiPollPrev = false
+	}
 	c.push(c.P | FlagB | FlagU)
 	c.setFlag(FlagI, true)
 	// CMOS quirk: BRK also clears the D flag (the running CPU's flag,
@@ -479,8 +497,8 @@ func opBRK(c *CPU, _ uint16, _ AddrMode) {
 	if c.Variant == VariantCMOS65C02 {
 		c.setFlag(FlagD, false)
 	}
-	lo := uint16(c.read(VecIRQ))
-	hi := uint16(c.read(VecIRQ + 1))
+	lo := uint16(c.read(vec))
+	hi := uint16(c.read(vec + 1))
 	c.PC = lo | hi<<8
 }
 func opNOP(c *CPU, addr uint16, m AddrMode) {

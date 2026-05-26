@@ -76,6 +76,16 @@ var accuracyROMs = []accuracyROM{
 		pathEnv:   "CHIPPY_ACCURACY_INSTR_TIMING_BIN",
 		maxFrames: 2400,
 	},
+	{
+		// IRQ/NMI/BRK interaction + interrupt latency: cli_latency,
+		// nmi_and_brk, nmi_and_irq, irq_and_dma, branch_delays_irq (#369).
+		name:      "cpu_interrupts_v2.nes",
+		url:       "https://github.com/christopherpow/nes-test-roms/raw/master/cpu_interrupts_v2/cpu_interrupts.nes",
+		sha:       "ccbac4e824eb96ecfe8b82d331a083be186eb6776aa57e25c52251eaf7df9c4f",
+		pathEnv:   "CHIPPY_ACCURACY_INTERRUPTS_BIN",
+		maxFrames: 2400,
+		knownFail: "cycle-precise NMI hijack window (#369) — test 1 cli_latency passes via the IRQ interrupt-poll latch; test 2 nmi_and_brk matches 8/10 of the expected NMI/BRK hijack table (rows 9-10 off by one in NMI count); tests 3-5 untested (sub-tests gate sequentially on test 2's exact CRC, and the rom_singles use screen output, not the $6000 protocol)",
+	},
 }
 
 func TestAccuracy(t *testing.T) {
