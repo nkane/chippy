@@ -500,6 +500,13 @@ func opBRK(c *CPU, _ uint16, _ AddrMode) {
 	lo := uint16(c.read(vec))
 	hi := uint16(c.read(vec + 1))
 	c.PC = lo | hi<<8
+	// 6502 quirk: the handler's first instruction must run before a
+	// pending NMI takes (#369). Clear the poll latches; nmiPending
+	// stays so the next instruction re-establishes nmiDue.
+	if c.Variant == VariantNES {
+		c.nmiDue = false
+		c.nmiPollPrev = false
+	}
 }
 func opNOP(c *CPU, addr uint16, m AddrMode) {
 	// Illegal multi-byte NOPs (DOP/TOP) read their operand and discard

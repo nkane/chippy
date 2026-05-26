@@ -398,6 +398,14 @@ func (c *CPU) serviceVector(vec uint16) {
 	hi := uint16(c.read(vec + 1))
 	c.PC = lo | hi<<8
 	c.Cycles += 7
+	// 6502 quirk: interrupt sequences don't poll on the handler's first
+	// instruction — that instruction must execute before a higher-
+	// priority interrupt can preempt (#369, cpu_interrupts_v2). Clear
+	// the poll latches; nmiPending stays (the line/edge persists) and
+	// the next instruction's poll re-establishes nmiDue, so the NMI
+	// fires after that first instruction, not before.
+	c.nmiDue = false
+	c.nmiPollPrev = false
 }
 
 // serviceIRQ performs the 7-cycle IRQ vector dispatch. Caller must have
