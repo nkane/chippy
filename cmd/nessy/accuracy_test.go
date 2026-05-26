@@ -84,7 +84,7 @@ var accuracyROMs = []accuracyROM{
 		sha:       "ccbac4e824eb96ecfe8b82d331a083be186eb6776aa57e25c52251eaf7df9c4f",
 		pathEnv:   "CHIPPY_ACCURACY_INTERRUPTS_BIN",
 		maxFrames: 2400,
-		knownFail: "cycle-precise NMI hijack window (#369) — test 1 cli_latency passes via the IRQ interrupt-poll latch; test 2 nmi_and_brk matches 8/10 of the expected NMI/BRK hijack table (rows 9-10 off by one in NMI count); tests 3-5 untested (sub-tests gate sequentially on test 2's exact CRC, and the rom_singles use screen output, not the $6000 protocol)",
+		knownFail: "cycle-precise interrupt-poll details (#369) — tests 1 (cli_latency) + 2 (nmi_and_brk) pass; test 3 (nmi_and_irq) needs precise NMI line-rise timing relative to instructions, tests 4-5 (irq_and_dma, branch_delays_irq) gate behind it",
 	},
 }
 
