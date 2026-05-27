@@ -206,6 +206,18 @@ func (c *CPU) Reset() {
 	c.Cycles = 7
 	c.Halted = false
 	c.stoppedBySTP = false
+	// Mesen2 NesCpu::Reset ticks the bus chain 8 cycles after the
+	// vector load ("The CPU takes 8 cycles before it starts executing
+	// the ROM's code after a reset/power up"). That window lets the
+	// APU's phantom $4017=$00 write delay (3 cycles) apply and the
+	// frame counter take 5 cycles before the first instruction. The
+	// vector reads themselves use direct Bus.Read so they don't tick,
+	// matching Mesen's comment "to prevent clocking the PPU/APU when
+	// setting PC at reset." cpu_interrupts_v2 test 3 depends on this
+	// for the right $4017-write parity at every iteration (#372).
+	if c.Variant == VariantNES && c.busTicker != nil {
+		c.busTicker.Tick(8)
+	}
 }
 
 // flag helpers

@@ -374,17 +374,17 @@ func (a *APU) SetFrameCounter(v byte) {
 	a.frameResetValue = v
 	// nesdev / Mesen mapping: "between APU cycles" (odd CPU cycle) =>
 	// 4-cycle delay; "during an APU cycle" (even CPU cycle) =>
-	// 3-cycle delay. alternateTick is the *post-toggle* state of the
-	// just-completed stepCPU cycle. Post-toggle == true means the
-	// just-completed CPU cycle was NOT an APU cycle (pulse didn't
-	// tick) — i.e. between APU cycles — so 4. Post-toggle == false
-	// means it WAS an APU cycle (during) — so 3. cpu_interrupts_v2
-	// test 3's per-iter calibration is delay-sensitive (#372); the
-	// parity has to match Mesen's half-cycle reference.
+	// 3-cycle delay. At SetFrameCounter time alternateTick reflects
+	// the value AFTER the write cycle's stepCPU toggle: false ==
+	// just-completed cycle was odd absolute-cycle in chippy's
+	// reset-7-already-skipped frame, which lines up with Mesen's
+	// "between APU cycles" branch when traced against mesen_trace3
+	// (#372). cpu_interrupts_v2 test 3's per-iter calibration is
+	// delay-sensitive; this polarity has to match Mesen's reference.
 	if a.alternateTick {
-		a.frameResetDelay = 4
-	} else {
 		a.frameResetDelay = 3
+	} else {
+		a.frameResetDelay = 4
 	}
 }
 
