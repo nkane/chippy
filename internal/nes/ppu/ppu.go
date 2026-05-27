@@ -200,7 +200,12 @@ func New(cart Cart, nmi NMI) *PPU {
 // the scanline cursor onto it to stay consistent.
 func (p *PPU) SetRegion(t nes.Timing) {
 	p.timing = t
-	p.scanline, p.dot, p.frameCount = t.PreRenderScanline, 0, 0
+	// Match Mesen2 NesPpu::Reset's "First execution will be cycle 0,
+	// scanline 0" by seating the cursor at the very last dot of pre-
+	// render so the next stepDot wraps straight to (sl=0, dot=0) of
+	// frame 1 — instead of walking the whole pre-render scanline
+	// first (#372).
+	p.scanline, p.dot, p.frameCount = t.PreRenderScanline, t.DotsPerScanline-1, 1
 }
 
 // Reset clears the PPU to a deterministic post-power state. Real
@@ -214,7 +219,14 @@ func (p *PPU) Reset() {
 	p.ctrl, p.mask, p.status, p.oamAddr = 0, 0, 0, 0
 	p.v, p.t, p.x, p.w, p.readBuf = 0, 0, 0, false, 0
 	p.scrollX, p.scrollY, p.scrollHi = 0, 0, false
-	p.scanline, p.dot, p.frameCount = p.timing.PreRenderScanline, 0, 0
+	// Mesen2 NesPpu::Reset sets (_scanline=-1, _cycle=340, _frameCount=1)
+	// — pre-render scanline at its final dot, so the first stepDot wraps
+	// straight to (sl=0, dot=0) of the visible frame instead of walking
+	// through the whole 341-dot pre-render scanline first. Matches
+	// Mesen's "First execution will be cycle 0, scanline 0" comment.
+	// Closing the ~340-dot phase gap aligns vblank-set timing for the
+	// $4017-write-parity branches in cpu_interrupts_v2 test 3 (#372).
+	p.scanline, p.dot, p.frameCount = p.timing.PreRenderScanline, p.timing.DotsPerScanline-1, 1
 	p.dots, p.vblSetAtDots, p.vblClearAtDots = 0, ^uint64(0), ^uint64(0)
 	for i := range p.vram {
 		p.vram[i] = 0
