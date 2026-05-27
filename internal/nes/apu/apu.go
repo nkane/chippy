@@ -85,6 +85,19 @@ type APU struct {
 	frameTimer   int // CPU cycles until the next step boundary
 	frameIRQFlag bool
 
+	// $4017 write side effects (mode latch + counter reset + 5-step
+	// immediate quarter/half-frame tick) are delayed 3 or 4 CPU
+	// cycles after the write per nesdev: 3 when the write lands
+	// between APU cycles, 4 when during. The IRQ-inhibit flag clear
+	// is the only side effect that takes immediate effect.
+	// `frameResetDelay` is the cycle countdown; `frameResetValue`
+	// holds the $4017 byte to apply when it hits zero. cpu_interrupts
+	// _v2 tests 3-5 require this — without it the APU IRQ asserts
+	// 3-4 cycles too early relative to the test's calibration
+	// (#369, #372).
+	frameResetDelay int
+	frameResetValue byte
+
 	// sunsoft5b (optional) is the audio half of the FME-7 mapper
 	// package. nil unless cmd/nessy wires it via SetSunsoft5B
 	// during cart construction. Output is folded into emitSample's
@@ -131,9 +144,17 @@ func New() *APU {
 		pulse2:    pulse2,
 		noise:     noiseChannel{lfsr: 1},
 		mode4Step: true,
-		// First quarter-frame fires at the step mark, not at cycle 0.
-		// Initialize the timer so stepCPU drains down to the boundary
-		// correctly.
+		// alternateTick starts false so that after N stepCPU calls
+		// (N == absolute CPU cycle), alternateTick == N & 1 — matching
+		// Mesen's `cycleCount & 0x01` parity check used for the
+		// $4017-write delay branch (#372).
+		// Mesen2 init does a phantom $4017 = $00 write with a 3-cycle
+		// delay at reset. The counter only starts running after those
+		// 3 cycles, so the first quarter-frame fires at cycle 3 +
+		// quarterFrameCycles. We pre-load frameResetDelay to 3 with
+		// value $00 to mimic that path.
+		frameResetDelay:    3,
+		frameResetValue:    0x00,
 		frameTimer:         quarterFrameCycles,
 		samplesMax:         SampleRate / 4, // ~250 ms of buffered audio
 		cpuClockHz:         cpuClockHz,
@@ -328,22 +349,55 @@ func (a *APU) Write(addr uint16, v byte) {
 
 // SetFrameCounter accepts the $4017 write forwarded from
 // joypad.Port. Bit 7 = mode (0 = 4-step, 1 = 5-step); bit 6 = IRQ
-// inhibit. Inhibit set also clears any pending frame IRQ
-// immediately (per nesdev). 5-step mode never fires the IRQ.
+// inhibit.
+//
+// Side effects split between immediate and delayed (nesdev "Frame
+// Counter — Side Effects of Writing"):
+//   - Immediate: IRQ inhibit + flag clear when bit 6 is set.
+//   - Delayed by 3-4 CPU cycles: mode latch (bit 7), counter reset,
+//     and the 5-step mode's "immediate" quarter+half-frame tick.
+//     3 cycles if the write lands between APU cycles, 4 if during.
+//
+// cpu_interrupts_v2 tests 3-5 lean on the delay: without it the
+// APU IRQ asserts a few cycles too early and the calibration trial
+// services IRQ-hijack-NMI instead of plain NMI (#369, #372).
 func (a *APU) SetFrameCounter(v byte) {
-	a.mode4Step = v&0x80 == 0
-	a.irqInhibit = v&0x40 != 0
-	a.frameStep = 0
-	a.frameTimer = a.quarterFrameCycles
-	if a.irqInhibit {
-		// Inhibit set clears any pending IRQ + drops the line.
+	if v&0x40 != 0 {
+		// IRQ inhibit + flag clear apply immediately; counter / mode
+		// changes still wait for the delay to expire.
+		a.irqInhibit = true
 		a.frameIRQFlag = false
 		if a.irqSink != nil {
 			a.irqSink.ClearIRQSource(frameIRQSource)
 		}
 	}
+	a.frameResetValue = v
+	// nesdev / Mesen mapping: "between APU cycles" (odd CPU cycle) =>
+	// 4-cycle delay; "during an APU cycle" (even CPU cycle) =>
+	// 3-cycle delay. alternateTick is the *post-toggle* state of the
+	// just-completed stepCPU cycle. Post-toggle == true means the
+	// just-completed CPU cycle was NOT an APU cycle (pulse didn't
+	// tick) — i.e. between APU cycles — so 4. Post-toggle == false
+	// means it WAS an APU cycle (during) — so 3. cpu_interrupts_v2
+	// test 3's per-iter calibration is delay-sensitive (#372); the
+	// parity has to match Mesen's half-cycle reference.
+	if a.alternateTick {
+		a.frameResetDelay = 4
+	} else {
+		a.frameResetDelay = 3
+	}
+}
+
+// applyFrameCounterReset latches mode + IRQ inhibit, resets the
+// frame counter, and fires the 5-step's immediate quarter/half-frame
+// tick. Called by stepCPU when frameResetDelay counts down to zero.
+func (a *APU) applyFrameCounterReset() {
+	v := a.frameResetValue
+	a.mode4Step = v&0x80 == 0
+	a.irqInhibit = v&0x40 != 0
+	a.frameStep = 0
+	a.frameTimer = a.quarterFrameCycles
 	if !a.mode4Step {
-		// 5-step mode: immediate quarter + half frame tick on write.
 		a.tickQuarterFrame()
 		a.tickHalfFrame()
 	}
@@ -360,6 +414,12 @@ func (a *APU) Tick(cpuCycles int) {
 // stepCPU is one CPU cycle worth of APU work: frame-counter step,
 // pulse timer (every other cycle), sample emission accumulator.
 func (a *APU) stepCPU() {
+	if a.frameResetDelay > 0 {
+		a.frameResetDelay--
+		if a.frameResetDelay == 0 {
+			a.applyFrameCounterReset()
+		}
+	}
 	a.frameTimer--
 	if a.frameTimer <= 0 {
 		a.advanceFrameStep()

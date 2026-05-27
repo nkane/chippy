@@ -20,6 +20,12 @@ type FullState struct {
 	FrameTimer   int
 	FrameIRQFlag bool
 
+	// $4017-write delay state. Non-zero FrameResetDelay means a
+	// counter reset is pending; FrameResetValue holds the deferred
+	// $4017 byte to latch when the countdown expires.
+	FrameResetDelay int
+	FrameResetValue byte
+
 	AlternateTick bool
 	SampleAccum   int
 }
@@ -99,18 +105,20 @@ type DMCState struct {
 // SaveFullState copies the APU's mutable state into a FullState.
 func (a *APU) SaveFullState() FullState {
 	return FullState{
-		Pulse1:        a.pulse1.save(),
-		Pulse2:        a.pulse2.save(),
-		Triangle:      a.triangle.save(),
-		Noise:         a.noise.save(),
-		DMC:           a.dmc.save(),
-		Mode4Step:     a.mode4Step,
-		IRQInhibit:    a.irqInhibit,
-		FrameStep:     a.frameStep,
-		FrameTimer:    a.frameTimer,
-		FrameIRQFlag:  a.frameIRQFlag,
-		AlternateTick: a.alternateTick,
-		SampleAccum:   a.sampleAccum,
+		Pulse1:          a.pulse1.save(),
+		Pulse2:          a.pulse2.save(),
+		Triangle:        a.triangle.save(),
+		Noise:           a.noise.save(),
+		DMC:             a.dmc.save(),
+		Mode4Step:       a.mode4Step,
+		IRQInhibit:      a.irqInhibit,
+		FrameStep:       a.frameStep,
+		FrameTimer:      a.frameTimer,
+		FrameIRQFlag:    a.frameIRQFlag,
+		FrameResetDelay: a.frameResetDelay,
+		FrameResetValue: a.frameResetValue,
+		AlternateTick:   a.alternateTick,
+		SampleAccum:     a.sampleAccum,
 	}
 }
 
@@ -128,6 +136,8 @@ func (a *APU) LoadFullState(s FullState) error {
 	a.frameStep = s.FrameStep
 	a.frameTimer = s.FrameTimer
 	a.frameIRQFlag = s.FrameIRQFlag
+	a.frameResetDelay = s.FrameResetDelay
+	a.frameResetValue = s.FrameResetValue
 	a.alternateTick = s.AlternateTick
 	a.sampleAccum = s.SampleAccum
 	return nil
