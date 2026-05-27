@@ -21,11 +21,39 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
 	"testing"
+	"unsafe"
 
 	"github.com/nkane/chippy/internal/nes"
 )
+
+// nmiInternal pries the unexported NMI poll state out of cpu.CPU so the
+// probe can log it side-by-side with the visible PC/cycle/PPU phase. The
+// fields are accessed by name via reflect so we don't depend on field
+// order, and unsafe.Pointer lets us read them despite the package
+// boundary. Test-only — never link this into a non-probe binary.
+type nmiInternal struct {
+	nmiPending, nmiDue, nmiPollPrev, nmiLineLevel bool
+	irqDue, irqPollPrev                           bool
+}
+
+func readNMIInternal(c interface{}) nmiInternal {
+	v := reflect.ValueOf(c).Elem()
+	get := func(name string) bool {
+		f := v.FieldByName(name)
+		return *(*bool)(unsafe.Pointer(f.UnsafeAddr()))
+	}
+	return nmiInternal{
+		nmiPending:   get("nmiPending"),
+		nmiDue:       get("nmiDue"),
+		nmiPollPrev:  get("nmiPollPrev"),
+		nmiLineLevel: get("nmiLineLevel"),
+		irqDue:       get("irqDue"),
+		irqPollPrev:  get("irqPollPrev"),
+	}
+}
 
 func TestCPUInterruptsPhaseProbe(t *testing.T) {
 	out := os.Getenv("CHIPPY_PHASE_PROBE_OUT")
@@ -72,19 +100,29 @@ func TestCPUInterruptsPhaseProbe(t *testing.T) {
 	// Header documents the column layout so the file is self-describing
 	// when grepped or diffed in isolation.
 	fmt.Fprintf(w, "# cpu_interrupts_v2 phase probe — chippy model trace (#372)\n")
-	fmt.Fprintf(w, "# cols: PC  cpu_cyc  frame  sl  dot  b0 b1 b2  A X Y P SP\n")
+	fmt.Fprintf(w, "# cols: PC  cpu_cyc  frame  sl  dot  b0 b1 b2  A X Y P SP  nmi=L/P/PP/D/Pend irq=D/PP\n")
 
 	for bus.cpu.Cycles < maxCycles && !bus.cpu.Halted {
 		pc := bus.cpu.PC
 		b0 := bus.cart.CPURead(pc)
 		b1 := bus.cart.CPURead(pc + 1)
 		b2 := bus.cart.CPURead(pc + 2)
+		nm := readNMIInternal(bus.cpu)
 		fmt.Fprintf(w,
-			"%04X  %d  f=%d  sl=%d  dot=%d  %02X %02X %02X  A=%02X X=%02X Y=%02X P=%02X SP=%02X\n",
+			"%04X  %d  f=%d  sl=%d  dot=%d  %02X %02X %02X  A=%02X X=%02X Y=%02X P=%02X SP=%02X  nmi=%d%d%d%d%d irq=%d%d\n",
 			pc, bus.cpu.Cycles, bus.ppu.FrameCount(), bus.ppu.Scanline(), bus.ppu.Dot(),
 			b0, b1, b2,
-			bus.cpu.A, bus.cpu.X, bus.cpu.Y, bus.cpu.P, bus.cpu.SP)
+			bus.cpu.A, bus.cpu.X, bus.cpu.Y, bus.cpu.P, bus.cpu.SP,
+			b2i(nm.nmiLineLevel), b2i(nm.nmiPending), b2i(nm.nmiPollPrev), b2i(nm.nmiDue), b2i(nm.nmiPending),
+			b2i(nm.irqDue), b2i(nm.irqPollPrev))
 		bus.cpu.Step()
 	}
 	t.Logf("phase probe → %s (cycles<%d, halted=%v)", out, maxCycles, bus.cpu.Halted)
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
