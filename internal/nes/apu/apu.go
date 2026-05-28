@@ -140,8 +140,15 @@ type APU struct {
 	// to dbgIRQAsserts so the phase probe can diff per-iter cycles
 	// against Mesen-derived expectations. Cheap (one slice append per
 	// ~30K CPU cycles); revert before shipping.
-	dbgCycles     uint64
-	dbgIRQAsserts []uint64
+	dbgCycles      uint64
+	dbgIRQAsserts  []uint64
+	dbgFrameResets []frameResetLog
+}
+
+type frameResetLog struct {
+	apuC          uint64
+	delay         int
+	alternateTick bool
 }
 
 // New constructs an APU with the standard NTSC sample rate + a
@@ -217,6 +224,20 @@ func (s *StatusPeripheral) Write(addr uint16, v byte) { s.apu.Write(addr, v) }
 // DbgIRQAsserts returns the list of APU-cycle counts at which the
 // frame-counter IRQ asserted. Test-only instrumentation for #372.
 func (a *APU) DbgIRQAsserts() []uint64 { return a.dbgIRQAsserts }
+
+// DbgFrameResets returns the per-$4017-write log of (apuC, delay,
+// alternateTick) for offline diff against Mesen2 cycleCount parity.
+func (a *APU) DbgFrameResets() [][3]uint64 {
+	out := make([][3]uint64, len(a.dbgFrameResets))
+	for i, e := range a.dbgFrameResets {
+		alt := uint64(0)
+		if e.alternateTick {
+			alt = 1
+		}
+		out[i] = [3]uint64{e.apuC, uint64(e.delay), alt}
+	}
+	return out
+}
 
 // DbgAPUCycles returns the APU's running stepCPU count. Same units as
 // DbgIRQAsserts entries.
@@ -394,18 +415,21 @@ func (a *APU) SetFrameCounter(v byte) {
 	a.frameResetValue = v
 	// nesdev / Mesen mapping: "between APU cycles" (odd CPU cycle) =>
 	// 4-cycle delay; "during an APU cycle" (even CPU cycle) =>
-	// 3-cycle delay. At SetFrameCounter time alternateTick reflects
-	// the value AFTER the write cycle's stepCPU toggle: false ==
-	// just-completed cycle was odd absolute-cycle in chippy's
-	// reset-7-already-skipped frame, which lines up with Mesen's
-	// "between APU cycles" branch when traced against mesen_trace3
-	// (#372). cpu_interrupts_v2 test 3's per-iter calibration is
-	// delay-sensitive; this polarity has to match Mesen's reference.
-	if a.alternateTick {
+	// 3-cycle delay. Use dbgCycles parity directly to mirror Mesen's
+	// `cycleCount & 0x01` check — alternateTick can desync from the
+	// raw cycle count by 1 due to init / reset ordering nuances.
+	// chippy's stepCPU increments dbgCycles at top, so by the time
+	// SetFrameCounter sees it, dbgCycles is 1 ahead of Mesen's
+	// cycleCount at the equivalent write moment (Mesen's StartCpuCycle
+	// increments cycleCount BEFORE PPU.Run + ProcessCpuClock; bus.Write
+	// reads it post-increment). Flip the parity check so chippy's
+	// delay matches Mesen's `cycleCount & 0x01` directly.
+	if a.dbgCycles&1 == 1 {
 		a.frameResetDelay = 3
 	} else {
 		a.frameResetDelay = 4
 	}
+	a.dbgFrameResets = append(a.dbgFrameResets, frameResetLog{a.dbgCycles, a.frameResetDelay, a.alternateTick})
 }
 
 // applyFrameCounterReset latches mode + IRQ inhibit, resets the

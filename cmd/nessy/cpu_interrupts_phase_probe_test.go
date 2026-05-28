@@ -125,6 +125,12 @@ func TestCPUInterruptsPhaseProbe(t *testing.T) {
 			fmt.Fprintf(w, "# irq #%d apuC=%d\n", i, c)
 		}
 	}
+	if resets := bus.apu.DbgFrameResets(); len(resets) > 0 {
+		fmt.Fprintf(w, "\n# $4017 reset log (apuC, delay, alternateTick):\n")
+		for i, e := range resets {
+			fmt.Fprintf(w, "# rst #%d apuC=%d delay=%d alt=%d\n", i, e[0], e[1], e[2])
+		}
+	}
 	t.Logf("phase probe → %s (cycles<%d, halted=%v, irqs=%d)",
 		out, maxCycles, bus.cpu.Halted, len(bus.apu.DbgIRQAsserts()))
 }
