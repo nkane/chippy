@@ -435,15 +435,24 @@ func (a *APU) Tick(cpuCycles int) {
 // pulse timer (every other cycle), sample emission accumulator.
 func (a *APU) stepCPU() {
 	a.dbgCycles++
+	applied := false
 	if a.frameResetDelay > 0 {
 		a.frameResetDelay--
 		if a.frameResetDelay == 0 {
 			a.applyFrameCounterReset()
+			applied = true
 		}
 	}
-	a.frameTimer--
-	if a.frameTimer <= 0 {
-		a.advanceFrameStep()
+	// Skip frameTimer decrement on the stepCPU where applyReset just
+	// fired — Mesen2's Run model only consumes cycles AFTER reset
+	// (the reset itself doesn't count). Without this gate the first
+	// IRQ fires 1 CPU cycle earlier than Mesen, breaking cpu_inter
+	// rupts_v2 test 3 per-iter calibration (#372).
+	if !applied {
+		a.frameTimer--
+		if a.frameTimer <= 0 {
+			a.advanceFrameStep()
+		}
 	}
 	if a.alternateTick {
 		a.pulse1.tickTimer()
