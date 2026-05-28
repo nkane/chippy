@@ -470,22 +470,26 @@ func (c *CPU) serviceVector(vec uint16) {
 	c.idle(c.PC) // two internal cycles
 	c.idle(c.PC)
 	c.push16(c.PC)
+	// Vector hijacking (#369, redone for #372 to match Mesen2 NesCpu::IRQ
+	// ordering): the NMI-pending check happens BETWEEN push16(PC) and
+	// push(P). Mesen sets P with I=1 only on the NMI-side branch's P
+	// push, so if NMI hijacks, the pushed P captures the post-handler
+	// I=1 state on subsequent inheritance — and importantly the check
+	// fires 1 CPU cycle earlier than chippy's previous "after push P"
+	// placement, matching the cycle at which Mesen's _needNmi sample
+	// catches the late vblank-set transition.
+	if c.Variant == VariantNES && vec == VecIRQ && c.nmiPending {
+		vec = VecNMI
+		c.nmiPending = false
+		c.nmiDue = false
+		c.nmiPollPrev = false
+	}
 	c.push((c.P | FlagU) &^ FlagB)
 	c.setFlag(FlagI, true)
 	// CMOS quirk: interrupt entry also clears D so handlers can rely
 	// on binary mode. NMOS leaves D alone.
 	if c.Variant == VariantCMOS65C02 {
 		c.setFlag(FlagD, false)
-	}
-	// Vector hijacking (#369): an NMI raised during interrupt entry
-	// steals the dispatched vector. Applies to IRQ entry (NMI > IRQ
-	// priority); NMI entry to NMI just stays NMI. The NMI is then
-	// consumed.
-	if c.Variant == VariantNES && vec == VecIRQ && c.nmiPending {
-		vec = VecNMI
-		c.nmiPending = false
-		c.nmiDue = false
-		c.nmiPollPrev = false
 	}
 	lo := uint16(c.read(vec))
 	hi := uint16(c.read(vec + 1))
