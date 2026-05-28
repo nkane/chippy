@@ -236,7 +236,13 @@ func (c *CPU) Reset() {
 	// when the first instruction runs — matching Mesen "9 to 12 clocks
 	// before first instruction begins" for the phantom $4017=$00 APU
 	// frame-counter reset.
-	if c.Variant == VariantNES && c.busTicker != nil {
+	// Skip the 8-cycle reset advance unless ppuRunner is wired —
+	// otherwise NewVariant's pre-PPU Reset double-advances the APU
+	// (chippy calls Reset twice: once from NewVariant before the PPU
+	// is registered, once from wiring after). The post-wiring Reset
+	// is the one that needs to match Mesen2's reset loop; the pre-
+	// PPU one only needs to load the vector and leave clean state.
+	if c.Variant == VariantNES && c.busTicker != nil && c.ppuRunner != nil {
 		c.masterClock = cpuDivider
 		for range 8 {
 			c.stallTick()
