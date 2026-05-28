@@ -270,7 +270,9 @@ func (c *CPU) setZN(v byte) {
 // stallTick advances master-clock + PPU + APU by one full CPU cycle
 // without a bus access. Used by the OAMDMA stall drain — the bus is
 // stolen by the peripheral so the CPU sees an opaque "wait one cycle"
-// per stall unit, but the PPU/APU still need to advance.
+// per stall unit, but the PPU/APU still need to advance + interrupt
+// poll latches still advance with each cycle (#372 test 4 needs this
+// to detect IRQ assertions that happen mid-DMA at the right cycle).
 func (c *CPU) stallTick() {
 	c.instrCycles++
 	c.masterClock += cpuDivider
@@ -278,6 +280,7 @@ func (c *CPU) stallTick() {
 		c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
 	}
 	c.busTicker.Tick(1)
+	c.sampleNMI()
 }
 
 // sampleNMI runs at the end of a cycle, after the bus op. It edge-detects
