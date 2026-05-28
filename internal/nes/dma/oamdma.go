@@ -52,6 +52,19 @@ type OAMDMA struct {
 	ppu  PPU
 	cpu  CPUStaller
 	last byte // most recently written page selector — surfaced for tests
+
+	// Per-cycle transfer state (#372 test 4 irq_and_dma): each Step
+	// either reads a byte (even counter) or writes the buffered byte
+	// to OAM (odd counter), so the 256-byte copy spreads across the
+	// CPU's 513/514-cycle stall instead of happening "instantly" at
+	// Write. ROMs that put $4015 in the DMA source page (or other
+	// peripherals with side-effecting reads) depend on the per-cycle
+	// read schedule for IRQ-flag clear timing to land at the right CPU
+	// cycle relative to APU frame-counter assertions.
+	active   bool
+	haltLeft int  // halt/align cycles remaining before read/writes begin
+	counter  int  // 0..511, even = read, odd = write
+	buffer   byte // read-then-write holding latch
 }
 
 // New constructs an OAMDMA peripheral. All three dependencies must be
@@ -75,16 +88,53 @@ func (d *OAMDMA) Read(addr uint16) byte { return 0 }
 // drains it on its next Step().
 func (d *OAMDMA) Write(addr uint16, page byte) {
 	d.last = page
-	base := uint16(page) << 8
-	for i := range 256 {
-		b := d.bus.Read(base + uint16(i))
-		d.ppu.WriteOAM(b)
-	}
+	d.active = true
+	d.counter = 0
+	// 1 halt cycle on even-start, 2 on odd-start (real silicon's bus
+	// steal aligns on a read cycle). After halt, 256 read + 256 write
+	// = 512 work cycles. Total 513/514.
+	d.haltLeft = 1
 	stall := 513
 	if d.cpu.CurrentCycle()&1 == 1 {
 		stall++
+		d.haltLeft = 2
 	}
 	d.cpu.Stall(stall)
+}
+
+// Step advances the per-cycle DMA transfer by one CPU cycle. Called by
+// the CPU's stall drain so the 256 reads + 256 writes spread across the
+// 513-cycle bus-steal window. Even counter values read from CPU bus
+// into a 1-byte latch; odd values write the latch into PPU OAM. The
+// first 1-2 stall cycles (halt + optional align) are no-ops here —
+// `counter` only starts incrementing once we begin the read/write pair
+// sequence. Returns true when the transfer has completed.
+func (d *OAMDMA) Step() bool {
+	if !d.active {
+		return true
+	}
+	if d.haltLeft > 0 {
+		d.haltLeft--
+		return false
+	}
+	if d.counter >= 512 {
+		d.active = false
+		return true
+	}
+	if d.counter&1 == 0 {
+		// Read cycle
+		addr := uint16(d.last)<<8 | uint16(d.counter/2)
+		d.buffer = d.bus.Read(addr)
+	} else {
+		// Write cycle
+		d.ppu.WriteOAM(d.buffer)
+	}
+	d.counter++
+	if d.counter >= 512 {
+		d.active = false
+		return true
+	}
+	return false
 }
 
 // LastPage returns the most recent byte written to $4014. Exposed for

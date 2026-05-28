@@ -17,6 +17,16 @@ type Ticker interface {
 	Tick(cycles int)
 }
 
+// StallStepper is the per-cycle callback fired during stall drains
+// (e.g. OAMDMA bus-steal). The peripheral that owns the stall (set via
+// CPU.SetStallStepper after wiring) runs one cycle of its DMA state
+// machine per call — typically a read on even counter or a write on
+// odd, so the 256-byte transfer spreads across the 513-514-cycle window
+// like Mesen2 does. Returns true when the transfer is complete.
+type StallStepper interface {
+	Step() bool
+}
+
 // PPURunner is the master-clock-deadline contract for advancing the PPU
 // in lockstep with the CPU's per-cycle interleave (#372 redesign).
 // chippy's NES read/write splits the cycle's master-clock budget around

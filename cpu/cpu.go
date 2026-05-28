@@ -148,6 +148,12 @@ type CPU struct {
 	// counter as one block — bus ticks fire, c.Cycles advances, no
 	// opcode executes. See Stall().
 	pendingStall int
+
+	// stallStepper runs one DMA-state-machine step per stall cycle so
+	// the peripheral can spread its bus reads/writes across the stall
+	// window (#372 test 4 irq_and_dma). nil for non-NES variants and
+	// for pre-OAMDMA wiring.
+	stallStepper StallStepper
 }
 
 // Stall queues N cycles of CPU stall. The very next Step() consumes
@@ -185,6 +191,11 @@ func NewVariant(bus Bus, v Variant) *CPU {
 	c.Reset()
 	return c
 }
+
+// SetStallStepper wires the per-cycle DMA hook called during stall
+// drains (#372 test 4). nil resets to "no per-cycle action" (legacy
+// behavior — peripheral did all bus reads upfront via batch).
+func (c *CPU) SetStallStepper(s StallStepper) { c.stallStepper = s }
 
 // SetPPURunner wires the PPU master-clock-deadline hook. After this
 // call the NES variant's read/write/idle paths split the cycle's
