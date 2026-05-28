@@ -86,7 +86,7 @@ func (c *CPU) Step() int {
 			// Per-cycle so the PPU stays in lockstep through the bus
 			// steal (#342); also keeps the NMI poll advancing.
 			for range stalled {
-				c.tick()
+				c.stallTick()
 			}
 		case c.busTicker != nil:
 			c.busTicker.Tick(stalled)

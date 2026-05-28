@@ -141,6 +141,13 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 	pp.SetRegion(timing)
 	ap.SetRegion(timing)
 
+	// Wire master-clock-deadline PPU advance + flip PPU into cpuDriven
+	// mode so MMIO's Ticker fan-out stops double-advancing. CPU.read /
+	// write / idle now drive PPU dot-by-dot via the deadline contract,
+	// matching Mesen2's interleave (#372 redesign).
+	processor.SetPPURunner(pp)
+	pp.SetCPUDriven(true)
+
 	// Re-run reset now that the PPU is registered. Some ROMs touch PPU
 	// registers in their very first instructions, so we want those to
 	// hit the PPU rather than fall through to RAM during the moments

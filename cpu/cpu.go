@@ -54,7 +54,22 @@ type CPU struct {
 	// Step() checks this instead of doing a per-call type assertion;
 	// the no-ticker fast path stays single-digit-ns.
 	busTicker Ticker
-	Variant   Variant
+
+	// ppuRunner drives PPU dot advance with master-clock deadlines
+	// (#372 redesign). Set via SetPPURunner after the PPU is built.
+	// When non-nil, read/write/idle split the cycle's master-clock
+	// budget around the bus access and call Run at each split so the
+	// PPU runs in lockstep with the CPU's mid-cycle phase, matching
+	// Mesen2 NesCpu::Start/EndCpuCycle.
+	ppuRunner PPURunner
+
+	// masterClock is the CPU's running master-clock counter (NTSC: 12
+	// mc per CPU cycle, 4 mc per PPU dot). Bus reads add startClock-1
+	// (5 mc) before the access and endClock+1 (7 mc) after; writes
+	// swap to 7+5. Reset seeds it to cpuDivider + cpuOffset (12+0).
+	masterClock uint64
+
+	Variant Variant
 
 	// Optional per-instruction execution hook. When non-nil, Step() invokes
 	// Tracer.LogStep at the instruction boundary just before opcode fetch.
@@ -171,6 +186,13 @@ func NewVariant(bus Bus, v Variant) *CPU {
 	return c
 }
 
+// SetPPURunner wires the PPU master-clock-deadline hook. After this
+// call the NES variant's read/write/idle paths split the cycle's
+// master-clock budget around the bus access and call Run at each split.
+// Callers must also flip the PPU's cpuDriven flag (so MMIO's Ticker
+// fan-out stops double-advancing); see ppu.SetCPUDriven.
+func (c *CPU) SetPPURunner(r PPURunner) { c.ppuRunner = r }
+
 // SetBus swaps the CPU's bus and refreshes the cached busTicker
 // (#175). Callers must use this rather than assigning c.Bus directly
 // so the per-Step ticker dispatch stays correct after a bus wrap.
@@ -206,17 +228,19 @@ func (c *CPU) Reset() {
 	c.Cycles = 7
 	c.Halted = false
 	c.stoppedBySTP = false
-	// Mesen2 NesCpu::Reset ticks the bus chain 8 cycles after the
-	// vector load ("The CPU takes 8 cycles before it starts executing
-	// the ROM's code after a reset/power up"). That window lets the
-	// APU's phantom $4017=$00 write delay (3 cycles) apply and the
-	// frame counter take 5 cycles before the first instruction. The
-	// vector reads themselves use direct Bus.Read so they don't tick,
-	// matching Mesen's comment "to prevent clocking the PPU/APU when
-	// setting PC at reset." cpu_interrupts_v2 test 3 depends on this
-	// for the right $4017-write parity at every iteration (#372).
+	// Mesen2 NesCpu::Reset master-clock seeding + 8-cycle reset loop.
+	// masterClock starts at cpuDivider + cpuOffset (= 12 + 0 = 12) per
+	// the NTSC default; then 8 read-flavor cycles each add 12 mc, with
+	// PPU.Run firing at the Start (mc - ppuOffset) and End deadlines.
+	// Total post-reset masterClock = 12 + 8*12 = 108, PPU at 26 dots
+	// when the first instruction runs — matching Mesen "9 to 12 clocks
+	// before first instruction begins" for the phantom $4017=$00 APU
+	// frame-counter reset.
 	if c.Variant == VariantNES && c.busTicker != nil {
-		c.busTicker.Tick(8)
+		c.masterClock = cpuDivider
+		for range 8 {
+			c.stallTick()
+		}
 	}
 }
 
@@ -236,13 +260,18 @@ func (c *CPU) setZN(v byte) {
 }
 
 // stack
-// tick advances the bus chain one CPU cycle for the NES variant and
-// counts it against the instruction's cycle budget. The /NMI poll runs
-// here with a one-cycle delay (nmiPollPrev), so nmiDue lands holding the
-// line state as of the penultimate cycle (#342).
-func (c *CPU) tick() {
+
+// stallTick advances master-clock + PPU + APU by one full CPU cycle
+// without a bus access. Used by the OAMDMA stall drain — the bus is
+// stolen by the peripheral so the CPU sees an opaque "wait one cycle"
+// per stall unit, but the PPU/APU still need to advance.
+func (c *CPU) stallTick() {
 	c.instrCycles++
-	c.busTicker.Tick(1) // advance PPU/APU/cart; the PPU may move /NMI
+	c.masterClock += cpuDivider
+	if c.ppuRunner != nil {
+		c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
+	}
+	c.busTicker.Tick(1)
 }
 
 // sampleNMI runs at the end of a cycle, after the bus op. It edge-detects
@@ -266,16 +295,44 @@ func (c *CPU) sampleNMI() {
 // from (vblank-flag AND PPUCTRL.7); the CPU edge-detects in sampleNMI.
 func (c *CPU) SetNMILine(level bool) { c.nmiLineLevel = level }
 
-// read / write perform one bus cycle: for NES, tick the chain (advancing
-// the PPU to this cycle), do the access, then sample /NMI. Other variants
-// access directly and keep the post-instruction batch tick. The 6502
-// latches the bus at the end of the cycle, so the tick (which advances
-// the PPU through the cycle) precedes the access and the interrupt sample
-// follows it.
+// NES per-cycle master-clock split (Mesen2 NesCpu::Start/EndCpuCycle).
+// NTSC default: 12 master clocks per CPU cycle, 4 per PPU dot. Reads
+// commit at master-clock + (startClock-1) = +5; the EndCpuCycle adds
+// (endClock+1) = +7 for a 12-mc total. Writes swap: +7 pre-access,
+// +5 post-access — modelling the 6502's φ1 (writes) vs φ2 (reads)
+// phase. ppuOffset shifts PPU's masterClock 1 mc behind the CPU's so
+// it lags the right fraction of a dot relative to the bus.
+const (
+	cpuStartClock      = 6
+	cpuEndClock        = 6
+	cpuStartReadShift  = cpuStartClock - 1 // 5 mc pre-read
+	cpuEndReadShift    = cpuEndClock + 1   // 7 mc post-read
+	cpuStartWriteShift = cpuStartClock + 1 // 7 mc pre-write
+	cpuEndWriteShift   = cpuEndClock - 1   // 5 mc post-write
+	cpuDivider         = 12                // total mc per CPU cycle
+	cpuPPUOffset       = 1                 // PPU lag (Mesen default, _ppuOffset=1)
+)
+
+// read / write perform one bus cycle. NES path splits the master-clock
+// budget around the bus access and runs PPU at each split via the
+// PPURunner deadline, matching Mesen2 NesCpu::Start/EndCpuCycle. APU +
+// cart advance 1 CPU cycle via busTicker.Tick(1) at the StartCpuCycle
+// equivalent point (after PPU pre-advance, before bus access). PPU.Tick
+// is a no-op when SetCPUDriven(true) lands so MMIO's fan-out doesn't
+// double-advance.
 func (c *CPU) read(addr uint16) byte {
 	if c.nesCycle {
-		c.tick()
+		c.instrCycles++
+		c.masterClock += cpuStartReadShift
+		if c.ppuRunner != nil {
+			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
+		}
+		c.busTicker.Tick(1)
 		v := c.Bus.Read(addr)
+		c.masterClock += cpuEndReadShift
+		if c.ppuRunner != nil {
+			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
+		}
 		c.sampleNMI()
 		return v
 	}
@@ -284,8 +341,17 @@ func (c *CPU) read(addr uint16) byte {
 
 func (c *CPU) write(addr uint16, v byte) {
 	if c.nesCycle {
-		c.tick()
+		c.instrCycles++
+		c.masterClock += cpuStartWriteShift
+		if c.ppuRunner != nil {
+			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
+		}
+		c.busTicker.Tick(1)
 		c.Bus.Write(addr, v)
+		c.masterClock += cpuEndWriteShift
+		if c.ppuRunner != nil {
+			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
+		}
 		c.sampleNMI()
 		return
 	}
@@ -293,13 +359,22 @@ func (c *CPU) write(addr uint16, v byte) {
 }
 
 // idle burns one cycle the way the 6502 does on internal / fix-up /
-// dummy cycles: it performs a real (discarded) bus read at addr — the
-// chip always drives the bus — so MMIO side effects are faithful. A
-// no-op for non-NES variants, which don't model per-cycle timing.
+// dummy cycles: a real (discarded) bus read at addr so MMIO side
+// effects are faithful. NES path uses the same pre/post-bus PPU split
+// as a real read.
 func (c *CPU) idle(addr uint16) {
 	if c.nesCycle {
-		c.tick()
+		c.instrCycles++
+		c.masterClock += cpuStartReadShift
+		if c.ppuRunner != nil {
+			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
+		}
+		c.busTicker.Tick(1)
 		_ = c.Bus.Read(addr)
+		c.masterClock += cpuEndReadShift
+		if c.ppuRunner != nil {
+			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
+		}
 		c.sampleNMI()
 	}
 }

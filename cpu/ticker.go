@@ -16,3 +16,15 @@ package cpu
 type Ticker interface {
 	Tick(cycles int)
 }
+
+// PPURunner is the master-clock-deadline contract for advancing the PPU
+// in lockstep with the CPU's per-cycle interleave (#372 redesign).
+// chippy's NES read/write splits the cycle's master-clock budget around
+// the bus access (5 mc before a read, 7 after; 7 before a write, 5
+// after) and calls Run(masterClockDeadline - ppuOffset) at each split
+// so the PPU advances dot-by-dot up to that deadline. Mirrors Mesen2
+// NesPpu::Run, which is the implementation passes both Blargg accuracy
+// suites cpu_interrupts_v2 and ppu_vbl_nmi simultaneously.
+type PPURunner interface {
+	Run(masterClockDeadline uint64)
+}
