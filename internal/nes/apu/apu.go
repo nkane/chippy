@@ -133,6 +133,15 @@ type APU struct {
 	// SetRegion swaps for PAL / Dendy carts.
 	cpuClockHz         int
 	quarterFrameCycles int
+
+	// Debug instrumentation for #372 IRQ-timing probe. dbgCycles is a
+	// monotonic count of stepCPU calls (= APU cycles since boot). Each
+	// frame-counter IRQ assertion appends the current dbgCycles value
+	// to dbgIRQAsserts so the phase probe can diff per-iter cycles
+	// against Mesen-derived expectations. Cheap (one slice append per
+	// ~30K CPU cycles); revert before shipping.
+	dbgCycles     uint64
+	dbgIRQAsserts []uint64
 }
 
 // New constructs an APU with the standard NTSC sample rate + a
@@ -204,6 +213,14 @@ func (s *StatusPeripheral) Read(addr uint16) byte { return s.apu.Read(addr) }
 // Write forwards to APU.Write so the per-channel enable / length-
 // counter clear behavior on $4015 writes still fires.
 func (s *StatusPeripheral) Write(addr uint16, v byte) { s.apu.Write(addr, v) }
+
+// DbgIRQAsserts returns the list of APU-cycle counts at which the
+// frame-counter IRQ asserted. Test-only instrumentation for #372.
+func (a *APU) DbgIRQAsserts() []uint64 { return a.dbgIRQAsserts }
+
+// DbgAPUCycles returns the APU's running stepCPU count. Same units as
+// DbgIRQAsserts entries.
+func (a *APU) DbgAPUCycles() uint64 { return a.dbgCycles }
 
 // SetIRQSink wires the CPU's named-source IRQ surface. May be nil
 // in tests / headless contexts. Frame-counter IRQ assertions
@@ -417,6 +434,7 @@ func (a *APU) Tick(cpuCycles int) {
 // stepCPU is one CPU cycle worth of APU work: frame-counter step,
 // pulse timer (every other cycle), sample emission accumulator.
 func (a *APU) stepCPU() {
+	a.dbgCycles++
 	if a.frameResetDelay > 0 {
 		a.frameResetDelay--
 		if a.frameResetDelay == 0 {
@@ -490,6 +508,7 @@ func (a *APU) advanceFrameStep() {
 			// $4015 read or $4017-inhibit-set acks it.
 			if !a.irqInhibit {
 				a.frameIRQFlag = true
+				a.dbgIRQAsserts = append(a.dbgIRQAsserts, a.dbgCycles)
 				if a.irqSink != nil {
 					a.irqSink.AssertIRQSource(frameIRQSource)
 				}

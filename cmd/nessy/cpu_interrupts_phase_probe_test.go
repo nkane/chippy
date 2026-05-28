@@ -109,15 +109,24 @@ func TestCPUInterruptsPhaseProbe(t *testing.T) {
 		b2 := bus.cart.CPURead(pc + 2)
 		nm := readNMIInternal(bus.cpu)
 		fmt.Fprintf(w,
-			"%04X  %d  f=%d  sl=%d  dot=%d  %02X %02X %02X  A=%02X X=%02X Y=%02X P=%02X SP=%02X  nmi=%d%d%d%d%d irq=%d%d\n",
+			"%04X  %d  f=%d  sl=%d  dot=%d  %02X %02X %02X  A=%02X X=%02X Y=%02X P=%02X SP=%02X  nmi=%d%d%d%d%d irq=%d%d apuC=%d\n",
 			pc, bus.cpu.Cycles, bus.ppu.FrameCount(), bus.ppu.Scanline(), bus.ppu.Dot(),
 			b0, b1, b2,
 			bus.cpu.A, bus.cpu.X, bus.cpu.Y, bus.cpu.P, bus.cpu.SP,
 			b2i(nm.nmiLineLevel), b2i(nm.nmiPending), b2i(nm.nmiPollPrev), b2i(nm.nmiDue), b2i(nm.nmiPending),
-			b2i(nm.irqDue), b2i(nm.irqPollPrev))
+			b2i(nm.irqDue), b2i(nm.irqPollPrev), bus.apu.DbgAPUCycles())
 		bus.cpu.Step()
 	}
-	t.Logf("phase probe → %s (cycles<%d, halted=%v)", out, maxCycles, bus.cpu.Halted)
+
+	// Dump APU IRQ assert cycles at end for offline diff vs Mesen.
+	if asserts := bus.apu.DbgIRQAsserts(); len(asserts) > 0 {
+		fmt.Fprintf(w, "\n# APU frame-counter IRQ assert APU-cycle log:\n")
+		for i, c := range asserts {
+			fmt.Fprintf(w, "# irq #%d apuC=%d\n", i, c)
+		}
+	}
+	t.Logf("phase probe → %s (cycles<%d, halted=%v, irqs=%d)",
+		out, maxCycles, bus.cpu.Halted, len(bus.apu.DbgIRQAsserts()))
 }
 
 func b2i(b bool) int {
