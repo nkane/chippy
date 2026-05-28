@@ -144,10 +144,13 @@ func New() *APU {
 		pulse2:    pulse2,
 		noise:     noiseChannel{lfsr: 1},
 		mode4Step: true,
-		// alternateTick starts false so that after N stepCPU calls
-		// (N == absolute CPU cycle), alternateTick == N & 1 — matching
-		// Mesen's `cycleCount & 0x01` parity check used for the
-		// $4017-write delay branch (#372).
+		// alternateTick starts true so that after the 8-cycle reset
+		// loop's stallTicks the APU's per-cycle parity check at $4017
+		// write time matches Mesen's `cycleCount & 0x01` reference
+		// (#372 redesign). 8 toggles from `true` lands back at `true`,
+		// and the first real CPU cycle aligns parity-wise with Mesen's
+		// post-reset cycleCount.
+		alternateTick: true,
 		// Mesen2 init does a phantom $4017 = $00 write with a 3-cycle
 		// delay at reset. The counter only starts running after those
 		// 3 cycles, so the first quarter-frame fires at cycle 3 +
