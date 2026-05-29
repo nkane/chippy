@@ -44,21 +44,43 @@ const (
 )
 
 // frameStepIntervalsNtsc4Step is the cycle delay until the NEXT step
-// fires after the current step does, for NTSC 4-step mode. Mesen2
-// ApuFrameCounter.h:19 step boundaries — {7457, 14913, 22371, 29828}
-// with reset at 29830 — translate to per-step intervals:
+// fires for the 6 internal sub-steps of NTSC 4-step mode. Mesen2
+// ApuFrameCounter.h:19 step boundary table — {7457, 14913, 22371,
+// 29828, 29829, 29830} — encodes that the final "step 3" of the
+// user-visible 4-step sequence spans 3 CPU cycles (29828, 29829,
+// 29830) so the IRQ assertion window is 3 cycles wide and the
+// half-frame tick fires at cycle 29829 (Mesen step 4), NOT at
+// 29828. chippy's previous uniform 7457 reload summed to 29828 —
+// 2 cycles short per frame — and the older 4-entry {7456, 7458,
+// 7457, 7459} table fired the half-frame at 29828 (1 cycle too
+// early for Blargg apu_test 5-len_timing's 29831-29832 polling
+// window). The 6-entry expansion matches Mesen exactly:
 //
-//	step 0 → step 1: 14913 - 7457 = 7456
-//	step 1 → step 2: 22371 - 14913 = 7458
-//	step 2 → step 3: 29828 - 22371 = 7457
-//	step 3 → step 0: 29830 + 7457 - 29828 = 7459 (incl. 2-cycle IRQ tail)
+//	step 0 at cycle 7457:  quarter
+//	step 1 at cycle 14913: quarter + half
+//	step 2 at cycle 22371: quarter
+//	step 3 at cycle 29828: IRQ assert, no tick
+//	step 4 at cycle 29829: quarter + half + IRQ
+//	step 5 at cycle 29830: IRQ assert, no tick, frame reset
 //
-// Sum = 29830 cycles per full frame cycle, matching nesdev's published
-// 4-step total and what cpu_interrupts_v2 test 5's IRQ-handler loop
-// (delay 29831-13 + 4 + 4 = 29830 cycles per iter) calibrates against.
-// chippy's previous uniform 7457 reload summed to 29828 — 2 cycles
-// short per frame, accumulating the drift that broke test 5 sync.
-var frameStepIntervalsNtsc4Step = [4]int{7456, 7458, 7457, 7459}
+// Sum = 29830 cycles per full cycle.
+var frameStepIntervalsNtsc4Step = [6]int{7456, 7458, 7457, 1, 1, 7457}
+
+// frameStepIntervalsNtsc5Step is the 5-step (mode 1) analogue.
+// Mesen2 ApuFrameCounter.h:20 step boundaries — {7457, 14913, 22371,
+// 29829, 37281, 37282}. 5-step has no IRQ; the half-frame at step 4
+// (cycle 37281) is what Blargg apu_test 5-len_timing's mode-1 case
+// polls against (between 37283 and 37284). Internal step layout:
+//
+//	step 0 at cycle 7457:  quarter
+//	step 1 at cycle 14913: quarter + half
+//	step 2 at cycle 22371: quarter
+//	step 3 at cycle 29829: idle
+//	step 4 at cycle 37281: quarter + half
+//	step 5 at cycle 37282: idle, frame reset
+//
+// Sum = 37282 cycles per full cycle.
+var frameStepIntervalsNtsc5Step = [6]int{7456, 7458, 7458, 7452, 1, 7457}
 
 // IRQSink is the CPU's named-source IRQ surface from the APU's
 // point of view (see cpu.AssertIRQSource / cpu.ClearIRQSource). The
@@ -587,22 +609,42 @@ func (a *APU) stepCPU() {
 // frame ticks for the current step + mode, then advances to the
 // next step boundary.
 func (a *APU) advanceFrameStep() {
-	// NTSC 4-step uses non-uniform step intervals (Mesen
-	// ApuFrameCounter table) totalling 29830 CPU cycles per cycle;
-	// other modes/regions still use the uniform quarterFrameCycles
-	// reload. The step about to fire is a.frameStep; the reload is
-	// the delay until the NEXT step fires.
-	if a.mode4Step && a.quarterFrameCycles == quarterFrameCycles {
+	// NTSC uses non-uniform 6-step intervals (Mesen ApuFrameCounter
+	// table). 4-step totals 29830 CPU cycles per cycle; 5-step
+	// totals 37282. Other regions still use the uniform
+	// quarterFrameCycles reload. The step about to fire is
+	// a.frameStep; the reload is the delay until the NEXT step.
+	switch {
+	case a.quarterFrameCycles == quarterFrameCycles && a.mode4Step:
 		a.frameTimer += frameStepIntervalsNtsc4Step[a.frameStep]
-	} else {
+	case a.quarterFrameCycles == quarterFrameCycles && !a.mode4Step:
+		a.frameTimer += frameStepIntervalsNtsc5Step[a.frameStep]
+	default:
 		a.frameTimer += a.quarterFrameCycles
 	}
 	if a.mode4Step {
-		// 4-step pattern (q = quarter, h = half + quarter):
-		//   step 0: q
-		//   step 1: q + h
-		//   step 2: q
-		//   step 3: q + h + IRQ
+		// 4-step pattern, 6 internal sub-steps (Mesen
+		// ApuFrameCounter):
+		//   step 0 (cycle 7457):  q
+		//   step 1 (cycle 14913): q + h
+		//   step 2 (cycle 22371): q
+		//   step 3 (cycle 29828): IRQ assert, no tick
+		//   step 4 (cycle 29829): q + h + IRQ assert
+		//   step 5 (cycle 29830): IRQ assert, no tick, reset
+		// IRQ is level-triggered + stays asserted across the 3-cycle
+		// window; $4015 read or $4017 inhibit-set acks it. The half-
+		// frame tick at step 4 (cycle 29829) is the key for Blargg
+		// apu_test 5-len_timing which polls between 29831 and 29832.
+		fireIRQ := func() {
+			if a.irqInhibit {
+				return
+			}
+			a.frameIRQFlag = true
+			a.dbgIRQAsserts = append(a.dbgIRQAsserts, a.dbgCycles)
+			if a.irqSink != nil {
+				a.irqSink.AssertIRQSource(frameIRQSource)
+			}
+		}
 		switch a.frameStep {
 		case 0:
 			a.tickQuarterFrame()
@@ -612,23 +654,25 @@ func (a *APU) advanceFrameStep() {
 		case 2:
 			a.tickQuarterFrame()
 		case 3:
+			fireIRQ()
+		case 4:
 			a.tickQuarterFrame()
 			a.tickHalfFrame()
-			// 4-step IRQ fires at the end of each cycle unless
-			// inhibited. Level-triggered; stays asserted until
-			// $4015 read or $4017-inhibit-set acks it.
-			if !a.irqInhibit {
-				a.frameIRQFlag = true
-				a.dbgIRQAsserts = append(a.dbgIRQAsserts, a.dbgCycles)
-				if a.irqSink != nil {
-					a.irqSink.AssertIRQSource(frameIRQSource)
-				}
-			}
+			fireIRQ()
+		case 5:
+			fireIRQ()
 		}
-		a.frameStep = (a.frameStep + 1) & 3
+		a.frameStep = (a.frameStep + 1) % 6
 	} else {
-		// 5-step pattern: q, q+h, q, _, q+h. No IRQ. Step 3 is
-		// idle on real silicon — slight difference vs 4-step.
+		// 5-step pattern, 6 internal sub-steps (Mesen
+		// ApuFrameCounter):
+		//   step 0 (cycle 7457):  q
+		//   step 1 (cycle 14913): q + h
+		//   step 2 (cycle 22371): q
+		//   step 3 (cycle 29829): idle
+		//   step 4 (cycle 37281): q + h
+		//   step 5 (cycle 37282): idle, frame reset
+		// No IRQ in 5-step mode.
 		switch a.frameStep {
 		case 0:
 			a.tickQuarterFrame()
@@ -642,8 +686,10 @@ func (a *APU) advanceFrameStep() {
 		case 4:
 			a.tickQuarterFrame()
 			a.tickHalfFrame()
+		case 5:
+			// idle, frame reset
 		}
-		a.frameStep = (a.frameStep + 1) % 5
+		a.frameStep = (a.frameStep + 1) % 6
 	}
 }
 
