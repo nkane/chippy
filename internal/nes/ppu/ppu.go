@@ -142,6 +142,17 @@ type PPU struct {
 	// relative to a $2001 BG-enable write (#342, Blargg 10-even_odd).
 	oddSkipArmed bool
 
+	// renderingEnabledDelayed mirrors Mesen2's _renderingEnabled — a
+	// 1-PPU-clock delayed view of (mask & 0x18 != 0). Per Mesen
+	// comment: "Rendering enabled flag is apparently set with a 1
+	// cycle delay (i.e setting it at cycle 5 will render cycle 6 like
+	// cycle 5 and then take the new settings for cycle 7)". Updated
+	// at end of each stepDot from the live mask. Used by the
+	// oddSkipArmed check at pre-render dot 339 so Blargg
+	// 10-even_odd_timing sees the BG-enable write at the right cycle
+	// boundary (#372).
+	renderingEnabledDelayed bool
+
 	// masterClock is the PPU's running master-clock counter, advanced
 	// 4 master clocks per dot (NTSC; PAL = 5). The CPU drives PPU.Run
 	// with a deadline in master-clock units; Run advances dot-by-dot
@@ -737,9 +748,12 @@ func (p *PPU) stepDot() {
 		}
 	}
 	// Latch the odd-frame-skip decision at dot 339 of the pre-render
-	// scanline for the next dot's boundary check (#342).
+	// scanline for the next dot's boundary check (#342). Use the
+	// Mesen2 1-PPU-clock-delayed rendering-enabled view so the BG-
+	// enable write timing relative to dot 339 matches the hardware
+	// sample point (Blargg 10-even_odd_timing).
 	if p.scanline == p.timing.PreRenderScanline && p.dot == 339 {
-		p.oddSkipArmed = p.renderingEnabled()
+		p.oddSkipArmed = p.renderingEnabledDelayed
 	}
 	// Per-scanline sprite-0 hit detector (issue #268). At each
 	// visible scanline we live-check whether sprite 0's row at y
@@ -836,6 +850,10 @@ func (p *PPU) stepDot() {
 		p.vblClearAtDots = p.dots
 		p.updateNMI()
 	}
+	// End-of-stepDot: sync the delayed rendering-enabled flag so the
+	// next dot's checks see the previous dot's mask state (Mesen2's
+	// 1-PPU-clock delay model).
+	p.renderingEnabledDelayed = p.mask&0x18 != 0
 }
 
 // FrameBuffer returns a 256 × 240 RGBA byte slice. Indexed row-
