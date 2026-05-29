@@ -86,7 +86,7 @@ func buildBus(rom *nes.ROM) (*bus, error) {
 	if err := mmio.Register(pp); err != nil {
 		return nil, err
 	}
-	if err := mmio.Register(dma.New(mmio, pp, processor)); err != nil {
+	if err := mmio.Register(dma.New(processor)); err != nil {
 		return nil, err
 	}
 	processor.Reset()
