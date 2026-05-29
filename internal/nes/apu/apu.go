@@ -198,7 +198,7 @@ func New() *APU {
 	a := &APU{
 		pulse2:    pulse2,
 		noise:     noiseChannel{lfsr: 1},
-		dmc:       dmcChannel{bufferEmpty: true, silenced: true},
+		dmc:       dmcChannel{bufferEmpty: true, silenced: true, bitsRemaining: 8},
 		mode4Step: true,
 		// alternateTick starts true so that after the 8-cycle reset
 		// loop's stallTicks the APU's per-cycle parity check at $4017
