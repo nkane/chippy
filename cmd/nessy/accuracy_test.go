@@ -86,6 +86,21 @@ var accuracyROMs = []accuracyROM{
 		pathEnv:   "CHIPPY_ACCURACY_INTERRUPTS_BIN",
 		maxFrames: 2400,
 	},
+	{
+		// Blargg apu_test — 8 sub-tests of APU behavior. After
+		// #376/#377 (NTSC 4-step frame intervals + DMC fetch via
+		// ProcessPendingDma) tests 1-4 pass; test 5 (len_timing)
+		// fails with "Second length of mode 0 is too soon" — a
+		// length-counter timing gap separate from the frame
+		// counter work. Tracked under #318; harness logs the
+		// status + skips so the existing PASS suite stays green.
+		name:      "apu_test.nes",
+		url:       "https://github.com/christopherpow/nes-test-roms/raw/master/apu_test/apu_test.nes",
+		sha:       "00d4722bae1c82a14528dd3220462d3fb9ce4b14b8cec996619dea23e07fef0a",
+		pathEnv:   "CHIPPY_ACCURACY_APU_TEST_BIN",
+		maxFrames: 3000,
+		knownFail: "tests 1-4 (irq_flag, len_ctr, len_table, irq_timing) PASS; test 5 (len_timing) fails — length-counter clock alignment relative to half-frame ticks needs a sub-cycle fix",
+	},
 }
 
 func TestAccuracy(t *testing.T) {
