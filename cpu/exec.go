@@ -423,6 +423,25 @@ func branch(c *CPU, addr uint16, take bool) {
 	if !take {
 		return
 	}
+	// 6502 branch-IRQ quirk (Mesen NesCpu::BranchRelative, fixes
+	// cpu_interrupts_v2 test 5 branch_delays_irq): a taken non-
+	// page-crossing branch ignores an IRQ asserted at its last
+	// clock, so the next instruction runs before service. NMI is
+	// NOT affected — only IRQ.
+	//
+	// Mesen's framing: at the end of the branch's operand-fetch
+	// cycle, _runIrq holds the current IRQ state and _prevRunIrq
+	// holds the previous cycle's. A freshly-asserted IRQ here
+	// means _runIrq=true && !_prevRunIrq — roll _runIrq back to
+	// false so the propagation to _prevRunIrq at the end of the
+	// branch's dummy-read cycle leaves _prevRunIrq false, and the
+	// boundary check that follows doesn't service.
+	//
+	// chippy mapping: c.irqPollPrev ↔ _runIrq (current cycle),
+	// c.irqDue ↔ _prevRunIrq (previous cycle). Same rollback.
+	if c.Variant == VariantNES && c.irqPollPrev && !c.irqDue {
+		c.irqPollPrev = false
+	}
 	// Taken branch: +1 cycle (dummy opcode-fetch at the current PC),
 	// +1 more if the target is on a different page.
 	c.extraCycles++
