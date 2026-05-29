@@ -189,6 +189,12 @@ type CPU struct {
 	spriteDmaOffset   byte
 	dmcDmaRunning     bool
 	abortDmcDma       bool
+
+	// dmcFetcher is the APU-side hook ProcessPendingDma calls to
+	// look up the DMC's current read address + push the fetched
+	// byte back into the sample buffer. Wired via SetDMCFetcher
+	// in the nessy build; nil for non-NES variants.
+	dmcFetcher DMCFetcher
 }
 
 // Stall queues N cycles of CPU stall. The very next Step() consumes
@@ -408,6 +414,12 @@ const (
 // double-advance.
 func (c *CPU) read(addr uint16) byte {
 	if c.nesCycle {
+		// Drain any pending DMA window before the actual read so the
+		// bus-steal cycles land on the right side of this read in
+		// the cycle stream (Mesen NesCpu::Read #376).
+		if c.needHalt {
+			c.ProcessPendingDma(addr)
+		}
 		c.instrCycles++
 		c.masterClock += cpuStartReadShift
 		if c.ppuRunner != nil {
