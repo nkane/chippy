@@ -278,12 +278,6 @@ func (a *APU) TriangleLengthCounter() byte { return a.triangle.lengthCounter }
 func (a *APU) NoiseLengthCounter() byte    { return a.noise.lengthCounter }
 func (a *APU) DMCBytesRemaining() uint16   { return a.dmc.bytesRemaining }
 
-// StepDMCFetch is retained as a no-op for callers that haven't yet
-// migrated; #376 Phase 2C moved the per-cycle DMC fetch into
-// cpu.ProcessPendingDma. Always returns true since the channel
-// itself owns no pending-cycle state anymore.
-func (a *APU) StepDMCFetch() bool { return true }
-
 // SetDMCBus wires the CPU bus the DMC reads sample bytes from and
 // the cpu.Stall hook the DMA byte-fetch charges. Optional — when
 // either argument is nil the DMC channel still tracks state but

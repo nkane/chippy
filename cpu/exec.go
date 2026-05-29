@@ -39,17 +39,11 @@ func (c *CPU) Step() int {
 	// while the vblank flag is already set) is delayed one instruction —
 	// matching the 6502's interrupt-poll timing. NMOS/CMOS keep the
 	// immediate edge-service path.
-	// stallJustDrained: skip this Step's interrupt service check.
-	// Mesen2 runs the post-DMA opcode before servicing — match by
-	// consuming the flag and proceeding straight to opcode fetch.
-	suppressService := c.stallJustDrained
-	c.stallJustDrained = false
-
 	nmiTake := c.nmiPending
 	if c.Variant == VariantNES {
 		nmiTake = c.nmiDue
 	}
-	if nmiTake && !suppressService {
+	if nmiTake {
 		c.Halted = false
 		if c.Tracer != nil {
 			c.Tracer.LogInterrupt(c, "NMI", VecNMI)
@@ -65,7 +59,7 @@ func (c *CPU) Step() int {
 		// instruction. cpu_interrupts_v2 cli_latency (#369).
 		irqTake = c.irqDue
 	}
-	if irqTake && !suppressService {
+	if irqTake {
 		c.Halted = false
 		if c.Tracer != nil {
 			c.Tracer.LogInterrupt(c, "IRQ", VecIRQ)
@@ -74,31 +68,6 @@ func (c *CPU) Step() int {
 		c.irqDue = false
 		c.serviceIRQ()
 		return int(c.Cycles - before)
-	}
-
-	// Drain any pending bus-stealing stall (e.g. $4014 OAMDMA) before
-	// fetching the next opcode. The whole counter is consumed as one
-	// block — the PPU / APU sees its cycle delta via the ticker but
-	// no opcode runs this Step. Set stallJustDrained so the interrupt
-	// check ABOVE on the NEXT Step does not fire: Mesen2 runs the
-	// post-DMA opcode first then services the IRQ (#372 test 4).
-	if c.pendingStall > 0 {
-		stalled := c.pendingStall
-		c.pendingStall = 0
-		c.Cycles += uint64(stalled)
-		switch {
-		case c.nesCycle:
-			for range stalled {
-				if c.stallStepper != nil {
-					c.stallStepper.Step()
-				}
-				c.stallTick()
-			}
-		case c.busTicker != nil:
-			c.busTicker.Tick(stalled)
-		}
-		c.stallJustDrained = true
-		return stalled
 	}
 
 	if c.Halted {
