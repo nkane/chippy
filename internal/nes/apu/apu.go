@@ -198,6 +198,7 @@ func New() *APU {
 	a := &APU{
 		pulse2:    pulse2,
 		noise:     noiseChannel{lfsr: 1},
+		dmc:       dmcChannel{bufferEmpty: true, silenced: true},
 		mode4Step: true,
 		// alternateTick starts true so that after the 8-cycle reset
 		// loop's stallTicks the APU's per-cycle parity check at $4017
@@ -410,14 +411,15 @@ func (a *APU) Read(addr uint16) byte {
 	if a.dmc.irqPending {
 		v |= 0x80
 	}
-	// Reading $4015 clears the frame-IRQ flag. DMC IRQ has its own
-	// ack path via dmc.clearIRQ — also fired here per nesdev (one
-	// $4015 read acks both).
+	// Reading $4015 clears the frame-counter IRQ flag only. The DMC
+	// IRQ flag is NOT cleared by a $4015 read — only by a $4015
+	// write (any value) or $4010 write with bit 7 = 0. Mesen2
+	// NesApu.cpp:101 + Blargg apu_test 7-dmc_basics test 10
+	// (#318).
 	a.frameIRQFlag = false
 	if a.irqSink != nil {
 		a.irqSink.ClearIRQSource(frameIRQSource)
 	}
-	a.dmc.clearIRQ(a.irqSink)
 	return v
 }
 
@@ -473,7 +475,7 @@ func (a *APU) Write(addr uint16, v byte) {
 		a.pulse2.setEnabled(v&0x02 != 0)
 		a.triangle.setEnabled(v&0x04 != 0)
 		a.noise.setEnabled(v&0x08 != 0)
-		a.dmc.setEnabled(v&0x10 != 0)
+		a.dmc.setEnabled(v&0x10 != 0, a.dmcStaller)
 		// Writing $4015 also clears the DMC IRQ flag (per nesdev).
 		a.dmc.clearIRQ(a.irqSink)
 	}

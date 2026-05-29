@@ -186,14 +186,15 @@ func TestDMC_LoopReloadsOnExhaustion(t *testing.T) {
 	}
 }
 
-// $4015 read clears the pending DMC IRQ flag + drops the sink
-// assertion.
-func TestDMC_Read4015ClearsDMCIRQ(t *testing.T) {
+// $4015 read surfaces the DMC IRQ flag in bit 7 but does NOT clear
+// it — per nesdev + Mesen2 NesApu.cpp:101. Only $4015 write (any
+// value) or $4010 write with bit 7 clear acks DMC IRQ. Blargg
+// apu_test 7-dmc_basics test 10 pins this.
+func TestDMC_Read4015DoesNotClearDMCIRQ(t *testing.T) {
 	a := New()
 	s := NewStatus(a)
 	sink := newFakeSink()
 	a.SetIRQSink(sink)
-	// Force IRQ-pending state directly (skip the full DMA dance).
 	a.dmc.irqPending = true
 	sink.AssertIRQSource(dmcIRQSource)
 
@@ -201,11 +202,11 @@ func TestDMC_Read4015ClearsDMCIRQ(t *testing.T) {
 	if v&0x80 == 0 {
 		t.Errorf("$4015 read = $%02X; want bit 7 set", v)
 	}
-	if a.dmc.irqPending {
-		t.Errorf("$4015 read didn't clear DMC IRQ flag")
+	if !a.dmc.irqPending {
+		t.Errorf("$4015 read cleared DMC IRQ flag; want it to stay")
 	}
-	if sink.cleared[dmcIRQSource] == 0 {
-		t.Errorf("$4015 read didn't ClearIRQSource(dmc)")
+	if sink.cleared[dmcIRQSource] != 0 {
+		t.Errorf("$4015 read called ClearIRQSource(dmc); want no clear")
 	}
 }
 
