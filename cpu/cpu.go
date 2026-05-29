@@ -154,6 +154,14 @@ type CPU struct {
 	// window (#372 test 4 irq_and_dma). nil for non-NES variants and
 	// for pre-OAMDMA wiring.
 	stallStepper StallStepper
+
+	// stallJustDrained is set by the stall-drain branch in Step and
+	// read at the next Step's entry to suppress the interrupt-poll
+	// service check on that one Step. Mesen2's OAMDMA model runs the
+	// post-DMA opcode BEFORE servicing IRQ that asserted mid-DMA, so
+	// chippy needs to skip its boundary-check service exactly once
+	// after a stall drain to match (#372 test 4).
+	stallJustDrained bool
 }
 
 // Stall queues N cycles of CPU stall. The very next Step() consumes
