@@ -109,12 +109,25 @@ func (d *dmcChannel) writeReg3(v byte) {
 // length IF bytes-remaining is currently zero (per nesdev — avoids
 // restarting a sample mid-play). Disabling clears bytes-remaining
 // + the IRQ flag; output level + sample buffer survive.
-func (d *dmcChannel) setEnabled(on bool) {
+//
+// When enabling with the sample buffer empty + bytesRemaining > 0
+// after reload, immediately flag a DMA fetch via the CPU sink.
+// Mesen2 DeltaModulationChannel::SetEnabled delays this by 2-3 CPU
+// cycles depending on cycle parity; chippy fires inline since the
+// CPU's ProcessPendingDma drains on the next bus read regardless
+// and Blargg apu_test 7-dmc_basics test 19 cares only that the
+// fetch happens before the user-visible $4015 poll a few dozen
+// cycles later (#318).
+func (d *dmcChannel) setEnabled(on bool, staller DMCStaller) {
 	d.enabled = on
 	if on {
 		if d.bytesRemaining == 0 {
 			d.currentAddr = d.sampleAddrBase
 			d.bytesRemaining = d.sampleLenBase
+		}
+		if d.bytesRemaining > 0 && d.bufferEmpty && staller != nil && !d.fetchPending {
+			d.fetchPending = true
+			staller.SetNeedDmcDma()
 		}
 	} else {
 		d.bytesRemaining = 0
@@ -157,25 +170,37 @@ func (d *dmcChannel) clockShift() {
 	d.bitsRemaining--
 }
 
-// maybeRefill restocks the shift register from the sample buffer
-// when the 8-bit unit is exhausted. If the buffer is empty and the
-// sample pointer still has bytes to fetch, signal the CPU's DMA
-// state machine (#376 Phase 2C); ProcessPendingDma drains the
-// 4-cycle (or 6 under contention) bus-steal on the next opcode
-// fetch and pushes the byte back through APU.SetDmcReadBuffer.
+// maybeRefill is two real-silicon ops fused: (1) the output unit
+// reloads the shift register from the sample buffer when the 8-bit
+// unit is exhausted, and (2) the memory reader queues a DMA refill
+// when the sample buffer is empty + the byte counter still has
+// bytes. Either or both can fire on a single call; an empty buffer
+// only silences the channel when the byte counter is also zero
+// (otherwise the fetch we just queued will refill it).
+//
+// (#376 Phase 2C) The fetch path doesn't read directly — it sets
+// fetchPending + calls cpu.SetNeedDmcDma; ProcessPendingDma drains
+// the 4-cycle (or 6 under contention) bus-steal on the next CPU
+// read and pushes the byte back through APU.SetDmcReadBuffer.
 func (d *dmcChannel) maybeRefill(_ DMCBus, staller DMCStaller, _ IRQSink) {
 	if d.bitsRemaining != 0 {
 		return
 	}
-	if d.bufferEmpty {
+	// Output unit: reload shifter from buffer if anything's there.
+	if !d.bufferEmpty {
+		d.silenced = false
+		d.shiftRegister = d.sampleBuffer
+		d.bufferEmpty = true
+		d.bitsRemaining = 8
+	} else if d.bytesRemaining == 0 {
+		// Buffer empty + no more bytes — silence.
 		d.silenced = true
-		return
 	}
-	d.silenced = false
-	d.shiftRegister = d.sampleBuffer
-	d.bufferEmpty = true
-	d.bitsRemaining = 8
-
+	// Memory reader: queue a DMA refill if the buffer is empty +
+	// the byte counter is still alive. The bufferEmpty check above
+	// always leaves it true at this point (either the reload set
+	// it, or it was already true). Skip if a fetch is already in
+	// flight (the channel pending one byte at a time).
 	if d.bytesRemaining > 0 && staller != nil && !d.fetchPending {
 		d.fetchPending = true
 		staller.SetNeedDmcDma()

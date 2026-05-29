@@ -99,7 +99,7 @@ var accuracyROMs = []accuracyROM{
 		sha:       "00d4722bae1c82a14528dd3220462d3fb9ce4b14b8cec996619dea23e07fef0a",
 		pathEnv:   "CHIPPY_ACCURACY_APU_TEST_BIN",
 		maxFrames: 3000,
-		knownFail: "tests 1-6 PASS (incl. 5-len_timing after the 6-internal-sub-step frame counter); 7-dmc_basics + 8-dmc_rates fail — DMC accuracy gaps tracked separately",
+		knownFail: "tests 1-7 PASS (incl. 7-dmc_basics after the DMC enable-fetch + $4015 read fixes); 8-dmc_rates fails at sub-test 3 ('Rate 0's period is too long') — DMC fetch decrement timing across multiple bytes needs alignment to Mesen",
 	},
 }
 
