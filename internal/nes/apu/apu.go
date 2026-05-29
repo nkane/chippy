@@ -297,6 +297,57 @@ func (a *APU) SetDMCBus(bus DMCBus, staller DMCStaller) {
 	a.dmcStaller = staller
 }
 
+// GetDmcReadAddress returns the sample address the DMC will fetch
+// from on its next byte read. Exposed for the CPU's
+// ProcessPendingDma loop (#376) so the DMA cycle can issue the
+// memory read directly via the CPU bus and route the result back
+// through SetDmcReadBuffer. Mirrors Mesen2 NesApu::GetDmcReadAddress.
+func (a *APU) GetDmcReadAddress() uint16 {
+	return a.dmc.currentAddr
+}
+
+// SetDmcReadBuffer hands a byte fetched by the CPU's DMA loop
+// (#376) into the DMC sample buffer + advances the read pointer,
+// decrements bytes-remaining, and fires loop / IRQ on exhaustion.
+// Mirrors Mesen2 NesApu::SetDmcReadBuffer + the tail end of the
+// per-cycle DMC fetch path that previously lived in dmcChannel.Step.
+func (a *APU) SetDmcReadBuffer(v byte) {
+	d := &a.dmc
+	d.sampleBuffer = v
+	d.bufferEmpty = false
+	if d.currentAddr == 0xFFFF {
+		d.currentAddr = 0x8000
+	} else {
+		d.currentAddr++
+	}
+	if d.bytesRemaining > 0 {
+		d.bytesRemaining--
+	}
+	if d.bytesRemaining == 0 {
+		if d.loop {
+			d.currentAddr = d.sampleAddrBase
+			d.bytesRemaining = d.sampleLenBase
+		} else if d.irqEnable {
+			d.irqPending = true
+			if a.irqSink != nil {
+				a.irqSink.AssertIRQSource(dmcIRQSource)
+			}
+		}
+	}
+}
+
+// DmcFetchPending reports whether the DMC has signalled it needs a
+// new sample byte from the CPU bus. The CPU's ProcessPendingDma
+// loop (#376) reads this each cycle to decide whether to merge a
+// DMC fetch into the running DMA window. Replaces the older
+// fetchPending flag the stall-stepper consulted directly.
+func (a *APU) DmcFetchPending() bool { return a.dmc.fetchPending }
+
+// ClearDmcFetchPending marks the DMC fetch as serviced by the CPU's
+// ProcessPendingDma loop. Called from the CPU after it has issued
+// the sample read + handed the byte back via SetDmcReadBuffer.
+func (a *APU) ClearDmcFetchPending() { a.dmc.fetchPending = false }
+
 // Read services CPU reads. $4015 returns the per-channel status +
 // IRQ flags; reading also clears the frame-IRQ flag (per nesdev).
 // Other register addresses return open-bus 0.
