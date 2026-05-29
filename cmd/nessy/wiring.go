@@ -16,19 +16,6 @@ import (
 	"github.com/nkane/chippy/internal/nes/ppu"
 )
 
-// dmaScheduler runs OAMDMA + DMC fetch steppers per CPU stall cycle.
-// Implements cpu.StallStepper — returns true when both are idle.
-type dmaScheduler struct {
-	oam *dma.OAMDMA
-	ap  *apu.APU
-}
-
-func (s *dmaScheduler) Step() bool {
-	oamDone := s.oam.Step()
-	dmcDone := s.ap.StepDMCFetch()
-	return oamDone && dmcDone
-}
-
 // nesBus is the assembled NES — every component the Ebiten game loop or
 // the DAP server needs to touch. cart is exposed for save-state work
 // (battery PRG-RAM); ram is the 2 KiB internal RAM mirrored at $0000-
@@ -98,6 +85,11 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 	// 4-cycle bus-steal stall.
 	ap.SetIRQSink(processor)
 	ap.SetDMCBus(mmio, processor)
+	// CPU drives DMC sample fetches inside ProcessPendingDma (#376).
+	// The APU exposes GetDmcReadAddress / SetDmcReadBuffer so the
+	// CPU's DMA loop can issue the read on the right cycle within
+	// the bus-steal window.
+	processor.SetDMCFetcher(ap)
 	// MMC3 carts assert IRQ on the named "mmc3" source via the same
 	// multi-source pump. Type-assertion through the interface so
 	// non-MMC3 carts (NROM / MMC1 / UxROM / CNROM) silently skip
@@ -137,12 +129,10 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 		return nil, err
 	}
 
-	// $4014 OAMDMA. Reads bytes from the CPU bus (via MMIO) and pushes
-	// them into the PPU's OAM cursor. Must register AFTER the PPU so
-	// the source-byte reads for $2000-$3FFF cases land on the live
-	// PPU. The 513-cycle bus-steal stall flows through cpu.Stall →
-	// Step()'s drain on the next instruction boundary.
-	oam := dma.New(mmio, pp, processor)
+	// $4014 OAMDMA. Hands the source page to the CPU's sprite-DMA
+	// state machine; cpu.ProcessPendingDma drains the 513/514-cycle
+	// transfer on the next read (#376 Phase 2B).
+	oam := dma.New(processor)
 	if err := mmio.Register(oam); err != nil {
 		return nil, err
 	}
@@ -160,13 +150,6 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 	// matching Mesen2's interleave (#372 redesign).
 	processor.SetPPURunner(pp)
 	pp.SetCPUDriven(true)
-
-	// Per-cycle DMA scheduler: OAMDMA + DMC fetches step alongside the
-	// CPU's stall drain so reads land on the right cycle within the
-	// bus-steal window (#372 test 4). Both peripherals get a Step call
-	// per stall cycle — OAMDMA does its 256 read/write pairs over 513
-	// cycles, DMC does its 4-cycle halt+read.
-	processor.SetStallStepper(&dmaScheduler{oam: oam, ap: ap})
 
 	// Re-run reset now that the PPU is registered. Some ROMs touch PPU
 	// registers in their very first instructions, so we want those to

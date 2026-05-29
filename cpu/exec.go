@@ -39,17 +39,11 @@ func (c *CPU) Step() int {
 	// while the vblank flag is already set) is delayed one instruction —
 	// matching the 6502's interrupt-poll timing. NMOS/CMOS keep the
 	// immediate edge-service path.
-	// stallJustDrained: skip this Step's interrupt service check.
-	// Mesen2 runs the post-DMA opcode before servicing — match by
-	// consuming the flag and proceeding straight to opcode fetch.
-	suppressService := c.stallJustDrained
-	c.stallJustDrained = false
-
 	nmiTake := c.nmiPending
 	if c.Variant == VariantNES {
 		nmiTake = c.nmiDue
 	}
-	if nmiTake && !suppressService {
+	if nmiTake {
 		c.Halted = false
 		if c.Tracer != nil {
 			c.Tracer.LogInterrupt(c, "NMI", VecNMI)
@@ -65,7 +59,7 @@ func (c *CPU) Step() int {
 		// instruction. cpu_interrupts_v2 cli_latency (#369).
 		irqTake = c.irqDue
 	}
-	if irqTake && !suppressService {
+	if irqTake {
 		c.Halted = false
 		if c.Tracer != nil {
 			c.Tracer.LogInterrupt(c, "IRQ", VecIRQ)
@@ -74,31 +68,6 @@ func (c *CPU) Step() int {
 		c.irqDue = false
 		c.serviceIRQ()
 		return int(c.Cycles - before)
-	}
-
-	// Drain any pending bus-stealing stall (e.g. $4014 OAMDMA) before
-	// fetching the next opcode. The whole counter is consumed as one
-	// block — the PPU / APU sees its cycle delta via the ticker but
-	// no opcode runs this Step. Set stallJustDrained so the interrupt
-	// check ABOVE on the NEXT Step does not fire: Mesen2 runs the
-	// post-DMA opcode first then services the IRQ (#372 test 4).
-	if c.pendingStall > 0 {
-		stalled := c.pendingStall
-		c.pendingStall = 0
-		c.Cycles += uint64(stalled)
-		switch {
-		case c.nesCycle:
-			for range stalled {
-				if c.stallStepper != nil {
-					c.stallStepper.Step()
-				}
-				c.stallTick()
-			}
-		case c.busTicker != nil:
-			c.busTicker.Tick(stalled)
-		}
-		c.stallJustDrained = true
-		return stalled
 	}
 
 	if c.Halted {
@@ -453,6 +422,25 @@ func opRTI(c *CPU, _ uint16, _ AddrMode) {
 func branch(c *CPU, addr uint16, take bool) {
 	if !take {
 		return
+	}
+	// 6502 branch-IRQ quirk (Mesen NesCpu::BranchRelative, fixes
+	// cpu_interrupts_v2 test 5 branch_delays_irq): a taken non-
+	// page-crossing branch ignores an IRQ asserted at its last
+	// clock, so the next instruction runs before service. NMI is
+	// NOT affected — only IRQ.
+	//
+	// Mesen's framing: at the end of the branch's operand-fetch
+	// cycle, _runIrq holds the current IRQ state and _prevRunIrq
+	// holds the previous cycle's. A freshly-asserted IRQ here
+	// means _runIrq=true && !_prevRunIrq — roll _runIrq back to
+	// false so the propagation to _prevRunIrq at the end of the
+	// branch's dummy-read cycle leaves _prevRunIrq false, and the
+	// boundary check that follows doesn't service.
+	//
+	// chippy mapping: c.irqPollPrev ↔ _runIrq (current cycle),
+	// c.irqDue ↔ _prevRunIrq (previous cycle). Same rollback.
+	if c.Variant == VariantNES && c.irqPollPrev && !c.irqDue {
+		c.irqPollPrev = false
 	}
 	// Taken branch: +1 cycle (dummy opcode-fetch at the current PC),
 	// +1 more if the target is on a different page.

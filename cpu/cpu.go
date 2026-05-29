@@ -143,49 +143,47 @@ type CPU struct {
 	// never receives a tagged-source call has no map overhead.
 	irqSources map[string]struct{}
 
-	// pendingStall is a cycle debt owed to a peripheral that took over
-	// the bus (e.g. $4014 OAMDMA). The next Step() drains the whole
-	// counter as one block — bus ticks fire, c.Cycles advances, no
-	// opcode executes. See Stall().
+	// pendingStall is retained as a v1 save-state field (frozen
+	// per docs/state-format.md). #376 retired the Stall + drain
+	// path in favor of ProcessPendingDma; this counter is never
+	// touched by the live emulator anymore but stays in the JSON
+	// schema for backward compat with v1.x save-state files.
 	pendingStall int
 
-	// stallStepper runs one DMA-state-machine step per stall cycle so
-	// the peripheral can spread its bus reads/writes across the stall
-	// window (#372 test 4 irq_and_dma). nil for non-NES variants and
-	// for pre-OAMDMA wiring.
-	stallStepper StallStepper
+	// Per-cycle DMA state machine fields (#376, Mesen2 ProcessPendingDma
+	// port). The whole DMA loop runs inside CPU.read at opcode-fetch
+	// time when needHalt is set. Peripherals (OAMDMA writes to $4014,
+	// DMC sample fetches) drive these flags; the CPU drains them.
+	//
+	// needHalt — pending DMA halt cycle. Set by SetNeedSpriteDma or
+	//   SetNeedDmcDma. Cleared when ProcessPendingDma services the halt.
+	// spriteDmaTransfer — OAMDMA active. Set by OAMDMA.Write; cleared
+	//   when the 256 read/write pairs finish.
+	// spriteDmaOffset — high byte of the OAMDMA source page (= $4014 value).
+	// dmcDmaRunning — DMC sample fetch active. Set by DMC.maybeRefill
+	//   via cpu.SetNeedDmcDma; cleared after the read+SetDmcReadBuffer.
+	// abortDmcDma — DMC fetch cancelled (e.g. $4015 disable mid-fetch).
+	//   ProcessPendingDma honours this on its next iteration.
+	//
+	// All fields stay zero on non-NES variants. Wiring lives in the
+	// nessy build (OAMDMA.Write + DMC.maybeRefill call SetNeed*).
+	needHalt          bool
+	spriteDmaTransfer bool
+	spriteDmaOffset   byte
+	dmcDmaRunning     bool
+	abortDmcDma       bool
 
-	// stallJustDrained is set by the stall-drain branch in Step and
-	// read at the next Step's entry to suppress the interrupt-poll
-	// service check on that one Step. Mesen2's OAMDMA model runs the
-	// post-DMA opcode BEFORE servicing IRQ that asserted mid-DMA, so
-	// chippy needs to skip its boundary-check service exactly once
-	// after a stall drain to match (#372 test 4).
-	stallJustDrained bool
-}
-
-// Stall queues N cycles of CPU stall. The very next Step() consumes
-// the whole queue as a single non-opcode unit: the bus ticker (PPU /
-// APU) sees the cycle delta, Cycles advances, no opcode fetches.
-//
-// Designed for bus-stealing peripherals — OAMDMA writes 256 bytes and
-// reports its 513-cycle stall via this hook. Multiple calls accumulate.
-func (c *CPU) Stall(cycles int) {
-	if cycles > 0 {
-		c.pendingStall += cycles
-	}
+	// dmcFetcher is the APU-side hook ProcessPendingDma calls to
+	// look up the DMC's current read address + push the fetched
+	// byte back into the sample buffer. Wired via SetDMCFetcher
+	// in the nessy build; nil for non-NES variants.
+	dmcFetcher DMCFetcher
 }
 
 // CurrentCycle returns the running CPU cycle counter. Bus-stealing
-// peripherals (OAMDMA, DMC sample fetch) read this to align their
-// dummy-cycle penalties against odd vs even CPU cycles.
+// peripherals read this to align dummy-cycle penalties against
+// even/odd CPU cycle parity.
 func (c *CPU) CurrentCycle() uint64 { return c.Cycles }
-
-// PendingStall returns the un-drained stall debt queued by an earlier
-// peripheral (typically OAMDMA). A non-zero value at DMC-fetch time
-// signals bus contention — the DMC fetch lands inside the OAMDMA
-// window and pays a 2-cycle alignment penalty per nesdev (#300).
-func (c *CPU) PendingStall() int { return c.pendingStall }
 
 func New(bus Bus) *CPU {
 	return NewVariant(bus, VariantNMOS)
@@ -200,10 +198,36 @@ func NewVariant(bus Bus, v Variant) *CPU {
 	return c
 }
 
-// SetStallStepper wires the per-cycle DMA hook called during stall
-// drains (#372 test 4). nil resets to "no per-cycle action" (legacy
-// behavior — peripheral did all bus reads upfront via batch).
-func (c *CPU) SetStallStepper(s StallStepper) { c.stallStepper = s }
+// SetNeedSpriteDma signals that a $4014 OAMDMA write just landed.
+// page is the value written to $4014 ($XX → source page $XX00).
+// The CPU's ProcessPendingDma loop (#376) consumes this on the
+// next opcode fetch. Replaces the OAMDMA-side Stall(513) call
+// pattern; peripheral only sets the state, CPU drains it.
+func (c *CPU) SetNeedSpriteDma(page byte) {
+	c.spriteDmaOffset = page
+	c.spriteDmaTransfer = true
+	c.needHalt = true
+}
+
+// SetNeedDmcDma signals that the DMC needs a sample byte. Called
+// from dmcChannel.maybeRefill when its sample buffer is empty +
+// bytes-remaining > 0. The CPU's ProcessPendingDma loop fetches
+// the byte (via APU.GetDmcReadAddress) and pushes it back through
+// APU.SetDmcReadBuffer.
+func (c *CPU) SetNeedDmcDma() {
+	c.dmcDmaRunning = true
+	c.needHalt = true
+}
+
+// AbortDmcDma cancels an in-flight DMC fetch (e.g. $4015 disable
+// or $4010 IRQ-off mid-DMA). ProcessPendingDma honours the flag
+// on its next iteration, dropping dmcDmaRunning before issuing
+// the read.
+func (c *CPU) AbortDmcDma() { c.abortDmcDma = true }
+
+// NeedHalt reports whether a DMA halt cycle is pending. Exposed
+// for #376 tests + the future ProcessPendingDma hot path.
+func (c *CPU) NeedHalt() bool { return c.needHalt }
 
 // SetPPURunner wires the PPU master-clock-deadline hook. After this
 // call the NES variant's read/write/idle paths split the cycle's
@@ -287,11 +311,9 @@ func (c *CPU) setZN(v byte) {
 // stack
 
 // stallTick advances master-clock + PPU + APU by one full CPU cycle
-// without a bus access. Used by the OAMDMA stall drain — the bus is
-// stolen by the peripheral so the CPU sees an opaque "wait one cycle"
-// per stall unit, but the PPU/APU still need to advance + interrupt
-// poll latches still advance with each cycle (#372 test 4 needs this
-// to detect IRQ assertions that happen mid-DMA at the right cycle).
+// without a bus access. Used by Reset's 8-cycle warmup pass on
+// VariantNES to seed the APU's $4017 reset-delay state. The DMA
+// path uses dmaStartCycle / dmaEndCycle instead (#376).
 func (c *CPU) stallTick() {
 	c.instrCycles++
 	c.masterClock += cpuDivider
@@ -350,6 +372,12 @@ const (
 // double-advance.
 func (c *CPU) read(addr uint16) byte {
 	if c.nesCycle {
+		// Drain any pending DMA window before the actual read so the
+		// bus-steal cycles land on the right side of this read in
+		// the cycle stream (Mesen NesCpu::Read #376).
+		if c.needHalt {
+			c.ProcessPendingDma(addr)
+		}
 		c.instrCycles++
 		c.masterClock += cpuStartReadShift
 		if c.ppuRunner != nil {

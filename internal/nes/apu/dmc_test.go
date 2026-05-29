@@ -18,13 +18,14 @@ func (b *fakeDMCBus) Read(addr uint16) byte {
 	return b.bytes[int(addr)%len(b.bytes)]
 }
 
+// fakeDMCStaller records CPU-side DMA-fetch signals. The real CPU
+// drains the bus-steal inside ProcessPendingDma (#376); tests stand
+// in by counting SetNeedDmcDma calls.
 type fakeDMCStaller struct {
-	stalled int
-	pending int // simulated OAMDMA debt for contention tests
+	needCalls int
 }
 
-func (s *fakeDMCStaller) Stall(c int)       { s.stalled += c }
-func (s *fakeDMCStaller) PendingStall() int { return s.pending }
+func (s *fakeDMCStaller) SetNeedDmcDma() { s.needCalls++ }
 
 // helper: configures DMC with a tiny sample (one byte) starting at
 // $C000, rate idx 0 (fastest), no loop / no IRQ.
@@ -71,113 +72,86 @@ func TestDMC_DirectOutputWriteOverridesLevel(t *testing.T) {
 	}
 }
 
-// Sample fetch on timer expiry reads from the configured base
-// address + charges 4 stall cycles per byte. Pump the timer just
-// long enough to drive the first DMA cycle.
-func TestDMC_FetchReadsBaseAddressAndStalls(t *testing.T) {
+// Timer expiry that empties the sample buffer signals the CPU via
+// SetNeedDmcDma — the actual bus.Read runs inside ProcessPendingDma
+// on the next opcode fetch (#376 Phase 2C). Verify the signal fires.
+func TestDMC_TimerExpirySignalsFetch(t *testing.T) {
 	a := New()
 	s := NewStatus(a)
 	bus := &fakeDMCBus{bytes: []byte{0xC3, 0x5A, 0xFF}}
 	staller := &fakeDMCStaller{}
 	setupDMC(a, bus, staller, nil)
-	a.Write(0x4013, 0x01) // length = 17 bytes (so multiple fetches happen)
+	a.Write(0x4013, 0x01) // length = 17 bytes
 	s.Write(0x4015, 0x10)
 
-	// Pump enough cycles to drain one shift-register unit (8 bits)
-	// + trigger one refill. rateIdx 0 = 428 CPU cycles per shift; 8
-	// shifts ≈ 3424 cycles. Add headroom.
-	// Drive in chunks so we can drain pending DMC fetches between Ticks
-	// (real CPU calls StepDMCFetch from its stall drain; tests here
-	// don't have a CPU, so we drain manually).
-	for i := 0; i < 50; i++ {
-		a.Tick(100)
-		for !a.StepDMCFetch() {
-		}
-	}
+	// Pump enough cycles to drain one shift unit (8 bits) and trigger
+	// a refill request. rateIdx 0 = 428 CPU cycles per shift.
+	a.Tick(5000)
 
-	if len(bus.reads) == 0 {
-		t.Fatalf("DMC didn't read any sample bytes")
+	if staller.needCalls == 0 {
+		t.Fatalf("DMC didn't request a CPU-side DMA fetch (SetNeedDmcDma calls = 0)")
 	}
-	if first := bus.reads[0]; first != 0xC000 {
-		t.Errorf("first DMC read = $%04X; want $C000", first)
+	if !a.DmcFetchPending() {
+		t.Errorf("DmcFetchPending = false; want true after refill request")
 	}
-	if staller.stalled < 4 {
-		t.Errorf("DMC didn't charge stall cycles; got %d, want >= 4", staller.stalled)
+	if got := a.GetDmcReadAddress(); got != 0xC000 {
+		t.Errorf("GetDmcReadAddress = $%04X; want $C000 (sample base)", got)
 	}
 }
 
-// DMC/OAMDMA contention (#300): when the staller already has
-// pending OAMDMA debt, each DMC fetch pays 2 extra cycles for the
-// bus-alignment penalty. With no pending debt the standard 4-cycle
-// stall stands.
-func TestDMC_OAMDMAContentionAdds2Cycles(t *testing.T) {
-	// Baseline: fetch with no OAMDMA pending → 4-cycle stall per fetch.
+// SetDmcReadBuffer hands a fetched byte back to the channel,
+// advances the sample pointer, decrements bytesRemaining, and
+// clears the fetch-pending flag so the next timer expiry can
+// queue another fetch.
+func TestDMC_SetDmcReadBufferAdvancesPointer(t *testing.T) {
 	a := New()
 	s := NewStatus(a)
-	bus := &fakeDMCBus{bytes: []byte{0x00}}
+	bus := &fakeDMCBus{bytes: []byte{0xAA, 0xBB}}
 	staller := &fakeDMCStaller{}
 	setupDMC(a, bus, staller, nil)
-	a.Write(0x4013, 0x00) // 1-byte sample
+	a.Write(0x4013, 0x01) // length = 17
 	s.Write(0x4015, 0x10)
-	for i := 0; i < 50; i++ {
-		a.Tick(100)
-		for !a.StepDMCFetch() {
-		}
-	}
-	baseline := staller.stalled
-	if baseline%4 != 0 {
-		t.Fatalf("baseline stall %d not a multiple of 4 — fetch path drifted", baseline)
-	}
+	a.Tick(5000) // drive a refill request
 
-	// Contention: same setup but staller reports pending OAMDMA
-	// debt at fetch time → each fetch charges 6 instead of 4.
-	a2 := New()
-	s2 := NewStatus(a2)
-	bus2 := &fakeDMCBus{bytes: []byte{0x00}}
-	staller2 := &fakeDMCStaller{pending: 100} // any non-zero
-	setupDMC(a2, bus2, staller2, nil)
-	a2.Write(0x4013, 0x00)
-	s2.Write(0x4015, 0x10)
-	for i := 0; i < 50; i++ {
-		a2.Tick(100)
-		for !a2.StepDMCFetch() {
-		}
+	pre := a.dmc.bytesRemaining
+	a.SetDmcReadBuffer(0x77)
+
+	if a.dmc.sampleBuffer != 0x77 {
+		t.Errorf("sampleBuffer = $%02X; want $77", a.dmc.sampleBuffer)
 	}
-	contended := staller2.stalled
-	if baseline == 0 || contended == 0 {
-		t.Fatalf("no fetches happened (baseline=%d contended=%d)", baseline, contended)
+	if a.dmc.bufferEmpty {
+		t.Errorf("bufferEmpty = true; want false after fill")
 	}
-	// Same number of fetches between the two runs → contended
-	// stall should be baseline + 2*fetches.
-	fetches := baseline / 4
-	want := contended
-	if got := baseline + 2*fetches; got != want {
-		t.Errorf("contended stall = %d; baseline=%d fetches=%d want %d", contended, baseline, fetches, got)
+	if a.dmc.bytesRemaining != pre-1 {
+		t.Errorf("bytesRemaining = %d; want %d", a.dmc.bytesRemaining, pre-1)
+	}
+	if a.dmc.currentAddr != 0xC001 {
+		t.Errorf("currentAddr = $%04X; want $C001 (advanced)", a.dmc.currentAddr)
+	}
+	if a.DmcFetchPending() {
+		t.Errorf("DmcFetchPending = true; want false after SetDmcReadBuffer")
 	}
 }
 
 // fakeIRQSink reuses the helper from irq_test.go (same package).
 // Loop disabled + IRQ enabled fires the DMC IRQ when bytes-
-// remaining reaches zero.
+// remaining reaches zero. Drive via SetDmcReadBuffer (the path the
+// CPU's ProcessPendingDma takes).
 func TestDMC_IRQAssertsOnExhaustion(t *testing.T) {
 	a := New()
 	s := NewStatus(a)
-	bus := &fakeDMCBus{bytes: []byte{0xFF}}
 	staller := &fakeDMCStaller{}
 	sink := newFakeSink()
-	a.SetDMCBus(bus, staller)
+	a.SetDMCBus(&fakeDMCBus{bytes: []byte{0xFF}}, staller)
 	a.SetIRQSink(sink)
 	a.Write(0x4010, 0x80) // IRQ enabled, loop off, rate idx 0
 	a.Write(0x4012, 0x00) // base $C000
 	a.Write(0x4013, 0x00) // length 1 byte
 	s.Write(0x4015, 0x10)
 
-	// Run enough cycles to fetch + exhaust the single-byte sample.
-	for i := 0; i < 1000; i++ {
-		a.Tick(100)
-		for !a.StepDMCFetch() {
-		}
-	}
+	// Feed one byte through the CPU-side hook to exhaust the 1-byte
+	// sample.
+	a.SetDmcReadBuffer(0xFF)
 
 	if !a.dmc.irqPending {
 		t.Errorf("DMC IRQ flag not pending after sample exhaustion")
@@ -192,17 +166,17 @@ func TestDMC_IRQAssertsOnExhaustion(t *testing.T) {
 func TestDMC_LoopReloadsOnExhaustion(t *testing.T) {
 	a := New()
 	s := NewStatus(a)
-	bus := &fakeDMCBus{bytes: []byte{0xAA}}
 	staller := &fakeDMCStaller{}
 	sink := newFakeSink()
-	a.SetDMCBus(bus, staller)
+	a.SetDMCBus(&fakeDMCBus{bytes: []byte{0xAA}}, staller)
 	a.SetIRQSink(sink)
 	a.Write(0x4010, 0x40) // loop on, IRQ off, rate idx 0
 	a.Write(0x4012, 0x00)
 	a.Write(0x4013, 0x00) // length 1
 	s.Write(0x4015, 0x10)
 
-	a.Tick(100_000)
+	// One CPU-side fetch exhausts the 1-byte sample; loop should reload.
+	a.SetDmcReadBuffer(0xAA)
 
 	if a.dmc.bytesRemaining == 0 {
 		t.Errorf("loop should reload bytesRemaining; got 0")

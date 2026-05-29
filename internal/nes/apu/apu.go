@@ -43,6 +43,23 @@ const (
 	quarterFrameCycles = 7457    // NTSC 240 Hz frame-counter step (CPU cycles)
 )
 
+// frameStepIntervalsNtsc4Step is the cycle delay until the NEXT step
+// fires after the current step does, for NTSC 4-step mode. Mesen2
+// ApuFrameCounter.h:19 step boundaries — {7457, 14913, 22371, 29828}
+// with reset at 29830 — translate to per-step intervals:
+//
+//	step 0 → step 1: 14913 - 7457 = 7456
+//	step 1 → step 2: 22371 - 14913 = 7458
+//	step 2 → step 3: 29828 - 22371 = 7457
+//	step 3 → step 0: 29830 + 7457 - 29828 = 7459 (incl. 2-cycle IRQ tail)
+//
+// Sum = 29830 cycles per full frame cycle, matching nesdev's published
+// 4-step total and what cpu_interrupts_v2 test 5's IRQ-handler loop
+// (delay 29831-13 + 4 + 4 = 29830 cycles per iter) calibrates against.
+// chippy's previous uniform 7457 reload summed to 29828 — 2 cycles
+// short per frame, accumulating the drift that broke test 5 sync.
+var frameStepIntervalsNtsc4Step = [4]int{7456, 7458, 7457, 7459}
+
 // IRQSink is the CPU's named-source IRQ surface from the APU's
 // point of view (see cpu.AssertIRQSource / cpu.ClearIRQSource). The
 // APU asserts under name "apu-frame" at the end of each 4-step
@@ -278,15 +295,6 @@ func (a *APU) TriangleLengthCounter() byte { return a.triangle.lengthCounter }
 func (a *APU) NoiseLengthCounter() byte    { return a.noise.lengthCounter }
 func (a *APU) DMCBytesRemaining() uint16   { return a.dmc.bytesRemaining }
 
-// StepDMCFetch runs one cycle of the DMC's pending DMA bus-steal. The
-// CPU's stall drain calls this alongside the OAMDMA stepper so the DMC
-// sample read happens on the right CPU cycle within the 4-cycle stall
-// window (#372 test 4). Returns true when no DMC fetch is pending.
-func (a *APU) StepDMCFetch() bool {
-	a.dmc.Step(a.dmcBus, a.irqSink)
-	return !a.dmc.fetchPending
-}
-
 // SetDMCBus wires the CPU bus the DMC reads sample bytes from and
 // the cpu.Stall hook the DMA byte-fetch charges. Optional — when
 // either argument is nil the DMC channel still tracks state but
@@ -296,6 +304,58 @@ func (a *APU) SetDMCBus(bus DMCBus, staller DMCStaller) {
 	a.dmcBus = bus
 	a.dmcStaller = staller
 }
+
+// GetDmcReadAddress returns the sample address the DMC will fetch
+// from on its next byte read. Exposed for the CPU's
+// ProcessPendingDma loop (#376) so the DMA cycle can issue the
+// memory read directly via the CPU bus and route the result back
+// through SetDmcReadBuffer. Mirrors Mesen2 NesApu::GetDmcReadAddress.
+func (a *APU) GetDmcReadAddress() uint16 {
+	return a.dmc.currentAddr
+}
+
+// SetDmcReadBuffer hands a byte fetched by the CPU's DMA loop
+// (#376) into the DMC sample buffer + advances the read pointer,
+// decrements bytes-remaining, and fires loop / IRQ on exhaustion.
+// Mirrors Mesen2 NesApu::SetDmcReadBuffer + the tail end of the
+// per-cycle DMC fetch path that previously lived in dmcChannel.Step.
+func (a *APU) SetDmcReadBuffer(v byte) {
+	d := &a.dmc
+	d.sampleBuffer = v
+	d.bufferEmpty = false
+	d.fetchPending = false
+	if d.currentAddr == 0xFFFF {
+		d.currentAddr = 0x8000
+	} else {
+		d.currentAddr++
+	}
+	if d.bytesRemaining > 0 {
+		d.bytesRemaining--
+	}
+	if d.bytesRemaining == 0 {
+		if d.loop {
+			d.currentAddr = d.sampleAddrBase
+			d.bytesRemaining = d.sampleLenBase
+		} else if d.irqEnable {
+			d.irqPending = true
+			if a.irqSink != nil {
+				a.irqSink.AssertIRQSource(dmcIRQSource)
+			}
+		}
+	}
+}
+
+// DmcFetchPending reports whether the DMC has signalled it needs a
+// new sample byte from the CPU bus. The CPU's ProcessPendingDma
+// loop (#376) reads this each cycle to decide whether to merge a
+// DMC fetch into the running DMA window. Replaces the older
+// fetchPending flag the stall-stepper consulted directly.
+func (a *APU) DmcFetchPending() bool { return a.dmc.fetchPending }
+
+// ClearDmcFetchPending marks the DMC fetch as serviced by the CPU's
+// ProcessPendingDma loop. Called from the CPU after it has issued
+// the sample read + handed the byte back via SetDmcReadBuffer.
+func (a *APU) ClearDmcFetchPending() { a.dmc.fetchPending = false }
 
 // Read services CPU reads. $4015 returns the per-channel status +
 // IRQ flags; reading also clears the frame-IRQ flag (per nesdev).
@@ -527,7 +587,16 @@ func (a *APU) stepCPU() {
 // frame ticks for the current step + mode, then advances to the
 // next step boundary.
 func (a *APU) advanceFrameStep() {
-	a.frameTimer += a.quarterFrameCycles
+	// NTSC 4-step uses non-uniform step intervals (Mesen
+	// ApuFrameCounter table) totalling 29830 CPU cycles per cycle;
+	// other modes/regions still use the uniform quarterFrameCycles
+	// reload. The step about to fire is a.frameStep; the reload is
+	// the delay until the NEXT step fires.
+	if a.mode4Step && a.quarterFrameCycles == quarterFrameCycles {
+		a.frameTimer += frameStepIntervalsNtsc4Step[a.frameStep]
+	} else {
+		a.frameTimer += a.quarterFrameCycles
+	}
 	if a.mode4Step {
 		// 4-step pattern (q = quarter, h = half + quarter):
 		//   step 0: q
