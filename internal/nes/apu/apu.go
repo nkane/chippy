@@ -278,6 +278,15 @@ func (a *APU) TriangleLengthCounter() byte { return a.triangle.lengthCounter }
 func (a *APU) NoiseLengthCounter() byte    { return a.noise.lengthCounter }
 func (a *APU) DMCBytesRemaining() uint16   { return a.dmc.bytesRemaining }
 
+// StepDMCFetch runs one cycle of the DMC's pending DMA bus-steal. The
+// CPU's stall drain calls this alongside the OAMDMA stepper so the DMC
+// sample read happens on the right CPU cycle within the 4-cycle stall
+// window (#372 test 4). Returns true when no DMC fetch is pending.
+func (a *APU) StepDMCFetch() bool {
+	a.dmc.Step(a.dmcBus, a.irqSink)
+	return !a.dmc.fetchPending
+}
+
 // SetDMCBus wires the CPU bus the DMC reads sample bytes from and
 // the cpu.Stall hook the DMA byte-fetch charges. Optional — when
 // either argument is nil the DMC channel still tracks state but

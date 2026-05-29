@@ -16,6 +16,19 @@ import (
 	"github.com/nkane/chippy/internal/nes/ppu"
 )
 
+// dmaScheduler runs OAMDMA + DMC fetch steppers per CPU stall cycle.
+// Implements cpu.StallStepper — returns true when both are idle.
+type dmaScheduler struct {
+	oam *dma.OAMDMA
+	ap  *apu.APU
+}
+
+func (s *dmaScheduler) Step() bool {
+	oamDone := s.oam.Step()
+	dmcDone := s.ap.StepDMCFetch()
+	return oamDone && dmcDone
+}
+
 // nesBus is the assembled NES — every component the Ebiten game loop or
 // the DAP server needs to touch. cart is exposed for save-state work
 // (battery PRG-RAM); ram is the 2 KiB internal RAM mirrored at $0000-
@@ -148,12 +161,12 @@ func buildNES(rom *nes.ROM) (*nesBus, error) {
 	processor.SetPPURunner(pp)
 	pp.SetCPUDriven(true)
 
-	// Per-cycle OAMDMA stepper so the 256-byte $4014 transfer spreads
-	// across the 513-514-cycle stall window instead of doing all 256
-	// bus reads "instantly" at the Write call. ROMs that put $4015 in
-	// the DMA source page depend on the per-cycle read schedule for
-	// IRQ-flag clear timing (#372 test 4 irq_and_dma).
-	processor.SetStallStepper(oam)
+	// Per-cycle DMA scheduler: OAMDMA + DMC fetches step alongside the
+	// CPU's stall drain so reads land on the right cycle within the
+	// bus-steal window (#372 test 4). Both peripherals get a Step call
+	// per stall cycle — OAMDMA does its 256 read/write pairs over 513
+	// cycles, DMC does its 4-cycle halt+read.
+	processor.SetStallStepper(&dmaScheduler{oam: oam, ap: ap})
 
 	// Re-run reset now that the PPU is registered. Some ROMs touch PPU
 	// registers in their very first instructions, so we want those to

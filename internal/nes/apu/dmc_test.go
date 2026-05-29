@@ -86,7 +86,14 @@ func TestDMC_FetchReadsBaseAddressAndStalls(t *testing.T) {
 	// Pump enough cycles to drain one shift-register unit (8 bits)
 	// + trigger one refill. rateIdx 0 = 428 CPU cycles per shift; 8
 	// shifts ≈ 3424 cycles. Add headroom.
-	a.Tick(5000)
+	// Drive in chunks so we can drain pending DMC fetches between Ticks
+	// (real CPU calls StepDMCFetch from its stall drain; tests here
+	// don't have a CPU, so we drain manually).
+	for i := 0; i < 50; i++ {
+		a.Tick(100)
+		for !a.StepDMCFetch() {
+		}
+	}
 
 	if len(bus.reads) == 0 {
 		t.Fatalf("DMC didn't read any sample bytes")
@@ -112,7 +119,11 @@ func TestDMC_OAMDMAContentionAdds2Cycles(t *testing.T) {
 	setupDMC(a, bus, staller, nil)
 	a.Write(0x4013, 0x00) // 1-byte sample
 	s.Write(0x4015, 0x10)
-	a.Tick(5000) // ≥1 fetch
+	for i := 0; i < 50; i++ {
+		a.Tick(100)
+		for !a.StepDMCFetch() {
+		}
+	}
 	baseline := staller.stalled
 	if baseline%4 != 0 {
 		t.Fatalf("baseline stall %d not a multiple of 4 — fetch path drifted", baseline)
@@ -127,7 +138,11 @@ func TestDMC_OAMDMAContentionAdds2Cycles(t *testing.T) {
 	setupDMC(a2, bus2, staller2, nil)
 	a2.Write(0x4013, 0x00)
 	s2.Write(0x4015, 0x10)
-	a2.Tick(5000)
+	for i := 0; i < 50; i++ {
+		a2.Tick(100)
+		for !a2.StepDMCFetch() {
+		}
+	}
 	contended := staller2.stalled
 	if baseline == 0 || contended == 0 {
 		t.Fatalf("no fetches happened (baseline=%d contended=%d)", baseline, contended)
@@ -158,7 +173,11 @@ func TestDMC_IRQAssertsOnExhaustion(t *testing.T) {
 	s.Write(0x4015, 0x10)
 
 	// Run enough cycles to fetch + exhaust the single-byte sample.
-	a.Tick(100_000)
+	for i := 0; i < 1000; i++ {
+		a.Tick(100)
+		for !a.StepDMCFetch() {
+		}
+	}
 
 	if !a.dmc.irqPending {
 		t.Errorf("DMC IRQ flag not pending after sample exhaustion")
