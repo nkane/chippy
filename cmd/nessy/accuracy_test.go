@@ -77,14 +77,14 @@ var accuracyROMs = []accuracyROM{
 		maxFrames: 2400,
 	},
 	{
-		// IRQ/NMI/BRK interaction + interrupt latency: cli_latency,
-		// nmi_and_brk, nmi_and_irq, irq_and_dma, branch_delays_irq (#369).
+		// IRQ/NMI/BRK interaction + interrupt latency. Full 5/5
+		// PASS as of #377 (cli_latency, nmi_and_brk, nmi_and_irq,
+		// irq_and_dma, branch_delays_irq) — see #369/#376.
 		name:      "cpu_interrupts_v2.nes",
 		url:       "https://github.com/christopherpow/nes-test-roms/raw/master/cpu_interrupts_v2/cpu_interrupts.nes",
 		sha:       "ccbac4e824eb96ecfe8b82d331a083be186eb6776aa57e25c52251eaf7df9c4f",
 		pathEnv:   "CHIPPY_ACCURACY_INTERRUPTS_BIN",
 		maxFrames: 2400,
-		knownFail: "cycle-precise interrupt-poll details (#369) — tests 1 (cli_latency) + 2 (nmi_and_brk) pass; test 3 (nmi_and_irq) needs precise NMI line-rise timing relative to instructions, tests 4-5 (irq_and_dma, branch_delays_irq) gate behind it",
 	},
 }
 
