@@ -125,6 +125,11 @@ func (d *dmcChannel) setEnabled(on bool, staller DMCStaller) {
 			d.currentAddr = d.sampleAddrBase
 			d.bytesRemaining = d.sampleLenBase
 		}
+		// Schedule a fetch immediately if the buffer is empty +
+		// bytes are pending (Mesen StartDmcTransfer condition). The
+		// existing leftover byte in the buffer plays out first if
+		// bufferEmpty is false; no fetch scheduled until that byte
+		// has been clocked through.
 		if d.bytesRemaining > 0 && d.bufferEmpty && staller != nil && !d.fetchPending {
 			d.fetchPending = true
 			staller.SetNeedDmcDma()
@@ -134,74 +139,62 @@ func (d *dmcChannel) setEnabled(on bool, staller DMCStaller) {
 	}
 }
 
-// tickTimer drops the period timer by one CPU cycle. When it
-// underflows it clocks one shift bit and (if the sample buffer is
-// empty + bytes-remaining > 0) requests a DMA refill via the
-// caller-supplied stall + bus.
-func (d *dmcChannel) tickTimer(bus DMCBus, staller DMCStaller, irqSink IRQSink) {
-	period := dmcRateLUT[d.rateIdx]
+// tickTimer drops the period timer by one CPU cycle. When the
+// timer underflows the clock fires (Mesen2 DeltaModulationChannel
+// ::Run/Clock). bitsRemaining=8 invariant (init in APU.New) +
+// always-shift semantics in clock() mean 8 clocks per byte exactly,
+// no extra "reload-only" cycle — matches Mesen's 17-byte sample at
+// rate 0 = 17*8*428 cycles total.
+func (d *dmcChannel) tickTimer(_ DMCBus, staller DMCStaller, _ IRQSink) {
 	if d.timer == 0 {
-		d.timer = period
-		d.clockShift()
-		d.maybeRefill(bus, staller, irqSink)
+		// Reload to period-1 so fire-to-fire = period CPU cycles
+		// exactly, matching Mesen2 ApuTimer::Run (which advances by
+		// `_timer + 1` per fire with period stored as rate-1).
+		d.timer = dmcRateLUT[d.rateIdx] - 1
+		d.clock(staller)
 		return
 	}
 	d.timer--
 }
 
-// clockShift moves one bit out of the shift register and adjusts
-// the output level. Real silicon's bit-counter loads from
-// sampleBuffer when bitsRemaining hits zero; v0.3 keeps the model
-// simple by loading at the top of the unit (every 8 bits).
-func (d *dmcChannel) clockShift() {
-	if d.silenced || d.bitsRemaining == 0 {
-		return
-	}
-	if d.shiftRegister&1 == 1 {
-		if d.output <= 125 {
-			d.output += 2
-		}
-	} else {
-		if d.output >= 2 {
-			d.output -= 2
-		}
-	}
-	d.shiftRegister >>= 1
-	d.bitsRemaining--
-}
-
-// maybeRefill is two real-silicon ops fused: (1) the output unit
-// reloads the shift register from the sample buffer when the 8-bit
-// unit is exhausted, and (2) the memory reader queues a DMA refill
-// when the sample buffer is empty + the byte counter still has
-// bytes. Either or both can fire on a single call; an empty buffer
-// only silences the channel when the byte counter is also zero
-// (otherwise the fetch we just queued will refill it).
+// clock is one DMC output unit tick. Mirrors Mesen2 Delta
+// ModulationChannel::Run inner body:
 //
-// (#376 Phase 2C) The fetch path doesn't read directly — it sets
-// fetchPending + calls cpu.SetNeedDmcDma; ProcessPendingDma drains
-// the 4-cycle (or 6 under contention) bus-steal on the next CPU
-// read and pushes the byte back through APU.SetDmcReadBuffer.
-func (d *dmcChannel) maybeRefill(_ DMCBus, staller DMCStaller, _ IRQSink) {
-	if d.bitsRemaining != 0 {
-		return
+//  1. If not silenced: emit a bit (adjust output level ±2, shift
+//     shift-register one place).
+//  2. Always decrement bitsRemaining.
+//  3. If bitsRemaining == 0: reset to 8 + reload shifter from
+//     sample buffer (or silence if buffer is empty).
+//  4. Schedule a DMA fetch if the buffer is empty + bytes remain.
+//
+// The fetch-schedule check runs every clock, not just at unit
+// boundaries, so the memory reader is responsive to mid-byte
+// disable/re-enable sequences without burning extra timer cycles.
+func (d *dmcChannel) clock(staller DMCStaller) {
+	if !d.silenced {
+		if d.shiftRegister&1 == 1 {
+			if d.output <= 125 {
+				d.output += 2
+			}
+		} else {
+			if d.output >= 2 {
+				d.output -= 2
+			}
+		}
+		d.shiftRegister >>= 1
 	}
-	// Output unit: reload shifter from buffer if anything's there.
-	if !d.bufferEmpty {
-		d.silenced = false
-		d.shiftRegister = d.sampleBuffer
-		d.bufferEmpty = true
+	d.bitsRemaining--
+	if d.bitsRemaining == 0 {
 		d.bitsRemaining = 8
-	} else if d.bytesRemaining == 0 {
-		// Buffer empty + no more bytes — silence.
-		d.silenced = true
+		if d.bufferEmpty {
+			d.silenced = true
+		} else {
+			d.silenced = false
+			d.shiftRegister = d.sampleBuffer
+			d.bufferEmpty = true
+		}
 	}
-	// Memory reader: queue a DMA refill if the buffer is empty +
-	// the byte counter is still alive. The bufferEmpty check above
-	// always leaves it true at this point (either the reload set
-	// it, or it was already true). Skip if a fetch is already in
-	// flight (the channel pending one byte at a time).
-	if d.bytesRemaining > 0 && staller != nil && !d.fetchPending {
+	if d.bufferEmpty && d.bytesRemaining > 0 && staller != nil && !d.fetchPending {
 		d.fetchPending = true
 		staller.SetNeedDmcDma()
 	}
