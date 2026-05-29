@@ -39,11 +39,17 @@ func (c *CPU) Step() int {
 	// while the vblank flag is already set) is delayed one instruction —
 	// matching the 6502's interrupt-poll timing. NMOS/CMOS keep the
 	// immediate edge-service path.
+	// stallJustDrained: skip this Step's interrupt service check.
+	// Mesen2 runs the post-DMA opcode before servicing — match by
+	// consuming the flag and proceeding straight to opcode fetch.
+	suppressService := c.stallJustDrained
+	c.stallJustDrained = false
+
 	nmiTake := c.nmiPending
 	if c.Variant == VariantNES {
 		nmiTake = c.nmiDue
 	}
-	if nmiTake {
+	if nmiTake && !suppressService {
 		c.Halted = false
 		if c.Tracer != nil {
 			c.Tracer.LogInterrupt(c, "NMI", VecNMI)
@@ -59,7 +65,7 @@ func (c *CPU) Step() int {
 		// instruction. cpu_interrupts_v2 cli_latency (#369).
 		irqTake = c.irqDue
 	}
-	if irqTake {
+	if irqTake && !suppressService {
 		c.Halted = false
 		if c.Tracer != nil {
 			c.Tracer.LogInterrupt(c, "IRQ", VecIRQ)
@@ -73,24 +79,25 @@ func (c *CPU) Step() int {
 	// Drain any pending bus-stealing stall (e.g. $4014 OAMDMA) before
 	// fetching the next opcode. The whole counter is consumed as one
 	// block — the PPU / APU sees its cycle delta via the ticker but
-	// no opcode runs this Step. Interrupts handled above intentionally
-	// pre-empt the drain: a peripheral that asserts NMI mid-DMA gets
-	// serviced first, matching the "next instruction boundary" model
-	// the rest of the interrupt path already uses.
+	// no opcode runs this Step. Set stallJustDrained so the interrupt
+	// check ABOVE on the NEXT Step does not fire: Mesen2 runs the
+	// post-DMA opcode first then services the IRQ (#372 test 4).
 	if c.pendingStall > 0 {
 		stalled := c.pendingStall
 		c.pendingStall = 0
 		c.Cycles += uint64(stalled)
 		switch {
 		case c.nesCycle:
-			// Per-cycle so the PPU stays in lockstep through the bus
-			// steal (#342); also keeps the NMI poll advancing.
 			for range stalled {
-				c.tick()
+				if c.stallStepper != nil {
+					c.stallStepper.Step()
+				}
+				c.stallTick()
 			}
 		case c.busTicker != nil:
 			c.busTicker.Tick(stalled)
 		}
+		c.stallJustDrained = true
 		return stalled
 	}
 

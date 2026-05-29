@@ -118,22 +118,54 @@ type PPU struct {
 	dot        int
 	frameCount uint64
 
-	// Per-dot vblank-flag race state (#342). `dots` is a monotonic dot
-	// counter. `vblSetAtDots` / `vblClearAtDots` record the dots on
-	// which the flag is raised (241,1) and auto-cleared (pre-render,1);
-	// sentinel = never. A $2002 read landing on the set dot loses the
-	// race and reads 0 (the set hasn't propagated CPU-side); a read on
-	// the clear dot reads the pre-clear value (still set). Blargg's
-	// 02-vbl_set_time + 03-vbl_clear_time pin both edges to a single dot.
+	// Per-dot vblank-flag race state (#342, #372 redesign). Mesen2
+	// NesPpu model:
+	//
+	//   - vblank-SET race: a $2002 read on the PPU clock immediately
+	//     before the set (scanline 241, dot 0) returns bit 7 clear AND
+	//     latches preventVblFlag, which suppresses the next dot's
+	//     vblank-set entirely for this frame. "Reading one PPU clock
+	//     before reads it as clear and never sets the flag or generates
+	//     NMI for that frame."
+	//
+	//   - vblank-CLEAR race: a $2002 read on the auto-clear dot at
+	//     pre-render scanline dot 1 still reads the pre-clear value
+	//     (flag set), winning the race. vblClearAtDots records that
+	//     dot so the read path can detect it.
 	dots           uint64
-	vblSetAtDots   uint64
 	vblClearAtDots uint64
+	preventVblFlag bool
 
 	// oddSkipArmed latches renderingEnabled() at dot 339 of the
 	// pre-render scanline; the next dot's boundary check uses it to
 	// decide the odd-frame dot-skip, matching the hardware sample point
 	// relative to a $2001 BG-enable write (#342, Blargg 10-even_odd).
 	oddSkipArmed bool
+
+	// renderingEnabledDelayed mirrors Mesen2's _renderingEnabled — a
+	// 1-PPU-clock delayed view of (mask & 0x18 != 0). Per Mesen
+	// comment: "Rendering enabled flag is apparently set with a 1
+	// cycle delay (i.e setting it at cycle 5 will render cycle 6 like
+	// cycle 5 and then take the new settings for cycle 7)". Updated
+	// at end of each stepDot from the live mask. Used by the
+	// oddSkipArmed check at pre-render dot 339 so Blargg
+	// 10-even_odd_timing sees the BG-enable write at the right cycle
+	// boundary (#372).
+	renderingEnabledDelayed bool
+
+	// masterClock is the PPU's running master-clock counter, advanced
+	// 4 master clocks per dot (NTSC; PAL = 5). The CPU drives PPU.Run
+	// with a deadline in master-clock units; Run advances dot-by-dot
+	// while the next dot's end stays under the deadline. This mirrors
+	// Mesen2 NesPpu::Run and closes the per-cycle phase gap chippy's
+	// older "tick N cycles in batch" model exposed against cpu_inter
+	// rupts_v2 test 3 calibration (#342, #372 redesign).
+	masterClock uint64
+
+	// cpuDriven is set once the CPU's Run hook is wired. While true,
+	// Tick(cpuCycles) is a no-op so MMIO's Ticker fan-out doesn't
+	// double-advance the PPU; the CPU drives advance via Run(deadline).
+	cpuDriven bool
 
 	// timing holds the region-specific frame geometry (NTSC / PAL /
 	// Dendy). Defaults to NTSC in New so existing callers + the
@@ -200,7 +232,12 @@ func New(cart Cart, nmi NMI) *PPU {
 // the scanline cursor onto it to stay consistent.
 func (p *PPU) SetRegion(t nes.Timing) {
 	p.timing = t
-	p.scanline, p.dot, p.frameCount = t.PreRenderScanline, 0, 0
+	// Match Mesen2 NesPpu::Reset's "First execution will be cycle 0,
+	// scanline 0" by seating the cursor at the very last dot of pre-
+	// render so the next stepDot wraps straight to (sl=0, dot=0) of
+	// frame 1 — instead of walking the whole pre-render scanline
+	// first (#372).
+	p.scanline, p.dot, p.frameCount = t.PreRenderScanline, t.DotsPerScanline-1, 1
 }
 
 // Reset clears the PPU to a deterministic post-power state. Real
@@ -214,8 +251,16 @@ func (p *PPU) Reset() {
 	p.ctrl, p.mask, p.status, p.oamAddr = 0, 0, 0, 0
 	p.v, p.t, p.x, p.w, p.readBuf = 0, 0, 0, false, 0
 	p.scrollX, p.scrollY, p.scrollHi = 0, 0, false
-	p.scanline, p.dot, p.frameCount = p.timing.PreRenderScanline, 0, 0
-	p.dots, p.vblSetAtDots, p.vblClearAtDots = 0, ^uint64(0), ^uint64(0)
+	// Mesen2 NesPpu::Reset sets (_scanline=-1, _cycle=340, _frameCount=1)
+	// — pre-render scanline at its final dot, so the first stepDot wraps
+	// straight to (sl=0, dot=0) of the visible frame instead of walking
+	// through the whole 341-dot pre-render scanline first. Matches
+	// Mesen's "First execution will be cycle 0, scanline 0" comment.
+	// Closing the ~340-dot phase gap aligns vblank-set timing for the
+	// $4017-write-parity branches in cpu_interrupts_v2 test 3 (#372).
+	p.scanline, p.dot, p.frameCount = p.timing.PreRenderScanline, p.timing.DotsPerScanline-1, 1
+	p.dots, p.vblClearAtDots, p.preventVblFlag = 0, ^uint64(0), false
+	p.masterClock = 0
 	for i := range p.vram {
 		p.vram[i] = 0
 	}
@@ -254,17 +299,18 @@ func (p *PPU) Read(addr uint16) byte {
 		// the open-bus latch (real silicon doesn't drive them).
 		// Reading also clears vblank + the $2005/$2006 toggle.
 		out := (p.status & 0xE0) | (p.openBus & 0x1F)
-		// 2C02 vblank-set race (#342): a CPU read landing on the exact
-		// dot the flag is set reads bit 7 as 0 — the set hasn't
-		// propagated to the CPU side — and clears the flag. Blargg's
-		// 02-vbl_set_time pins this: the read on the set dot suppresses
-		// that frame's flag (second read sees it clear), while a read
-		// one dot earlier does not.
-		switch p.dots {
-		case p.vblSetAtDots:
+		// 2C02 vblank-set race per Mesen2 NesPpu::UpdateStatusFlag:
+		// a $2002 read on the PPU clock immediately before vblank-set
+		// (scanline 241, dot 0) returns bit 7 clear AND latches
+		// preventVblFlag, suppressing the dot-1 set for this whole
+		// frame. The vblank-CLEAR race (read on pre-render dot 1 sees
+		// pre-clear value) emerges naturally from the master-clock
+		// model — no explicit code needed; the PPU.Run deadline at the
+		// pre-bus split leaves PPU at the dot BEFORE clear so the read
+		// observes the flag still set (Blargg 03-vbl_clear_time).
+		if p.scanline == p.timing.VBlankScanline && p.dot == 0 {
 			out &^= 0x80
-		case p.vblClearAtDots:
-			out |= 0x80
+			p.preventVblFlag = true
 		}
 		p.status &^= 0x80
 		p.w = false
@@ -627,11 +673,43 @@ func (p *PPU) incVRAMAddr() {
 // Tick advances the PPU by 3 * cpuCycles dots — the 2C02 / 2A03 share a
 // master clock, with the PPU running 3× the CPU's rate. Crosses scanline
 // boundaries and triggers vblank / NMI at the right dot.
+//
+// Once SetCPUDriven(true) latches (wiring step), this is a no-op so
+// MMIO's Ticker fan-out doesn't double-advance the PPU — the CPU calls
+// Run(deadline) directly with master-clock granularity matching Mesen.
 func (p *PPU) Tick(cpuCycles int) {
+	if p.cpuDriven {
+		return
+	}
 	for range cpuCycles * 3 {
 		p.stepDot()
 	}
+	p.masterClock += uint64(cpuCycles) * 12
 }
+
+// PPUMasterClockDividerNTSC is the master-clock count per PPU dot. NTSC
+// silicon runs PPU at 1/4 the master clock; PAL is 1/5 but chippy's NES
+// model defaults to NTSC and the only caller that varies it is the
+// SetRegion path (not yet hooked here).
+const PPUMasterClockDividerNTSC = 4
+
+// Run advances the PPU dot-by-dot until the next dot's end exceeds
+// masterClockDeadline. Each Exec (stepDot) covers
+// PPUMasterClockDividerNTSC master clocks. Matches Mesen2 NesPpu::Run.
+func (p *PPU) Run(masterClockDeadline uint64) {
+	for p.masterClock+PPUMasterClockDividerNTSC <= masterClockDeadline {
+		p.stepDot()
+		p.masterClock += PPUMasterClockDividerNTSC
+	}
+}
+
+// SetCPUDriven flips PPU into "CPU drives advance" mode. Tick becomes
+// a no-op so MMIO Ticker fan-out doesn't double-tick.
+func (p *PPU) SetCPUDriven(driven bool) { p.cpuDriven = driven }
+
+// MasterClock exposes the PPU's master-clock counter for inspectors +
+// tests that need to know where the PPU sits relative to the CPU.
+func (p *PPU) MasterClock() uint64 { return p.masterClock }
 
 func (p *PPU) stepDot() {
 	p.dot++
@@ -670,9 +748,12 @@ func (p *PPU) stepDot() {
 		}
 	}
 	// Latch the odd-frame-skip decision at dot 339 of the pre-render
-	// scanline for the next dot's boundary check (#342).
+	// scanline for the next dot's boundary check (#342). Use the
+	// Mesen2 1-PPU-clock-delayed rendering-enabled view so the BG-
+	// enable write timing relative to dot 339 matches the hardware
+	// sample point (Blargg 10-even_odd_timing).
 	if p.scanline == p.timing.PreRenderScanline && p.dot == 339 {
-		p.oddSkipArmed = p.renderingEnabled()
+		p.oddSkipArmed = p.renderingEnabledDelayed
 	}
 	// Per-scanline sprite-0 hit detector (issue #268). At each
 	// visible scanline we live-check whether sprite 0's row at y
@@ -749,11 +830,15 @@ func (p *PPU) stepDot() {
 		// then flush per-frame state + raise vblank + fire NMI.
 		p.PresentFrame()
 		p.scrollEvents = p.scrollEvents[:0]
-		p.status |= 0x80
-		// Record the dot of the set so a $2002 read landing on it loses
-		// the race (#342), then raise /NMI if enabled.
-		p.vblSetAtDots = p.dots
-		p.updateNMI()
+		// Mesen2 model: preventVblFlag (latched by a $2002 read on the
+		// previous dot at sl=241 dot=0) suppresses the vblank-set + NMI
+		// for this whole frame. Cleared unconditionally so the next
+		// frame's set works normally.
+		if !p.preventVblFlag {
+			p.status |= 0x80
+			p.updateNMI()
+		}
+		p.preventVblFlag = false
 	case p.scanline == p.timing.PreRenderScanline && p.dot == 1:
 		// End of vblank / start of pre-render: clear vblank, sprite-0
 		// hit, sprite overflow. v0.1 doesn't model the latter two so
@@ -765,6 +850,10 @@ func (p *PPU) stepDot() {
 		p.vblClearAtDots = p.dots
 		p.updateNMI()
 	}
+	// End-of-stepDot: sync the delayed rendering-enabled flag so the
+	// next dot's checks see the previous dot's mask state (Mesen2's
+	// 1-PPU-clock delay model).
+	p.renderingEnabledDelayed = p.mask&0x18 != 0
 }
 
 // FrameBuffer returns a 256 × 240 RGBA byte slice. Indexed row-

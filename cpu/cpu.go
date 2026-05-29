@@ -54,7 +54,22 @@ type CPU struct {
 	// Step() checks this instead of doing a per-call type assertion;
 	// the no-ticker fast path stays single-digit-ns.
 	busTicker Ticker
-	Variant   Variant
+
+	// ppuRunner drives PPU dot advance with master-clock deadlines
+	// (#372 redesign). Set via SetPPURunner after the PPU is built.
+	// When non-nil, read/write/idle split the cycle's master-clock
+	// budget around the bus access and call Run at each split so the
+	// PPU runs in lockstep with the CPU's mid-cycle phase, matching
+	// Mesen2 NesCpu::Start/EndCpuCycle.
+	ppuRunner PPURunner
+
+	// masterClock is the CPU's running master-clock counter (NTSC: 12
+	// mc per CPU cycle, 4 mc per PPU dot). Bus reads add startClock-1
+	// (5 mc) before the access and endClock+1 (7 mc) after; writes
+	// swap to 7+5. Reset seeds it to cpuDivider + cpuOffset (12+0).
+	masterClock uint64
+
+	Variant Variant
 
 	// Optional per-instruction execution hook. When non-nil, Step() invokes
 	// Tracer.LogStep at the instruction boundary just before opcode fetch.
@@ -133,6 +148,20 @@ type CPU struct {
 	// counter as one block — bus ticks fire, c.Cycles advances, no
 	// opcode executes. See Stall().
 	pendingStall int
+
+	// stallStepper runs one DMA-state-machine step per stall cycle so
+	// the peripheral can spread its bus reads/writes across the stall
+	// window (#372 test 4 irq_and_dma). nil for non-NES variants and
+	// for pre-OAMDMA wiring.
+	stallStepper StallStepper
+
+	// stallJustDrained is set by the stall-drain branch in Step and
+	// read at the next Step's entry to suppress the interrupt-poll
+	// service check on that one Step. Mesen2's OAMDMA model runs the
+	// post-DMA opcode BEFORE servicing IRQ that asserted mid-DMA, so
+	// chippy needs to skip its boundary-check service exactly once
+	// after a stall drain to match (#372 test 4).
+	stallJustDrained bool
 }
 
 // Stall queues N cycles of CPU stall. The very next Step() consumes
@@ -171,6 +200,18 @@ func NewVariant(bus Bus, v Variant) *CPU {
 	return c
 }
 
+// SetStallStepper wires the per-cycle DMA hook called during stall
+// drains (#372 test 4). nil resets to "no per-cycle action" (legacy
+// behavior — peripheral did all bus reads upfront via batch).
+func (c *CPU) SetStallStepper(s StallStepper) { c.stallStepper = s }
+
+// SetPPURunner wires the PPU master-clock-deadline hook. After this
+// call the NES variant's read/write/idle paths split the cycle's
+// master-clock budget around the bus access and call Run at each split.
+// Callers must also flip the PPU's cpuDriven flag (so MMIO's Ticker
+// fan-out stops double-advancing); see ppu.SetCPUDriven.
+func (c *CPU) SetPPURunner(r PPURunner) { c.ppuRunner = r }
+
 // SetBus swaps the CPU's bus and refreshes the cached busTicker
 // (#175). Callers must use this rather than assigning c.Bus directly
 // so the per-Step ticker dispatch stays correct after a bus wrap.
@@ -206,6 +247,26 @@ func (c *CPU) Reset() {
 	c.Cycles = 7
 	c.Halted = false
 	c.stoppedBySTP = false
+	// Mesen2 NesCpu::Reset master-clock seeding + 8-cycle reset loop.
+	// masterClock starts at cpuDivider + cpuOffset (= 12 + 0 = 12) per
+	// the NTSC default; then 8 read-flavor cycles each add 12 mc, with
+	// PPU.Run firing at the Start (mc - ppuOffset) and End deadlines.
+	// Total post-reset masterClock = 12 + 8*12 = 108, PPU at 26 dots
+	// when the first instruction runs — matching Mesen "9 to 12 clocks
+	// before first instruction begins" for the phantom $4017=$00 APU
+	// frame-counter reset.
+	// Skip the 8-cycle reset advance unless ppuRunner is wired —
+	// otherwise NewVariant's pre-PPU Reset double-advances the APU
+	// (chippy calls Reset twice: once from NewVariant before the PPU
+	// is registered, once from wiring after). The post-wiring Reset
+	// is the one that needs to match Mesen2's reset loop; the pre-
+	// PPU one only needs to load the vector and leave clean state.
+	if c.Variant == VariantNES && c.busTicker != nil && c.ppuRunner != nil {
+		c.masterClock = cpuDivider
+		for range 8 {
+			c.stallTick()
+		}
+	}
 }
 
 // flag helpers
@@ -224,13 +285,21 @@ func (c *CPU) setZN(v byte) {
 }
 
 // stack
-// tick advances the bus chain one CPU cycle for the NES variant and
-// counts it against the instruction's cycle budget. The /NMI poll runs
-// here with a one-cycle delay (nmiPollPrev), so nmiDue lands holding the
-// line state as of the penultimate cycle (#342).
-func (c *CPU) tick() {
+
+// stallTick advances master-clock + PPU + APU by one full CPU cycle
+// without a bus access. Used by the OAMDMA stall drain — the bus is
+// stolen by the peripheral so the CPU sees an opaque "wait one cycle"
+// per stall unit, but the PPU/APU still need to advance + interrupt
+// poll latches still advance with each cycle (#372 test 4 needs this
+// to detect IRQ assertions that happen mid-DMA at the right cycle).
+func (c *CPU) stallTick() {
 	c.instrCycles++
-	c.busTicker.Tick(1) // advance PPU/APU/cart; the PPU may move /NMI
+	c.masterClock += cpuDivider
+	if c.ppuRunner != nil {
+		c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
+	}
+	c.busTicker.Tick(1)
+	c.sampleNMI()
 }
 
 // sampleNMI runs at the end of a cycle, after the bus op. It edge-detects
@@ -254,16 +323,44 @@ func (c *CPU) sampleNMI() {
 // from (vblank-flag AND PPUCTRL.7); the CPU edge-detects in sampleNMI.
 func (c *CPU) SetNMILine(level bool) { c.nmiLineLevel = level }
 
-// read / write perform one bus cycle: for NES, tick the chain (advancing
-// the PPU to this cycle), do the access, then sample /NMI. Other variants
-// access directly and keep the post-instruction batch tick. The 6502
-// latches the bus at the end of the cycle, so the tick (which advances
-// the PPU through the cycle) precedes the access and the interrupt sample
-// follows it.
+// NES per-cycle master-clock split (Mesen2 NesCpu::Start/EndCpuCycle).
+// NTSC default: 12 master clocks per CPU cycle, 4 per PPU dot. Reads
+// commit at master-clock + (startClock-1) = +5; the EndCpuCycle adds
+// (endClock+1) = +7 for a 12-mc total. Writes swap: +7 pre-access,
+// +5 post-access — modelling the 6502's φ1 (writes) vs φ2 (reads)
+// phase. ppuOffset shifts PPU's masterClock 1 mc behind the CPU's so
+// it lags the right fraction of a dot relative to the bus.
+const (
+	cpuStartClock      = 6
+	cpuEndClock        = 6
+	cpuStartReadShift  = cpuStartClock - 1 // 5 mc pre-read
+	cpuEndReadShift    = cpuEndClock + 1   // 7 mc post-read
+	cpuStartWriteShift = cpuStartClock + 1 // 7 mc pre-write
+	cpuEndWriteShift   = cpuEndClock - 1   // 5 mc post-write
+	cpuDivider         = 12                // total mc per CPU cycle
+	cpuPPUOffset       = 1                 // PPU lag (Mesen default, _ppuOffset=1)
+)
+
+// read / write perform one bus cycle. NES path splits the master-clock
+// budget around the bus access and runs PPU at each split via the
+// PPURunner deadline, matching Mesen2 NesCpu::Start/EndCpuCycle. APU +
+// cart advance 1 CPU cycle via busTicker.Tick(1) at the StartCpuCycle
+// equivalent point (after PPU pre-advance, before bus access). PPU.Tick
+// is a no-op when SetCPUDriven(true) lands so MMIO's fan-out doesn't
+// double-advance.
 func (c *CPU) read(addr uint16) byte {
 	if c.nesCycle {
-		c.tick()
+		c.instrCycles++
+		c.masterClock += cpuStartReadShift
+		if c.ppuRunner != nil {
+			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
+		}
+		c.busTicker.Tick(1)
 		v := c.Bus.Read(addr)
+		c.masterClock += cpuEndReadShift
+		if c.ppuRunner != nil {
+			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
+		}
 		c.sampleNMI()
 		return v
 	}
@@ -272,8 +369,17 @@ func (c *CPU) read(addr uint16) byte {
 
 func (c *CPU) write(addr uint16, v byte) {
 	if c.nesCycle {
-		c.tick()
+		c.instrCycles++
+		c.masterClock += cpuStartWriteShift
+		if c.ppuRunner != nil {
+			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
+		}
+		c.busTicker.Tick(1)
 		c.Bus.Write(addr, v)
+		c.masterClock += cpuEndWriteShift
+		if c.ppuRunner != nil {
+			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
+		}
 		c.sampleNMI()
 		return
 	}
@@ -281,13 +387,22 @@ func (c *CPU) write(addr uint16, v byte) {
 }
 
 // idle burns one cycle the way the 6502 does on internal / fix-up /
-// dummy cycles: it performs a real (discarded) bus read at addr — the
-// chip always drives the bus — so MMIO side effects are faithful. A
-// no-op for non-NES variants, which don't model per-cycle timing.
+// dummy cycles: a real (discarded) bus read at addr so MMIO side
+// effects are faithful. NES path uses the same pre/post-bus PPU split
+// as a real read.
 func (c *CPU) idle(addr uint16) {
 	if c.nesCycle {
-		c.tick()
+		c.instrCycles++
+		c.masterClock += cpuStartReadShift
+		if c.ppuRunner != nil {
+			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
+		}
+		c.busTicker.Tick(1)
 		_ = c.Bus.Read(addr)
+		c.masterClock += cpuEndReadShift
+		if c.ppuRunner != nil {
+			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
+		}
 		c.sampleNMI()
 	}
 }
@@ -377,22 +492,26 @@ func (c *CPU) serviceVector(vec uint16) {
 	c.idle(c.PC) // two internal cycles
 	c.idle(c.PC)
 	c.push16(c.PC)
+	// Vector hijacking (#369, redone for #372 to match Mesen2 NesCpu::IRQ
+	// ordering): the NMI-pending check happens BETWEEN push16(PC) and
+	// push(P). Mesen sets P with I=1 only on the NMI-side branch's P
+	// push, so if NMI hijacks, the pushed P captures the post-handler
+	// I=1 state on subsequent inheritance — and importantly the check
+	// fires 1 CPU cycle earlier than chippy's previous "after push P"
+	// placement, matching the cycle at which Mesen's _needNmi sample
+	// catches the late vblank-set transition.
+	if c.Variant == VariantNES && vec == VecIRQ && c.nmiPending {
+		vec = VecNMI
+		c.nmiPending = false
+		c.nmiDue = false
+		c.nmiPollPrev = false
+	}
 	c.push((c.P | FlagU) &^ FlagB)
 	c.setFlag(FlagI, true)
 	// CMOS quirk: interrupt entry also clears D so handlers can rely
 	// on binary mode. NMOS leaves D alone.
 	if c.Variant == VariantCMOS65C02 {
 		c.setFlag(FlagD, false)
-	}
-	// Vector hijacking (#369): an NMI raised during interrupt entry
-	// steals the dispatched vector. Applies to IRQ entry (NMI > IRQ
-	// priority); NMI entry to NMI just stays NMI. The NMI is then
-	// consumed.
-	if c.Variant == VariantNES && vec == VecIRQ && c.nmiPending {
-		vec = VecNMI
-		c.nmiPending = false
-		c.nmiDue = false
-		c.nmiPollPrev = false
 	}
 	lo := uint16(c.read(vec))
 	hi := uint16(c.read(vec + 1))

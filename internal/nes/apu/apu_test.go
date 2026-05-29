@@ -42,9 +42,10 @@ func TestAPU_Disable_ClearsLengthCounter(t *testing.T) {
 }
 
 // $4017 frame counter forwarder: SetFrameCounter accepts bit 7
-// (5-step mode) + bit 6 (IRQ inhibit). 5-step write also fires an
-// immediate quarter+half tick, so a pre-loaded length counter
-// decrements once.
+// (5-step mode) + bit 6 (IRQ inhibit). 5-step write also fires a
+// quarter+half tick, but only after the 3-4 cycle write delay (per
+// nesdev). Tick four cycles after the write to cover both delay
+// parities, then assert the length counter has decremented once.
 func TestAPU_FrameCounter5StepImmediateTick(t *testing.T) {
 	a := New()
 	s := NewStatus(a)
@@ -54,9 +55,10 @@ func TestAPU_FrameCounter5StepImmediateTick(t *testing.T) {
 	// clear) so we leave $4000 alone here.
 	a.Write(0x4003, 0x08) // length LUT[1] = 254
 	pre := a.pulse1.lengthCounter
-	a.SetFrameCounter(0x80) // 5-step → immediate quarter + half tick
+	a.SetFrameCounter(0x80) // 5-step → deferred quarter + half tick
+	a.Tick(4)               // drain the 3- or 4-cycle write delay
 	if a.pulse1.lengthCounter != pre-1 {
-		t.Errorf("5-step write didn't decrement length: %d → %d", pre, a.pulse1.lengthCounter)
+		t.Errorf("5-step write didn't decrement length post-delay: %d → %d", pre, a.pulse1.lengthCounter)
 	}
 }
 

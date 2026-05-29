@@ -111,7 +111,8 @@ func TestBuildNES_OAMDMA_SourcesFromPRGROM(t *testing.T) {
 	}
 
 	bus.cpu.Step() // LDA #$81
-	bus.cpu.Step() // STA $4014
+	bus.cpu.Step() // STA $4014 — queues OAMDMA + 513-cycle stall
+	bus.cpu.Step() // drain stall (per-cycle DMA fills OAM)
 
 	for i := range 256 {
 		want := byte(i) ^ 0xC3
@@ -239,17 +240,7 @@ func TestBuildNES_OAMDMA_RoundTripsThroughCPU(t *testing.T) {
 
 	bus.cpu.Step() // LDA #$02
 	bus.cpu.Step() // STA $4014 → fires DMA, queues 513 or 514 stall
-
-	// OAM should now contain the seeded pattern from $0200-$02FF.
-	for i := range 256 {
-		got := bus.ppu.OAM(byte(i))
-		if got != byte(i) {
-			t.Fatalf("OAM[$%02X] = $%02X; want $%02X", i, got, i)
-		}
-	}
-
-	// Next Step drains the bus-steal stall. Cycle-at-write was odd
-	// (Reset 7 + LDA 2 = 9), so the odd-alignment penalty adds one.
+	// Drain stall — per-cycle DMA fills OAM during the stall window.
 	preCycles := bus.cpu.Cycles
 	stalled := bus.cpu.Step()
 	if stalled != 514 {
@@ -257,6 +248,14 @@ func TestBuildNES_OAMDMA_RoundTripsThroughCPU(t *testing.T) {
 	}
 	if delta := bus.cpu.Cycles - preCycles; delta != 514 {
 		t.Errorf("CPU.Cycles delta = %d; want 514", delta)
+	}
+
+	// OAM should now contain the seeded pattern from $0200-$02FF.
+	for i := range 256 {
+		got := bus.ppu.OAM(byte(i))
+		if got != byte(i) {
+			t.Fatalf("OAM[$%02X] = $%02X; want $%02X", i, got, i)
+		}
 	}
 }
 

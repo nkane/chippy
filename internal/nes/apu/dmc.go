@@ -47,6 +47,16 @@ type dmcChannel struct {
 	// IRQ pending flag. Set on bytes-remaining-reaches-zero with
 	// irqEnable + no loop. $4015 read clears.
 	irqPending bool
+
+	// Per-cycle DMA fetch state (#372 test 4). When a sample buffer
+	// refill is needed, maybeRefill queues a 4-cycle CPU stall and sets
+	// fetchPending; the actual bus.Read + bytesRemaining-- + IRQ
+	// assertion happens on the LAST cycle of the stall (matching
+	// Mesen2's DMC DMA model where the read is the read-cycle within
+	// the bus-steal window, not an instant batched read at the start).
+	fetchPending bool
+	fetchHalt    int    // halt/dummy cycles remaining before the actual read
+	fetchAddr    uint16 // address to read when halt completes
 }
 
 // DMCBus is the slice of the CPU bus the DMC reads sample bytes
@@ -153,7 +163,7 @@ func (d *dmcChannel) clockShift() {
 // sample pointer still has bytes to fetch, DMA one byte from the
 // CPU bus (stealing 4 cycles via cpu.Stall per nesdev). On final-
 // byte exhaustion, loop or assert DMC IRQ.
-func (d *dmcChannel) maybeRefill(bus DMCBus, staller DMCStaller, irqSink IRQSink) {
+func (d *dmcChannel) maybeRefill(bus DMCBus, staller DMCStaller, _ IRQSink) {
 	if d.bitsRemaining != 0 {
 		return
 	}
@@ -166,36 +176,58 @@ func (d *dmcChannel) maybeRefill(bus DMCBus, staller DMCStaller, irqSink IRQSink
 	d.bufferEmpty = true
 	d.bitsRemaining = 8
 
-	// Now refill the sample buffer from CPU memory if possible.
+	// Now request a DMA refill from CPU memory if possible. With the
+	// per-cycle stall stepper (#372 test 4), the actual bus.Read and
+	// the IRQ-on-exhaustion side effect are deferred to the LAST cycle
+	// of the 4-cycle stall (DMC.Step below) — Mesen2 puts the read on
+	// the read-cycle of the bus-steal window, not at the start.
 	if d.bytesRemaining > 0 && bus != nil {
 		if staller != nil {
-			// DMC fetch normally charges 4 CPU cycles. When OAMDMA is
-			// already mid-window (staller has pending debt), the DMC
-			// fetch has to wait for an OAMDMA byte slot and pays a
-			// 2-cycle alignment penalty (#300). Net is 6.
 			stall := 4
 			if staller.PendingStall() > 0 {
 				stall += 2
 			}
 			staller.Stall(stall)
+			d.fetchPending = true
+			d.fetchHalt = stall - 1 // last stall cycle is the read
+			d.fetchAddr = d.currentAddr
 		}
-		d.sampleBuffer = bus.Read(d.currentAddr)
-		d.bufferEmpty = false
-		if d.currentAddr == 0xFFFF {
-			d.currentAddr = 0x8000 // wrap per nesdev
-		} else {
-			d.currentAddr++
-		}
-		d.bytesRemaining--
-		if d.bytesRemaining == 0 {
-			if d.loop {
-				d.currentAddr = d.sampleAddrBase
-				d.bytesRemaining = d.sampleLenBase
-			} else if d.irqEnable {
-				d.irqPending = true
-				if irqSink != nil {
-					irqSink.AssertIRQSource(dmcIRQSource)
-				}
+	}
+}
+
+// Step runs one cycle of the DMC's DMA bus-steal. Called from the CPU
+// stall drain alongside the OAMDMA stepper. The first N-1 cycles are
+// halt/dummy; the last cycle reads the sample byte via the bus and
+// fires the bytesRemaining-- + IRQ-on-exhaustion side effects.
+func (d *dmcChannel) Step(bus DMCBus, irqSink IRQSink) {
+	if !d.fetchPending {
+		return
+	}
+	if d.fetchHalt > 0 {
+		d.fetchHalt--
+		return
+	}
+	// Read cycle.
+	d.fetchPending = false
+	if bus == nil {
+		return
+	}
+	d.sampleBuffer = bus.Read(d.fetchAddr)
+	d.bufferEmpty = false
+	if d.currentAddr == 0xFFFF {
+		d.currentAddr = 0x8000
+	} else {
+		d.currentAddr++
+	}
+	d.bytesRemaining--
+	if d.bytesRemaining == 0 {
+		if d.loop {
+			d.currentAddr = d.sampleAddrBase
+			d.bytesRemaining = d.sampleLenBase
+		} else if d.irqEnable {
+			d.irqPending = true
+			if irqSink != nil {
+				irqSink.AssertIRQSource(dmcIRQSource)
 			}
 		}
 	}

@@ -16,7 +16,7 @@ func stepToDot(t *testing.T, p *PPU, scanline, dot int) {
 }
 
 // The vblank flag sets at scanline 241 dot 1 when no read contends for
-// that dot.
+// the preceding dot 0.
 func TestVblRace_FlagSetsAtSetDot(t *testing.T) {
 	p := New(&fakeCart{}, &fakeNMI{})
 	stepToDot(t, p, 241, 1)
@@ -25,50 +25,54 @@ func TestVblRace_FlagSetsAtSetDot(t *testing.T) {
 	}
 }
 
-// 2C02 race: a $2002 read landing on the exact set dot reads bit 7 as 0
-// (and clears the flag).
-func TestVblRace_ReadOnSetDotReadsZero(t *testing.T) {
+// 2C02 race per Mesen2 model: a $2002 read on the PPU clock immediately
+// BEFORE vblank-set (scanline 241, dot 0) reads bit 7 clear AND latches
+// preventVblFlag — the flag never sets for this frame, and the next
+// dot's vblank-set check is skipped entirely.
+func TestVblRace_ReadOnDotBeforeSetSuppressesFrame(t *testing.T) {
+	p := New(&fakeCart{}, &fakeNMI{})
+	stepToDot(t, p, 241, 0)
+	if got := p.Read(0x2002); got&0x80 != 0 {
+		t.Errorf("read on (241,0) = $%02X; want bit 7 clear", got)
+	}
+	if !p.preventVblFlag {
+		t.Errorf("read on (241,0) didn't latch preventVblFlag")
+	}
+	p.stepDot() // advance to (241,1) — would-be set dot
+	if p.status&0x80 != 0 {
+		t.Errorf("vblank flag set despite preventVblFlag; status=$%02X", p.status)
+	}
+	if p.preventVblFlag {
+		t.Errorf("preventVblFlag should clear after the suppressed set check")
+	}
+}
+
+// A read landing exactly on the set dot (241,1) reads the flag set —
+// the dot-0 race didn't fire, the set fired, the read sees it.
+func TestVblRace_ReadOnSetDotReadsSet(t *testing.T) {
 	p := New(&fakeCart{}, &fakeNMI{})
 	stepToDot(t, p, 241, 1)
-	if got := p.Read(0x2002); got&0x80 != 0 {
-		t.Errorf("read on set dot = $%02X; want bit 7 clear (race)", got)
-	}
-}
-
-// One dot after the set, the read sees the flag set (and clears it).
-func TestVblRace_ReadAfterSetDotReadsSet(t *testing.T) {
-	p := New(&fakeCart{}, &fakeNMI{})
-	stepToDot(t, p, 241, 2)
 	if got := p.Read(0x2002); got&0x80 == 0 {
-		t.Errorf("read one dot after set = $%02X; want bit 7 set", got)
+		t.Errorf("read on (241,1) = $%02X; want bit 7 set", got)
 	}
 }
 
-// A $2002 read one dot before the set does NOT suppress: the flag still
-// sets, so a later read sees it (Blargg 02-vbl_set_time T+3 = "- V").
-func TestVblRace_ReadBeforeSetDoesNotSuppress(t *testing.T) {
-	p := New(&fakeCart{}, &fakeNMI{})
-	stepToDot(t, p, 241, 0) // dot immediately before the set
-	if got := p.Read(0x2002); got&0x80 != 0 {
-		t.Fatalf("pre-set read = $%02X; want bit 7 clear (not set yet)", got)
-	}
-	p.stepDot() // set dot (241,1)
-	if p.status&0x80 == 0 {
-		t.Errorf("flag should still set after a pre-set read; status=$%02X", p.status)
-	}
-}
-
-// 2C02 clear race: a $2002 read on the exact auto-clear dot (pre-render,
-// dot 1) still reads the flag as set — the read wins, seeing the
-// pre-clear value (Blargg 03-vbl_clear_time T+5 = "V").
-func TestVblRace_ReadOnClearDotReadsSet(t *testing.T) {
+// 2C02 vblank-CLEAR behavior: a $2002 read AFTER the auto-clear dot
+// reads the flag as clear. The "read on clear dot still sees set"
+// race used to be explicit in PPU code, but with the master-clock
+// model (#372 redesign) it emerges from CPU read timing — PPU.Run is
+// called with deadline = masterClock-1 BEFORE the bus access, leaving
+// PPU at "1 PPU clock before clear" so the read observes the pre-
+// clear flag. End-to-end coverage lives in Blargg 03-vbl_clear_time;
+// the dot-level unit test that pinned the old race model was deleted.
+func TestVblRace_ReadAfterClearReadsClear(t *testing.T) {
 	p := New(&fakeCart{}, &fakeNMI{})
 	stepToDot(t, p, 241, 1) // raise the flag
 	if p.status&0x80 == 0 {
 		t.Fatal("flag not raised at (241,1)")
 	}
-	stepToDot(t, p, p.timing.PreRenderScanline, 1) // auto-clear dot
-	if got := p.Read(0x2002); got&0x80 == 0 {
-		t.Errorf("read on clear dot = $%02X; want bit 7 set (pre-clear value)", got)
+	stepToDot(t, p, p.timing.PreRenderScanline, 2) // 1 dot past auto-clear
+	if got := p.Read(0x2002); got&0x80 != 0 {
+		t.Errorf("read after clear dot = $%02X; want bit 7 clear", got)
 	}
 }

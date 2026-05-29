@@ -10,8 +10,11 @@ func TestOddFrame_DotSkipWhenRenderingEnabled(t *testing.T) {
 	p := New(&fakeCart{}, nil)
 
 	// Enable rendering (BG show bit 3). The check looks at $2001 bits
-	// 3 + 4; either being set counts.
+	// 3 + 4; either being set counts. The latch samples
+	// renderingEnabledDelayed which lags mask by 1 PPU clock (Mesen2
+	// model), so seed both directly here.
 	p.mask = 0x08
+	p.renderingEnabledDelayed = true
 	p.scanline = preRenderScanline
 	p.dot = 338
 	p.frameCount = 1 // odd
