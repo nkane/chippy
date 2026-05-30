@@ -111,6 +111,36 @@ var accuracyROMs = []accuracyROM{
 		pathEnv:   "CHIPPY_ACCURACY_INSTR_MISC_BIN",
 		maxFrames: 3000,
 	},
+	{
+		// Blargg instr_test-v5 (all_instrs) — every NMOS official
+		// + illegal opcode under every addressing mode, across 16
+		// sub-tests. Tests 1 (basics) + 2 (implied) PASS; test 3
+		// (immediate) fails at $AB (LXA/ATX) — an *unstable*
+		// illegal whose result depends on real-silicon analog
+		// noise. chippy implements the common stable
+		// approximation (`(A | 0xEE) & imm`) per #318 but
+		// Blargg's tests pin a specific value that doesn't match
+		// any magic constant. Use official_only.nes instead for a
+		// clean pass on the non-unstable opcodes — wired below.
+		name:      "instr_test-v5.nes",
+		url:       "https://github.com/christopherpow/nes-test-roms/raw/master/instr_test-v5/all_instrs.nes",
+		sha:       "353870c157242e3d428ef7387109deaee0d2e158bdb432ab9aae4e657072c785",
+		pathEnv:   "CHIPPY_ACCURACY_INSTR_TEST_V5_BIN",
+		maxFrames: 6000,
+		knownFail: "tests 1-2 (basics, implied) PASS; test 3 (immediate) fails at $AB LXA/ATX — unstable illegal opcode whose silicon result depends on analog noise, chippy uses the 0xEE-magic stable approximation",
+	},
+	{
+		// Blargg instr_test-v5 (official_only) — same 16 sub-test
+		// matrix as all_instrs.nes but excludes the unstable
+		// illegal opcodes ($8B XAA, $AB LXA, $93 SHA, $9F AHX,
+		// $9C SHY, $9E SHX, $9B TAS, $BB LAS). Clean baseline
+		// for the cycle-accurate CPU core (#318).
+		name:      "instr_test-v5_official.nes",
+		url:       "https://github.com/christopherpow/nes-test-roms/raw/master/instr_test-v5/official_only.nes",
+		sha:       "589b8835deb5cbc69618dac193a3dbd675540f7f2794e2d2a92e97beb8abc3cb",
+		pathEnv:   "CHIPPY_ACCURACY_INSTR_TEST_V5_OFFICIAL_BIN",
+		maxFrames: 6000,
+	},
 }
 
 func TestAccuracy(t *testing.T) {
