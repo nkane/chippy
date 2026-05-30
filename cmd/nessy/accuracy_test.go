@@ -98,6 +98,19 @@ var accuracyROMs = []accuracyROM{
 		pathEnv:   "CHIPPY_ACCURACY_APU_TEST_BIN",
 		maxFrames: 3000,
 	},
+	{
+		// Blargg instr_misc — 4 sub-tests: abs_x_wrap (LDA absX
+		// wrapping past $FFFF), branch_wrap (branches wrapping
+		// past $FFFF), dummy_reads (addressing-mode dummy reads
+		// land on the right bus address), dummy_reads_apu (ditto
+		// for APU register addresses, exercises bus-side reads
+		// against side-effecting registers).
+		name:      "instr_misc.nes",
+		url:       "https://github.com/christopherpow/nes-test-roms/raw/master/instr_misc/instr_misc.nes",
+		sha:       "b6762e20a285216304dfd2b5e1f192459354b23a5e48b2f5f9fb7cb0dac51243",
+		pathEnv:   "CHIPPY_ACCURACY_INSTR_MISC_BIN",
+		maxFrames: 3000,
+	},
 }
 
 func TestAccuracy(t *testing.T) {
