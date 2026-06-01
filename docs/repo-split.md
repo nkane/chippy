@@ -82,8 +82,9 @@ chippy can't build nessy. Options:
 
 Lean #2 — the attach UX is nice + it's a thin exec wrapper.
 
-## Status
+## Status — **DONE 2026-05-31** via PR #386
 
-Staged, not executed — gated on the new GitHub repo existing + a
-chippy library tag. `scripts/carve-nessy.sh` + this doc are the
-runnable plan.
+Executed against chippy v1.2.0. nessy lives at
+[github.com/nkane/nessy](https://github.com/nkane/nessy) consuming
+chippy as a module dependency. The `scripts/carve-nessy.sh` script
+and this doc stay as the historical reference for how it ran.
