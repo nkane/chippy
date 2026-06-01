@@ -144,7 +144,7 @@ func resolveNessyBinary(override string) (string, error) {
 		return p, nil
 	}
 	return "", errors.New(
-		"nessy binary not found — install via `go install -tags=nessy github.com/nkane/chippy/cmd/nessy@latest`, " +
+		"nessy binary not found — install via `go install -tags=nessy github.com/nkane/nessy/cmd/nessy@latest`, " +
 			"or pass `-nessy-binary PATH`")
 }
 

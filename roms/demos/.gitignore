@@ -1,4 +1,0 @@
-# ca65 / ld65 build artifacts.
-# Built .nes files are committed (see Makefile header).
-*.o
-*.map

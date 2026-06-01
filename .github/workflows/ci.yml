@@ -60,26 +60,6 @@ jobs:
         with:
           version: v2.12.2
 
-  nessy-build:
-    # Validates the `-tags=nessy` build on every PR so regressions in
-    # the cmd/nessy / Ebiten coupling surface before release time.
-    # darwin is the cheapest runner (no apt-get X11 deps), so we use
-    # it as the canary; the release workflow exercises every platform
-    # on tag.
-    name: nessy tagged build (darwin)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: 'stable'
-          cache: true
-
-      - name: Build nessy (-tags=nessy)
-        run: go build -tags=nessy -o /tmp/nessy ./cmd/nessy
-
   klaus:
     name: klaus functional test
     runs-on: ubuntu-latest
@@ -94,41 +74,6 @@ jobs:
 
       - name: Run Klaus 6502 functional test
         run: go test -tags=klaus -timeout 5m -run TestKlaus -v ./cpu/...
-
-  nestest:
-    name: nestest
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: 'stable'
-          cache: true
-
-      - name: Run nestest golden-PC walk
-        run: go test -tags=nestest -timeout 5m -run TestNestest -v ./cmd/nessy/...
-
-  accuracy:
-    name: accuracy test ROMs
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: 'stable'
-          cache: true
-
-      # Downloads + SHA-pins nesdev / Blargg test ROMs on first run
-      # (cached under $XDG_CACHE_HOME/chippy-tests/). ROMs with a
-      # tracked accuracy gap are reported as skips, not failures, so
-      # this job gates on "the harness ran + read a status" — real
-      # regressions in a passing ROM still fail it.
-      - name: Run nesdev / Blargg accuracy ROMs
-        run: go test -tags=accuracy -timeout 5m -run TestAccuracy -v ./cmd/nessy/...
 
   dap-integration:
     name: dap integration
@@ -249,10 +194,6 @@ jobs:
     # PR overwrites that directory (keep_files: false) and updates
     # the comment in place.
     #
-    # Skips nessy-* tapes here because the nessy build pulls in
-    # X11 / GL dev headers (handled in the release workflow); chippy
-    # tapes alone exercise the TUI and DAP-attach surfaces this job
-    # exists to protect.
     name: vhs smoke (chippy)
     runs-on: ubuntu-latest
     permissions:
@@ -287,12 +228,6 @@ jobs:
 
       - name: Render smoke tapes
         run: make -C test/smoke chippy
-
-      - name: Render nessy headless captures (GIF + MP4)
-        # Synthesized straight from the emulator — no Ebiten window,
-        # no GL, no screen grab. Deterministic so the artifacts are
-        # stable. ffmpeg (installed above) muxes the audio MP4.
-        run: make -C test/smoke nessy-record
 
       - name: Upload rendered GIFs + MP4s (workflow artifact)
         if: always()
@@ -341,22 +276,6 @@ jobs:
 
             ### chippy-console (#232)
             ![chippy-console](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/chippy-console.gif)
-
-            ## nessy headless captures
-
-            Synthesized straight from the emulator (no window / GL / screen grab) — deterministic across runs.
-
-            ### nessy-vblank-bounce (PPU NMI + sprite move)
-            ![nessy-vblank-bounce](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/nessy-vblank-bounce.gif)
-
-            ### nessy-oam-grid (64-sprite OAMDMA, #326)
-            ![nessy-oam-grid](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/nessy-oam-grid.gif)
-
-            ### nessy-input-echo (scripted joypad input, #328-style)
-            ![nessy-input-echo](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/nessy-input-echo.gif)
-
-            ### nessy-all-channels (video + audio)
-            🔊 [nessy-all-channels.mp4](https://raw.githubusercontent.com/${{ github.repository }}/smoke-gifs/pr-${{ github.event.pull_request.number }}/nessy-all-channels.mp4) — H.264 + AAC, plays the APU mixer output.
 
   cmos-e2e:
     name: cmos e2e demo
