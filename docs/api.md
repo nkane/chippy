@@ -2,8 +2,8 @@
 
 chippy's 6502 core ships as an importable Go library. The packages
 below live at the module root (`github.com/nkane/chippy/<pkg>`) so
-external modules — including the standalone [nessy](nessy/index.md)
-emulator — can build on them. Everything under `internal/` is
+external modules — including the [nessy](https://github.com/nkane/nessy)
+NES emulator — can build on them. Everything under `internal/` is
 private to this module and exempt from the compatibility promise.
 
 ```go
@@ -130,6 +130,6 @@ A Debug Adapter Protocol server — drives the CPU from any DAP client
 ## What's NOT public
 
 - `internal/tui` — chippy's Bubble Tea UI. Chippy-binary-only.
-- `internal/nes/*` — the NES PPU / APU / cart / DMA / joypad. Moves to
-  the standalone nessy repo (#351); not part of chippy's library
-  contract.
+- The NES PPU / APU / cart / DMA / joypad live in the standalone
+  [nessy](https://github.com/nkane/nessy) repo and are not part of
+  chippy's library contract.

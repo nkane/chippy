@@ -176,7 +176,7 @@ type CPU struct {
 	// dmcFetcher is the APU-side hook ProcessPendingDma calls to
 	// look up the DMC's current read address + push the fetched
 	// byte back into the sample buffer. Wired via SetDMCFetcher
-	// in the nessy build; nil for non-NES variants.
+	// by the nessy NES-emulator consumer; nil for non-NES variants.
 	dmcFetcher DMCFetcher
 }
 
