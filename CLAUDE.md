@@ -13,8 +13,7 @@ Go-based TUI 6502 emulator + debugger (Bubble Tea, Lipgloss). Targets ca65/cc65 
 - Squash-merge with `--delete-branch`. Defer follow-ups by filing new issues.
 
 ## Release tag scheme
-- chippy ships under bare `vX.Y.Z` tags. Goreleaser via `.goreleaser.chippy.yml` (last released: `v1.0.0`).
-- nessy ships under `nessy-vX.Y.Z` tags. Custom multi-OS workflow (no goreleaser; alpha-only).
+- chippy ships under bare `vX.Y.Z` tags. Goreleaser via `.goreleaser.chippy.yml` (last released: `v1.2.0`; nessy was carved out into [github.com/nkane/nessy](https://github.com/nkane/nessy) post-v1.2.0).
 - Full process in [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## Docs are part of every PR (not a follow-up)

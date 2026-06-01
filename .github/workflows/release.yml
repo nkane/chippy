@@ -1,20 +1,18 @@
 name: release
 
 # Tag scheme:
-#   vX.Y.Z         → chippy release. Goreleaser flow: homebrew tap,
-#                    AUR, .deb / .rpm / .apk, VS Code marketplace,
-#                    cosign signatures, SPDX SBOMs.
-#   nessy-vX.Y.Z   → nessy alpha. Custom per-OS build jobs produce
-#                    darwin (amd64+arm64), linux (amd64), windows
-#                    (amd64) binaries bundled with demo ROMs. No
-#                    homebrew / AUR / marketplace yet (alpha-only).
+#   vX.Y.Z → chippy release. Goreleaser flow: homebrew tap, AUR,
+#            .deb / .rpm / .apk, VS Code marketplace, cosign
+#            signatures, SPDX SBOMs.
 #
-# See `docs/RELEASE.md` for the full release-cutting playbook.
+# nessy carved out to github.com/nkane/nessy post-v1.2.0; its
+# release workflow lives in that repo.
+#
+# See `docs/RELEASE.md` for the chippy release-cutting playbook.
 on:
   push:
     tags:
       - 'v*'
-      - 'nessy-v*'
 
 # id-token: write lets cosign mint a keyless OIDC certificate bound to
 # this workflow. contents: write is required for release-asset uploads.
@@ -140,150 +138,3 @@ jobs:
             sleep "$delay"
           done
 
-  # ----- nessy release (custom multi-OS build) -----
-  # Four parallel build jobs produce native binaries via CGO + each
-  # platform's graphics dev libs. First runner reaches `gh release
-  # create` and wins the release-creation race; subsequent runners
-  # attach their artifacts via `gh release upload --clobber`. No
-  # cosign / SBOM for nessy v0.1 alpha — those land when nessy
-  # graduates.
-  #
-  # Both darwin targets build on `macos-latest` (Apple Silicon). The
-  # amd64 variant cross-compiles via clang's `-target x86_64-apple-macos`
-  # — the macOS SDK ships both arch slices, so CGO + Ebiten just
-  # work. Previously the matrix used `macos-13` for darwin/amd64, but
-  # that runner pool has unpredictable multi-hour queues (#208).
-  nessy-build:
-    if: startsWith(github.ref_name, 'nessy-v')
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            binary: nessy
-            archive_ext: tar.gz
-          - os: macos-latest      # arm64; native build
-            goos: darwin
-            goarch: arm64
-            binary: nessy
-            archive_ext: tar.gz
-          - os: macos-latest      # arm64 runner; cross-compile for amd64
-            goos: darwin
-            goarch: amd64
-            binary: nessy
-            archive_ext: tar.gz
-          - os: windows-latest
-            goos: windows
-            goarch: amd64
-            binary: nessy.exe
-            archive_ext: zip
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: 'stable'
-          cache: true
-
-      # Ebiten on Linux pulls in X11 / GL / audio dev headers at build
-      # time. macOS + Windows runners bundle their equivalents.
-      - name: Install Linux build dependencies
-        if: matrix.goos == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libgl1-mesa-dev xorg-dev libasound2-dev \
-            libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
-
-      - name: Build nessy
-        shell: bash
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: '1'
-        run: |
-          # darwin/amd64 from an Apple Silicon runner needs an explicit
-          # clang -target so the linker pulls the x86_64 SDK slice. The
-          # macOS SDK on `macos-latest` ships both slices; this just
-          # tells CGO which to use.
-          if [ "${{ matrix.goos }}" = "darwin" ] && [ "${{ matrix.goarch }}" = "amd64" ] && [ "$(uname -m)" = "arm64" ]; then
-            export CC="cc -target x86_64-apple-macos"
-            export CXX="c++ -target x86_64-apple-macos"
-          fi
-          mkdir -p dist
-          go build -tags=nessy -trimpath -ldflags="-s -w" \
-            -o "dist/${{ matrix.binary }}" ./cmd/nessy
-          file "dist/${{ matrix.binary }}" || true
-
-      - name: Package
-        shell: bash
-        run: |
-          ver="${GITHUB_REF_NAME#nessy-v}"
-          stage="nessy_${ver}_${{ matrix.goos }}_${{ matrix.goarch }}"
-          mkdir -p "$stage"
-          cp "dist/${{ matrix.binary }}" "$stage/"
-          cp README.md LICENSE "$stage/" 2>/dev/null || true
-          # Bundle every demo so users can verify the install with a
-          # known-good payload.
-          mkdir -p "$stage/demos"
-          for d in roms/demos/*/; do
-            name=$(basename "$d")
-            cp -r "$d" "$stage/demos/$name"
-          done
-          if [ "${{ matrix.archive_ext }}" = "zip" ]; then
-            # PowerShell is the most portable cross-platform zip on
-            # Windows runners.
-            powershell -Command "Compress-Archive -Path '$stage' -DestinationPath '${stage}.zip'"
-          else
-            tar -czf "${stage}.tar.gz" "$stage"
-          fi
-          ls -la "${stage}".*
-
-      - name: Generate checksum
-        shell: bash
-        run: |
-          ver="${GITHUB_REF_NAME#nessy-v}"
-          archive="nessy_${ver}_${{ matrix.goos }}_${{ matrix.goarch }}.${{ matrix.archive_ext }}"
-          if command -v sha256sum >/dev/null; then
-            sha256sum "$archive" > "$archive.sha256"
-          else
-            shasum -a 256 "$archive" > "$archive.sha256"
-          fi
-
-      - name: Create or update GitHub release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          ver="${GITHUB_REF_NAME#nessy-v}"
-          archive="nessy_${ver}_${{ matrix.goos }}_${{ matrix.goarch }}.${{ matrix.archive_ext }}"
-          # All four matrix runners start in parallel. The original
-          # "view || create" idiom races: if none see the release yet
-          # they all race to create, the API hands one a 200 and the
-          # rest a 422 ("Release.tag_name already exists"). #251.
-          #
-          # Race-safe version: tolerate create-failure when the
-          # release already exists, then poll until visible so the
-          # subsequent upload is guaranteed a target.
-          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME" \
-              --title "$GITHUB_REF_NAME" \
-              --notes "nessy alpha release. See the docs at https://github.com/nkane/chippy for build + run instructions. Source-build is the supported path on every platform; the attached binaries are convenience artifacts." \
-              --prerelease 2>/dev/null || true
-          fi
-          # Up to ~30 s of poll for the winning runner's release to
-          # become visible to this runner. Real-world propagation is
-          # usually sub-second; the headroom absorbs API hiccups.
-          for i in 1 2 3 4 5 6; do
-            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-              break
-            fi
-            sleep 5
-          done
-          gh release upload "$GITHUB_REF_NAME" "$archive" "$archive.sha256" --clobber
