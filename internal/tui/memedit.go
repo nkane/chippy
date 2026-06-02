@@ -50,7 +50,7 @@ func (m *Model) handleMemEditKey(s string) memEditResult {
 			m.MemEditBuf = ""
 			return memEditCancelled
 		}
-		m.RAM.Write(m.MemCursor, byte(v))
+		m.memWrite(m.MemCursor, byte(v))
 		m.Status = fmt.Sprintf("$%04X <- $%02X", m.MemCursor, byte(v))
 		m.MemEditing = false
 		m.MemEditBuf = ""

@@ -394,6 +394,8 @@ func (m *Model) runCommand(line string) string {
 		delete(m.MemBPs, addr)
 		m.saveState()
 		return fmt.Sprintf("mem bp -$%04X", addr)
+	case "mem":
+		return m.cmdMem(args)
 	case "trace":
 		return m.cmdTrace(args)
 	case "textsave":
@@ -415,6 +417,78 @@ func (m *Model) runCommand(line string) string {
 // `off`, or a bare `PATH` (shorthand for `on PATH`). Setting a path opens
 // a fresh file (truncating any existing) and the tracer keeps its
 // enabled/disabled state until Enable/Disable is called.
+// cmdMem implements `:mem ADDR VALUE [VALUE...]` — writes hex bytes
+// starting at ADDR via the CPU's bus so any MMIO peripheral / WBus
+// watch side effects fire (matches the `STA $XXXX` codepath).
+//
+//	:mem $0200 41 42 43        → "ABC" at $0200..$0202
+//	:mem main 00               → zero the byte at symbol `main`
+func (m *Model) cmdMem(args []string) string {
+	if len(args) < 2 {
+		return "usage: :mem $ADDR VALUE [VALUE...]"
+	}
+	addr, err := m.parseAddrSym(args[0])
+	if err != nil {
+		return err.Error()
+	}
+	values := make([]byte, 0, len(args)-1)
+	for _, raw := range args[1:] {
+		v, err := parseByte(raw)
+		if err != nil {
+			return fmt.Sprintf("bad byte %q: %v", raw, err)
+		}
+		values = append(values, v)
+	}
+	for i, v := range values {
+		dst := addr + uint16(i)
+		m.memWrite(dst, v)
+	}
+	m.saveState()
+	if len(values) == 1 {
+		return fmt.Sprintf("$%04X <- $%02X", addr, values[0])
+	}
+	return fmt.Sprintf("$%04X..$%04X <- %d bytes", addr, addr+uint16(len(values)-1), len(values))
+}
+
+// parseByte accepts $XX / 0xXX / decimal 0-255. Returns an error on
+// out-of-range so users can't accidentally write a 16-bit value.
+func parseByte(s string) (byte, error) {
+	var v uint64
+	var err error
+	switch {
+	case strings.HasPrefix(s, "$"):
+		v, err = strconv.ParseUint(s[1:], 16, 16)
+	case strings.HasPrefix(s, "0x"), strings.HasPrefix(s, "0X"):
+		v, err = strconv.ParseUint(s[2:], 16, 16)
+	default:
+		v, err = strconv.ParseUint(s, 10, 16)
+	}
+	if err != nil {
+		return 0, err
+	}
+	if v > 0xFF {
+		return 0, fmt.Errorf("value $%X exceeds byte range", v)
+	}
+	return byte(v), nil
+}
+
+// memWrite is the canonical "TUI wrote one byte" path. Prefer the
+// WBus wrapper (so memory watches fire) over the raw RAM if WBus is
+// wired; otherwise fall through to the CPU's bus (which may be MMIO
+// in chippy-as-library use cases) so peripherals see the write.
+// Direct RAM.Write is the last fallback for the legacy in-process
+// case where no bus is configured.
+func (m *Model) memWrite(addr uint16, v byte) {
+	switch {
+	case m.WBus != nil:
+		m.WBus.Write(addr, v)
+	case m.CPU != nil && m.CPU.Bus != nil:
+		m.CPU.Bus.Write(addr, v)
+	default:
+		m.RAM.Write(addr, v)
+	}
+}
+
 func (m *Model) cmdTrace(args []string) string {
 	if m.Tracer == nil {
 		return "trace unavailable"

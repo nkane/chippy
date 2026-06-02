@@ -1357,6 +1357,7 @@ func helpPages() [][]helpSection {
 				{"← →", "move byte cursor ±1"},
 				{"↑ ↓", "move byte cursor ±$10 (auto-scrolls)"},
 				{"e", "edit byte at cursor (hex; enter=commit esc=cancel)"},
+				{":mem $ADDR V [V...]", "write hex bytes via the bus (MMIO + watches fire)"},
 			}},
 			{"Disassembly / Source", [][2]string{
 				{"[ / ]", "scroll one line/instruction up/down (active panel)"},
