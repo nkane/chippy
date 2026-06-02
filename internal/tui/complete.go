@@ -21,6 +21,7 @@ var defaultVerbs = func() []string {
 		"bp", "bpr", "bpw", "bprw",
 		"rmbpr", "rmbpw", "rmbprw",
 		"syms", "symbols",
+		"mem",
 		"trace",
 		"textsave",
 		"theme",
