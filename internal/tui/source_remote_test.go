@@ -117,7 +117,12 @@ func TestRemoteSource_SetBreakpoints_NoError(t *testing.T) {
 	src := NewRemoteSource(client, mirrorCPU, mirrorRAM, "tcp:test")
 	defer func() { _ = src.Close() }()
 
-	if err := src.SetBreakpoints([]uint16{0xC005, 0xC100}); err != nil {
+	if err := src.SetBreakpoints([]SourceBP{
+		{PC: 0xC005},
+		{PC: 0xC100, Cond: "A == $42"},
+		{PC: 0xC200, HitLimit: -1}, // one-shot
+		{PC: 0xC300, Log: "hit pc"},
+	}); err != nil {
 		t.Errorf("SetBreakpoints: %v", err)
 	}
 }

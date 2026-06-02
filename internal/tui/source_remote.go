@@ -154,18 +154,36 @@ func (s *RemoteSource) Pause() error {
 	return err
 }
 
-// SetBreakpoints (re)installs the active PC breakpoint set on the
+// SetBreakpoints (re)installs the active breakpoint set on the
 // server via `setInstructionBreakpoints`. Sends the full list each
-// time — the server treats every call as authoritative.
-func (s *RemoteSource) SetBreakpoints(pcs []uint16) error {
+// time — the server treats every call as authoritative. Forwards
+// the optional DAP `condition`, `hitCondition`, and `logMessage`
+// fields so a conditional / log / one-shot bp set in the local TUI
+// also short-circuits on the remote server.
+func (s *RemoteSource) SetBreakpoints(bps []SourceBP) error {
 	type instBP struct {
 		InstructionReference string `json:"instructionReference"`
+		Condition            string `json:"condition,omitempty"`
+		HitCondition         string `json:"hitCondition,omitempty"`
+		LogMessage           string `json:"logMessage,omitempty"`
 	}
-	bps := make([]instBP, 0, len(pcs))
-	for _, pc := range pcs {
-		bps = append(bps, instBP{InstructionReference: fmt.Sprintf("$%04X", pc)})
+	wire := make([]instBP, 0, len(bps))
+	for _, b := range bps {
+		var hit string
+		switch {
+		case b.HitLimit > 0:
+			hit = fmt.Sprintf("%d", b.HitLimit)
+		case b.HitLimit == -1:
+			hit = "1" // one-shot: break on first hit
+		}
+		wire = append(wire, instBP{
+			InstructionReference: fmt.Sprintf("$%04X", b.PC),
+			Condition:            b.Cond,
+			HitCondition:         hit,
+			LogMessage:           b.Log,
+		})
 	}
-	args := map[string]any{"breakpoints": bps}
+	args := map[string]any{"breakpoints": wire}
 	_, err := s.client.Request("setInstructionBreakpoints", args)
 	return err
 }
