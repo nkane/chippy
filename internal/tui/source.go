@@ -51,12 +51,15 @@ type Source interface {
 	// DAP `pause`.
 	Pause() error
 
-	// SetBreakpoints (re)installs the active set of PC breakpoints
-	// on the source. LocalSource records them so its Step can break;
-	// RemoteSource forwards via DAP `setInstructionBreakpoints`.
+	// SetBreakpoints (re)installs the active breakpoint set on the
+	// source. LocalSource only needs the PCs (conditions evaluate
+	// inside the TUI's run loop against the live CPU). RemoteSource
+	// forwards via DAP `setInstructionBreakpoints` with the optional
+	// `condition` field so the server can short-circuit non-matching
+	// hits without a TUI round-trip.
 	// Called whenever the TUI's `m.Breakpoints` map mutates so the
 	// remote stays in sync.
-	SetBreakpoints(pcs []uint16) error
+	SetBreakpoints(bps []SourceBP) error
 
 	// Attached reports whether this is a remote (DAP-backed) source.
 	// Used by the status bar and to gate features that don't work
@@ -145,7 +148,19 @@ func (s *LocalSource) Pause() error { return nil }
 // run loop via `shouldBreakAt`. The interface still requires the
 // method so RemoteSource can forward the same list to the remote
 // server.
-func (s *LocalSource) SetBreakpoints(pcs []uint16) error { return nil }
+func (s *LocalSource) SetBreakpoints(bps []SourceBP) error { return nil }
+
+// SourceBP is the wire shape Source.SetBreakpoints uses. PC is the
+// instruction address; Cond is the raw expression string ("" =
+// unconditional); HitLimit mirrors Breakpoint.HitLimit (0 unlimited,
+// >0 break on/after Nth hit, -1 one-shot); Log is the log-point
+// message ("" = pause-style bp).
+type SourceBP struct {
+	PC       uint16
+	Cond     string
+	HitLimit int
+	Log      string
+}
 
 // Attached returns false for LocalSource.
 func (s *LocalSource) Attached() bool { return false }

@@ -893,14 +893,19 @@ func (m *Model) syncSourceBreakpoints() {
 	if m.Source == nil {
 		return
 	}
-	pcs := make([]uint16, 0, len(m.Breakpoints))
+	bps := make([]SourceBP, 0, len(m.Breakpoints))
 	for pc, bp := range m.Breakpoints {
-		if bp == nil || !bp.Enabled {
+		if bp == nil || !bp.Enabled || bp.Rejected {
 			continue
 		}
-		pcs = append(pcs, pc)
+		bps = append(bps, SourceBP{
+			PC:       pc,
+			Cond:     bp.Cond,
+			HitLimit: bp.HitLimit,
+			Log:      bp.Log,
+		})
 	}
-	_ = m.Source.SetBreakpoints(pcs)
+	_ = m.Source.SetBreakpoints(bps)
 }
 
 // statusAfterStep updates Status reflecting halt or normal stepping outcome.
@@ -1097,6 +1102,20 @@ func (m Model) updateBPManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if bp := m.Breakpoints[bps[m.BPCursor]]; bp != nil {
 				bp.Enabled = !bp.Enabled
 				m.saveState()
+			}
+		}
+	case "c":
+		// Edit / clear the conditional expression on the selected bp.
+		// Opens the prompt pre-populated with `:bp $XXXX if <existing>`;
+		// user finishes the line + enter. To clear, leave nothing after
+		// `if`.
+		if m.BPCursor < len(bps) {
+			addr := bps[m.BPCursor]
+			if bp := m.Breakpoints[addr]; bp != nil {
+				m.ShowBPs = false
+				m.PromptActive = true
+				m.PromptBuf = fmt.Sprintf("bp $%04X if %s", addr, bp.Cond)
+				m.Status = "edit cond — enter to commit"
 			}
 		}
 	case "enter":
@@ -1523,7 +1542,7 @@ func (m Model) bpModal() string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString(help.Render("  j/k move  d delete  e enable/disable  enter set PC  esc close"))
+	b.WriteString(help.Render("  j/k move  d delete  e enable/disable  c edit cond  enter set PC  esc close"))
 	return lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
 		BorderForeground(lipgloss.Color("196")).
