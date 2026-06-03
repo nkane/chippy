@@ -88,6 +88,12 @@ type Watch struct {
 	Label string `json:"label,omitempty"`
 	Width int    `json:"width,omitempty"` // mem: 1 = byte, 2 = word (LE)
 	Reg   string `json:"reg,omitempty"`   // reg: A,X,Y,P,SP,PC
+	// Count > 1 marks an array watch: Count consecutive elements of Width
+	// bytes each, starting at Addr, rendered as name[0..Count-1]. cc65 .dbg
+	// rarely carries array bounds for data symbols, so this is usually set
+	// from an explicit `xN` token on `:watch`; when a sym `size=` is present
+	// it seeds the default.
+	Count int `json:"count,omitempty"`
 }
 
 type Model struct {
@@ -1183,9 +1189,9 @@ func (m Model) View() string {
 	flagH := 4
 	watchH := 0
 	if len(m.Watches) > 0 {
-		watchH = len(m.Watches) + 3
-		if watchH > 10 {
-			watchH = 10
+		watchH = m.watchRowCount() + 3
+		if watchH > 12 {
+			watchH = 12
 		}
 	}
 	stackH := innerH - regH - flagH - watchH
@@ -1341,7 +1347,7 @@ func helpPages() [][]helpSection {
 				{":goto X", "scroll memory pane to addr/symbol"},
 				{":pc X", "set CPU PC"},
 				{":run X", "run until addr (one-shot bp + go)"},
-				{":watch X [byte|word] [label]", "add value watch (also :watch reg <A|X|Y|P|SP|PC>)"},
+				{":watch X [byte|word] [xN] [label]", "add value watch (xN expands an array; also :watch reg <name>)"},
 				{":rmwatch X", "remove a watch (also :rmwatch reg <name>)"},
 				{":clearwatch", "remove ALL watches"},
 				{":speed Hz", "throttle to Hz (0 = max; try :speed 60)"},
@@ -1597,9 +1603,38 @@ func (m Model) flagsView(w, h int) string {
 	return fitPanel("Flags", body, w, h)
 }
 
+// maxWatchElemRows caps how many array elements a single array watch
+// renders in the panel; the rest collapse into a "… +N more" line.
+const maxWatchElemRows = 8
+
+// watchRowCount is the number of display rows the watch panel needs: one
+// per scalar/register watch, and 1 header + min(Count, cap)+1 rows per
+// array watch. Used to size the panel before rendering.
+func (m Model) watchRowCount() int {
+	n := 0
+	for _, wt := range m.Watches {
+		if wt.Kind == "mem" && wt.Count > 1 {
+			shown := wt.Count
+			if shown > maxWatchElemRows {
+				shown = maxWatchElemRows + 1 // elements + "… +N more"
+			}
+			n += 1 + shown
+			continue
+		}
+		n++
+	}
+	return n
+}
+
 func (m Model) watchView(w, h int) string {
+	nameStyle := dimAddr
+	valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Bold(true)
 	var b strings.Builder
 	for _, wt := range m.Watches {
+		if wt.Kind == "mem" && wt.Count > 1 {
+			m.writeArrayWatch(&b, wt, nameStyle, valStyle)
+			continue
+		}
 		var val, name string
 		if wt.Kind == "reg" {
 			val = m.regValue(wt.Reg)
@@ -1608,23 +1643,53 @@ func (m Model) watchView(w, h int) string {
 				name = wt.Reg
 			}
 		} else {
-			if wt.Width == 2 {
-				lo := uint16(m.RAM.Read(wt.Addr))
-				hi := uint16(m.RAM.Read(wt.Addr + 1))
-				val = fmt.Sprintf("$%04X", lo|(hi<<8))
-			} else {
-				val = fmt.Sprintf("  $%02X", m.RAM.Read(wt.Addr))
-			}
+			val = m.fmtMemValue(wt.Addr, wt.Width)
 			name = wt.Label
 			if name == "" {
 				name = fmt.Sprintf("$%04X", wt.Addr)
 			}
 		}
 		fmt.Fprintf(&b, "%s %s\n",
-			dimAddr.Render(fmt.Sprintf("%-10s", name)),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Bold(true).Render(val))
+			nameStyle.Render(fmt.Sprintf("%-10s", name)),
+			valStyle.Render(val))
 	}
 	return fitPanel("Watch", strings.TrimRight(b.String(), "\n"), w, h)
+}
+
+// fmtMemValue reads one watch element (byte or LE word) and formats it.
+func (m Model) fmtMemValue(addr uint16, width int) string {
+	if width == 2 {
+		lo := uint16(m.RAM.Read(addr))
+		hi := uint16(m.RAM.Read(addr + 1))
+		return fmt.Sprintf("$%04X", lo|(hi<<8))
+	}
+	return fmt.Sprintf("  $%02X", m.RAM.Read(addr))
+}
+
+// writeArrayWatch renders an array watch as a header row plus one indented
+// row per element (name[i]), capped at maxWatchElemRows with a trailing
+// "… +N more" when truncated.
+func (m Model) writeArrayWatch(b *strings.Builder, wt Watch, nameStyle, valStyle lipgloss.Style) {
+	name := wt.Label
+	if name == "" {
+		name = fmt.Sprintf("$%04X", wt.Addr)
+	}
+	fmt.Fprintf(b, "%s %s\n",
+		nameStyle.Render(fmt.Sprintf("%-10s", name)),
+		valStyle.Faint(true).Render(fmt.Sprintf("[%d]", wt.Count)))
+	shown := wt.Count
+	if shown > maxWatchElemRows {
+		shown = maxWatchElemRows
+	}
+	for i := 0; i < shown; i++ {
+		addr := wt.Addr + uint16(i*wt.Width)
+		fmt.Fprintf(b, "  %s %s\n",
+			nameStyle.Render(fmt.Sprintf("%-8s", fmt.Sprintf("[%d]", i))),
+			valStyle.Render(m.fmtMemValue(addr, wt.Width)))
+	}
+	if wt.Count > shown {
+		fmt.Fprintf(b, "  %s\n", nameStyle.Render(fmt.Sprintf("… +%d more", wt.Count-shown)))
+	}
 }
 
 // regValue formats the named CPU register. Returns "?" for unknown names.
