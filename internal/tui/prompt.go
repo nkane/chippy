@@ -285,25 +285,42 @@ func (m *Model) runCommand(line string) string {
 			return err.Error()
 		}
 		width := 1
-		label := ""
-		if len(args) >= 2 {
-			switch args[1] {
+		count := 0
+		var rest []string
+		for _, a := range args[1:] {
+			switch a {
 			case "word", "w", "16":
 				width = 2
 			case "byte", "b", "8":
 				width = 1
 			default:
-				label = strings.Join(args[1:], " ")
+				if n, ok := parseCountToken(a); ok {
+					count = n
+					continue
+				}
+				rest = append(rest, a)
 			}
 		}
-		if label == "" && len(args) >= 3 {
-			label = strings.Join(args[2:], " ")
-		}
+		label := strings.Join(rest, " ")
 		if label == "" && m.Syms != nil {
 			label = m.Syms.Lookup(addr)
 		}
-		m.Watches = append(m.Watches, Watch{Kind: "mem", Addr: addr, Label: label, Width: width})
+		// Seed an array watch from the cc65 `size=` when the user didn't
+		// pass an explicit `xN`. Only fires when the symbol spans more than
+		// one element; most data globals lack `size=` so this is best-effort.
+		if count == 0 && m.Syms != nil {
+			if sz := m.Syms.Size(addr); sz > width {
+				count = sz / width
+			}
+		}
+		if count > maxWatchCount {
+			count = maxWatchCount
+		}
+		m.Watches = append(m.Watches, Watch{Kind: "mem", Addr: addr, Label: label, Width: width, Count: count})
 		m.saveState()
+		if count > 1 {
+			return fmt.Sprintf("watch +$%04X [%d]", addr, count)
+		}
 		return fmt.Sprintf("watch +$%04X", addr)
 	case "rmwatch", "unwatch":
 		if len(args) == 0 {
@@ -452,6 +469,29 @@ func (m *Model) cmdMem(args []string) string {
 
 // parseByte accepts $XX / 0xXX / decimal 0-255. Returns an error on
 // out-of-range so users can't accidentally write a 16-bit value.
+// maxWatchCount caps array-watch expansion so a bogus `size=` or a fat-
+// fingered `xN` can't flood the watch panel.
+const maxWatchCount = 256
+
+// parseCountToken recognises the array-length token on `:watch`, written
+// as `xN` (e.g. `x4`) or `[N]` (e.g. `[4]`). Returns (n, true) on a match
+// with n >= 1; (0, false) otherwise so the caller treats it as a label word.
+func parseCountToken(s string) (int, bool) {
+	switch {
+	case strings.HasPrefix(s, "x"), strings.HasPrefix(s, "X"):
+		s = s[1:]
+	case strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]"):
+		s = s[1 : len(s)-1]
+	default:
+		return 0, false
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 {
+		return 0, false
+	}
+	return n, true
+}
+
 func parseByte(s string) (byte, error) {
 	var v uint64
 	var err error

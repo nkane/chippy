@@ -352,12 +352,21 @@ The watch panel shows live values of registers and memory cells.
 | `:watch $0200 word`                      | Watch 16-bit LE word                |
 | `:watch score`                           | Watch by symbol                     |
 | `:watch $0200 byte player x`             | Watch with custom label             |
+| `:watch grid word x16`                   | Array watch: 16 LE words from `grid` |
+| `:watch buf x8 sprite`                   | Array watch: 8 bytes, labelled       |
 | `:watch reg A`                           | Watch CPU register                  |
 | `:watch reg A accumulator`               | Register watch with label           |
 | `:rmwatch $0200` / `:rmwatch reg A`      | Remove a single watch               |
 | `:clearwatch`                            | Remove all watches                  |
 
 Aliases: `:w` for `:watch`, `:unwatch` for `:rmwatch`.
+
+Array watches expand into indexed rows (`name[0]`, `name[1]`, …). The
+element width is the watch's `byte`/`word` kind; `xN` (or `[N]`) sets the
+count. When the `.dbg` carries a `size=` for the symbol, chippy seeds the
+count automatically — but cc65 omits `size=` for most data globals, so
+`xN` is usually required. Long arrays render the first few elements and
+collapse the rest into a `… +N more` line.
 
 ### Misc
 

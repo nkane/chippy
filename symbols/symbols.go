@@ -22,15 +22,28 @@ import (
 
 // Table maps addresses to the symbol(s) defined there.
 type Table struct {
-	byAddr map[uint16]string
-	byName map[string]uint16
+	byAddr   map[uint16]string
+	byName   map[string]uint16
+	sizeByAd map[uint16]int // sym `size=` field, when cc65 emits one
 }
 
 func New() *Table {
 	return &Table{
-		byAddr: map[uint16]string{},
-		byName: map[string]uint16{},
+		byAddr:   map[uint16]string{},
+		byName:   map[string]uint16{},
+		sizeByAd: map[uint16]int{},
 	}
+}
+
+// Size returns the byte extent cc65 recorded for the symbol at addr, or 0
+// when unknown. cc65 only emits `size=` on some `sym` records (notably
+// code labels); data/BSS globals frequently lack it, so callers must treat
+// 0 as "size unavailable", not "zero-length".
+func (t *Table) Size(addr uint16) int {
+	if t == nil {
+		return 0
+	}
+	return t.sizeByAd[addr]
 }
 
 // Lookup returns the symbol at addr, or "" if none.
@@ -121,6 +134,11 @@ func LoadDbg(path string) (*Table, error) {
 		}
 		if _, exists := t.byName[name]; !exists {
 			t.byName[name] = uint16(addr)
+		}
+		if sz, ok := fields["size"]; ok {
+			if n, err := parseNum(sz); err == nil && n > 0 {
+				t.sizeByAd[uint16(addr)] = int(n)
+			}
 		}
 	}
 	if err := scan.Err(); err != nil {
