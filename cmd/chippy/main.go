@@ -33,6 +33,7 @@ func main() {
 		textBufCap  = flag.Int("text-buf-cap", peripheral.DefaultTextOutputCap, "TextOutput ($F001) buffer cap in bytes; 0 = unbounded")
 		theme       = flag.String("theme", "", "color palette: default | mono | protan | tritan. NO_COLOR=1 forces mono regardless.")
 		traceReplay = flag.String("trace-replay", "", "open a prior trace file in replay mode (step keys scroll through recorded frames; CPU stays paused)")
+		traceDiff   = flag.String("diff", "", "with -trace-replay: load a second trace and mark the first cycle where the two runs diverge (press d to toggle the side-by-side view)")
 	)
 	flag.Parse()
 
@@ -192,19 +193,16 @@ func main() {
 	wbus := tui.NewWBus(mmio)
 	c.SetBus(wbus)
 
-	var replay *trace.Replay
+	var replay, diffReplay *trace.Replay
 	if *traceReplay != "" {
-		f, err := os.Open(*traceReplay)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "trace-replay: %v\n", err)
+		replay = mustParseTrace(*traceReplay, "trace-replay")
+	}
+	if *traceDiff != "" {
+		if *traceReplay == "" {
+			fmt.Fprintln(os.Stderr, "-diff requires -trace-replay")
 			os.Exit(1)
 		}
-		replay, err = trace.Parse(f)
-		f.Close()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "trace-replay: %v\n", err)
-			os.Exit(1)
-		}
+		diffReplay = mustParseTrace(*traceDiff, "diff")
 	}
 
 	model := tui.New(c, ram).
@@ -215,7 +213,8 @@ func main() {
 		WithHistoryPath(tui.DefaultHistoryPath()).
 		WithRunOnStart(*runOnStart).
 		WithTheme(*theme).
-		WithTraceReplay(replay)
+		WithTraceReplay(replay).
+		WithReplayDiff(diffReplay)
 	if syms != nil {
 		model = model.WithSymbols(syms)
 	}
@@ -231,4 +230,22 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// mustParseTrace opens and parses a trace file, exiting with a labelled
+// error on failure. label names the flag in diagnostics ("trace-replay" /
+// "diff").
+func mustParseTrace(path, label string) *trace.Replay {
+	f, err := os.Open(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", label, err)
+		os.Exit(1)
+	}
+	defer f.Close()
+	rep, err := trace.Parse(f)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", label, err)
+		os.Exit(1)
+	}
+	return rep
 }

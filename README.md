@@ -183,6 +183,7 @@ Flags:
 | `-text-buf-cap` | `65536` | TextOutput ($F001) buffer cap in bytes. Older bytes are evicted when full. `0` disables the bound. Dump the live buffer with `:textsave PATH`. |
 | `-theme` | `default` | Color palette: `default` / `mono` / `protan` (red-green safe) / `tritan` (blue-yellow safe). `NO_COLOR=1` env forces `mono` regardless. Switch at runtime with `:theme NAME`; the choice persists across launches. |
 | `-trace-replay` | — | Path to a prior `.trace` file. Opens the TUI in replay mode — `s` and `<` scroll through recorded frames instead of running the live CPU. The CPU register state is synced from the active frame so every panel renders as if paused at that PC. |
+| `-diff` | — | With `-trace-replay`: load a second `.trace` and mark the first cycle where the two runs diverge. Press `d` for the side-by-side view, `D` to jump both cursors to the divergence. |
 
 Examples:
 
@@ -367,6 +368,25 @@ count. When the `.dbg` carries a `size=` for the symbol, chippy seeds the
 count automatically — but cc65 omits `size=` for most data globals, so
 `xN` is usually required. Long arrays render the first few elements and
 collapse the rest into a `… +N more` line.
+
+### Trace replay
+
+Available only when launched with `-trace-replay PATH` (the CPU stays paused;
+`s` / `<` scroll recorded frames).
+
+| Command            | Effect                                                            |
+|--------------------|------------------------------------------------------------------|
+| `:find EXPR`       | Jump to the next frame matching EXPR (e.g. `:find PC=$8042`, `:find A=$10 && X=0`) |
+| `:rfind EXPR`      | Same, searching backward                                         |
+| `:find` / `:rfind` | Repeat the last expression (sweep through matches)              |
+| `:cycle N`         | Jump to the first frame at/after absolute cycle N (binary search, O(log N)) |
+| `d`                | Toggle the side-by-side diff view (needs `-diff`)               |
+| `D`                | Jump both cursors to the first divergence                       |
+
+`:find` expressions use the same grammar as breakpoint conditions over the
+frame's registers/flags (`A`, `X`, `Y`, `P`, `SP`, `PC`, `N V B D I Z C`). A
+bare `=` is accepted as equality. Memory dereferences read live RAM, which is
+stale during replay — stick to register/flag predicates.
 
 ### Misc
 
