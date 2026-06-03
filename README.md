@@ -496,12 +496,26 @@ opens a reverse-incremental search through history — each keystroke
 narrows the match, Ctrl-R again walks to the next older one, Esc restores
 the original line, Enter accepts.
 
-Press `<` to rewind one instruction. Each explicit step (`s`, `S`, `n`,
-`f`) records a full CPU + RAM snapshot beforehand, kept in a 256-entry
-FIFO ring; the status bar shows `rwd:N` while non-empty. Free-run via
-`r` does NOT snapshot — the 64 KiB-per-step cost would dominate at multi-MHz
-throughput — so reverse-step covers single-stepping sessions, not whole
-program executions.
+Press `<` to rewind one instruction. Every step — explicit (`s`, `S`, `n`,
+`f`) or free-run (`r`) — records a page-level copy-on-write delta beforehand,
+kept in a 256-entry FIFO ring; the status bar shows `rwd:N` while non-empty.
+
+For jumps deeper than that ring, **deep rewind** keeps periodic full-RAM
+*keyframes* (one every 4096 steps) and reconstructs any earlier step by
+restoring the nearest keyframe and replaying forward to the exact target:
+
+| Command            | Effect                                                      |
+|--------------------|-------------------------------------------------------------|
+| `:rewind N`        | Step back N executed steps (keyframe replay for deep jumps) |
+| `:rewind-budget MB`| Cap keyframe memory; sets the deep-rewind reach             |
+
+Reach (steps) = `budget / 64 KiB × 4096`. At the default 128 MiB cap that's
+~8.4M steps; `:rewind-budget 256` reaches ~16.7M. The budget is a ceiling —
+a short run holds only the keyframes it produced — and the status bar shows
+`deep:<reach>@<budget>` once keyframes exist. A deep rewind replays at most
+4096 instructions (sub-millisecond on the cycle-accurate core). Replay assumes
+deterministic execution between keyframes; live keyboard input is captured in
+the snapshot, so buffered input replays correctly.
 
 ---
 

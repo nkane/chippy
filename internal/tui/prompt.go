@@ -259,6 +259,10 @@ func (m *Model) runCommand(line string) string {
 		return m.cmdFind(args, -1)
 	case "cycle":
 		return m.cmdCycle(args)
+	case "rewind":
+		return m.cmdRewind(args)
+	case "rewind-budget":
+		return m.cmdRewindBudget(args)
 	case "watch", "w":
 		if len(args) == 0 {
 			return "usage: :watch $XXXX [byte|word] [label]  |  :watch reg <name> [label]"

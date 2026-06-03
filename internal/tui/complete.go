@@ -23,6 +23,7 @@ var defaultVerbs = func() []string {
 		"syms", "symbols",
 		"mem",
 		"find", "rfind", "cycle",
+		"rewind", "rewind-budget",
 		"trace",
 		"textsave",
 		"theme",

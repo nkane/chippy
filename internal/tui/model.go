@@ -213,6 +213,17 @@ type Model struct {
 	// the runtime cost. Nil disables the feature; default cap is set in New.
 	Rewind *rewindRing
 
+	// Deep rewind (issue #392). StepCount counts every executed step since
+	// the last reset. Keyframes holds periodic full-RAM snapshots (one every
+	// keyframeInterval steps) so `:rewind N` can reconstruct a state far
+	// beyond the fine ring's depth by restoring the nearest keyframe and
+	// replaying forward. RewindBudgetMB caps keyframe memory; the ring drops
+	// the oldest keyframe when full, so reach = budget/64KiB × interval.
+	StepCount       uint64
+	Keyframes       *cpu.KeyframeRing
+	RewindBudgetMB  int
+	replayingRewind bool // suppresses keyframe capture during forward replay
+
 	// Immediate window — a modal REPL over the chippy expression grammar.
 	// `I` opens, Esc closes; while open, all keystrokes feed
 	// updateImmediate. Each Enter compiles + evaluates the buffer against
@@ -292,22 +303,24 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 	applyTheme(t)
 	rewind := newRewindRing(defaultRewindCap)
 	m := Model{
-		CPU:           c,
-		RAM:           r,
-		Breakpoints:   map[uint16]*Breakpoint{},
-		MemBPs:        map[uint16]*MemBP{},
-		MemViewAddr:   0x0000,
-		Status:        "ready",
-		TargetHz:      0,
-		DisasmFollow:  true,
-		SourceFollow:  true,
-		StackAnnotate: true,
-		HistIdx:       -1,
-		RIMatchIdx:    -1,
-		Rewind:        rewind,
-		Theme:         string(t),
-		W:             120,
-		H:             40,
+		CPU:            c,
+		RAM:            r,
+		Breakpoints:    map[uint16]*Breakpoint{},
+		MemBPs:         map[uint16]*MemBP{},
+		MemViewAddr:    0x0000,
+		Status:         "ready",
+		TargetHz:       0,
+		DisasmFollow:   true,
+		SourceFollow:   true,
+		StackAnnotate:  true,
+		HistIdx:        -1,
+		RIMatchIdx:     -1,
+		Rewind:         rewind,
+		RewindBudgetMB: defaultRewindBudgetMB,
+		Keyframes:      cpu.NewKeyframeRing(defaultRewindBudgetMB << 20),
+		Theme:          string(t),
+		W:              120,
+		H:              40,
 	}
 	m.Source = NewLocalSource(c, r)
 	return m
@@ -704,6 +717,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Rewind != nil {
 				m.Rewind.Reset()
 			}
+			m.Keyframes.Reset()
+			m.StepCount = 0
 			m.Status = "reset"
 		case "<":
 			if m.TraceReplay != nil {
@@ -719,6 +734,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s, _ := m.Rewind.Pop()
 			m.CPU.Restore(s, m.RAM)
 			m.restoreperipherals(s)
+			if m.StepCount > 0 {
+				m.StepCount--
+			}
 			m.Status = fmt.Sprintf("rewind -> $%04X (depth %d)", m.CPU.PC, m.Rewind.Len())
 		case "I":
 			m.ImmediateActive = true
@@ -935,15 +953,48 @@ func (m *Model) step() int {
 		defer m.CPUMu.Unlock()
 	}
 	if m.Rewind == nil {
-		return m.Source.Step()
+		n := m.Source.Step()
+		m.StepCount++
+		return n
 	}
+	m.seedKeyframe()
 	snap := m.CPU.Snapshot(m.RAM)
 	m.captureperipherals(&snap)
 	m.RAM.ResetShadow()
 	n := m.Source.Step()
 	snap.Pages = m.RAM.TakeShadow()
 	m.Rewind.Push(snap)
+	m.StepCount++
+	m.maybeKeyframe()
 	return n
+}
+
+// seedKeyframe captures the step-0 keyframe — the machine state before the
+// very first step — so deep rewinds to any target below the first interval
+// boundary have a base to replay forward from. Runs once per run (guarded by
+// StepCount==0) and never during replay.
+func (m *Model) seedKeyframe() {
+	if m.Keyframes == nil || m.replayingRewind || m.StepCount != 0 || m.Keyframes.Len() > 0 {
+		return
+	}
+	kf := cpu.Keyframe{Step: 0, Snap: m.CPU.SnapshotFull(m.RAM)}
+	m.captureperipherals(&kf.Snap)
+	m.Keyframes.Push(kf)
+}
+
+// maybeKeyframe captures a full-RAM keyframe at every keyframeInterval-th
+// step so `:rewind` can reach far past the fine ring. Skipped while replaying
+// (the keyframes for that span already exist) and when deep rewind is off.
+func (m *Model) maybeKeyframe() {
+	if m.Keyframes == nil || m.replayingRewind {
+		return
+	}
+	if m.StepCount%keyframeInterval != 0 {
+		return
+	}
+	kf := cpu.Keyframe{Step: m.StepCount, Snap: m.CPU.SnapshotFull(m.RAM)}
+	m.captureperipherals(&kf.Snap)
+	m.Keyframes.Push(kf)
 }
 
 // captureperipherals fills the snapshot's Peripherals map with the
@@ -1333,6 +1384,9 @@ func (m Model) View() string {
 	rewindSeg := ""
 	if d := m.Rewind.Len(); d > 0 {
 		rewindSeg = fmt.Sprintf(" │ rwd:%d", d)
+		if m.Keyframes.Len() > 0 {
+			rewindSeg += fmt.Sprintf(" deep:%s@%dMiB", humanCount(m.rewindReachSteps()), m.RewindBudgetMB)
+		}
 	}
 	statusText := fmt.Sprintf(
 		" %s │ cyc=%d │ PC=$%04X │ %s%s │ [?] help  [:] cmd  [s/n] step  [r] run  [<] back  [v] src  [q] quit",
@@ -1418,6 +1472,8 @@ func helpPages() [][]helpSection {
 				{"n", "step over (run JSR to RTS)"},
 				{"f", "run to next source line"},
 				{"<", "rewind one step (snapshot ring; depth shown as `rwd:N`)"},
+				{":rewind N", "rewind N steps (keyframe replay for deep jumps)"},
+				{":rewind-budget MB", "cap keyframe memory; sets deep-rewind reach"},
 				{"r", "run / pause"},
 				{"R", "reset CPU"},
 				{"b", "toggle breakpoint at PC"},
