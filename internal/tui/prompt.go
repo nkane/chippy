@@ -253,6 +253,12 @@ func (m *Model) runCommand(line string) string {
 			}
 		}
 		return fmt.Sprintf("running to $%04X", addr)
+	case "find":
+		return m.cmdFind(args, +1)
+	case "rfind":
+		return m.cmdFind(args, -1)
+	case "cycle":
+		return m.cmdCycle(args)
 	case "watch", "w":
 		if len(args) == 0 {
 			return "usage: :watch $XXXX [byte|word] [label]  |  :watch reg <name> [label]"

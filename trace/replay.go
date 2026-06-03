@@ -117,6 +117,109 @@ func (r *Replay) Seek(addr uint16) bool {
 	return false
 }
 
+// SeekCycle moves the cursor to the first frame whose Cycles >= target and
+// returns true. Trace cycle counts are monotonic non-decreasing, so this is
+// a binary search — O(log N) on a million-frame trace (issue #391). If every
+// frame is below target the cursor lands on the last frame and it returns
+// false (target past end).
+func (r *Replay) SeekCycle(target uint64) bool {
+	if r == nil || len(r.Frames) == 0 {
+		return false
+	}
+	lo, hi := 0, len(r.Frames) // first index with Cycles >= target
+	for lo < hi {
+		mid := int(uint(lo+hi) >> 1)
+		if r.Frames[mid].Cycles < target {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo >= len(r.Frames) {
+		r.Index = len(r.Frames) - 1
+		return false
+	}
+	r.Index = lo
+	return true
+}
+
+// FindFunc scans for the next frame satisfying pred, starting one step away
+// from `from` in direction dir (+1 forward, -1 backward). Returns the match
+// index and true, or (from, false) when none is found. The cursor is NOT
+// moved — callers decide whether to commit the jump.
+func (r *Replay) FindFunc(pred func(Frame) bool, from, dir int) (int, bool) {
+	if r == nil || len(r.Frames) == 0 || pred == nil {
+		return from, false
+	}
+	if dir >= 0 {
+		dir = 1
+	} else {
+		dir = -1
+	}
+	for i := from + dir; i >= 0 && i < len(r.Frames); i += dir {
+		if pred(r.Frames[i]) {
+			return i, true
+		}
+	}
+	return from, false
+}
+
+// Equal reports whether two frames represent the same architectural state:
+// PC, the visible registers, and the cycle count. OpBytes / Mnemonic are
+// derived from PC so they're excluded; InterruptIn is excluded because a
+// divergence in interrupt timing already shows up as a Cycles/PC mismatch.
+func (f Frame) Equal(g Frame) bool {
+	return f.PC == g.PC &&
+		f.A == g.A && f.X == g.X && f.Y == g.Y &&
+		f.P == g.P && f.SP == g.SP &&
+		f.Cycles == g.Cycles
+}
+
+// Divergence is the first frame index at which two replays of the same ROM
+// stop agreeing. Found is false when the traces match for their entire
+// overlapping length.
+type Divergence struct {
+	Index int    // frame index in both replays where they first differ
+	Cycle uint64 // Cycles of the left replay at Index (the divergence point)
+	Found bool
+}
+
+// Diff compares two replays frame-by-frame by index and reports the first
+// divergence. A length mismatch with no earlier state difference counts as a
+// divergence at the end of the shorter trace (one ran longer than the
+// other). Used by `-diff` mode to mark where two builds parted ways.
+func Diff(a, b *Replay) Divergence {
+	if a == nil || b == nil {
+		return Divergence{}
+	}
+	n := a.Len()
+	if b.Len() < n {
+		n = b.Len()
+	}
+	for i := 0; i < n; i++ {
+		if !a.Frames[i].Equal(b.Frames[i]) {
+			return Divergence{Index: i, Cycle: a.Frames[i].Cycles, Found: true}
+		}
+	}
+	if a.Len() != b.Len() {
+		return Divergence{Index: n, Cycle: lenCycle(a, b, n), Found: true}
+	}
+	return Divergence{}
+}
+
+// lenCycle returns the cycle count at the divergence-by-length point: the
+// first frame past the shorter trace, taken from whichever replay still has
+// it.
+func lenCycle(a, b *Replay, n int) uint64 {
+	if n < a.Len() {
+		return a.Frames[n].Cycles
+	}
+	if n < b.Len() {
+		return b.Frames[n].Cycles
+	}
+	return 0
+}
+
 // parseLine pulls one Frame out of a trace row. The format is
 // fixed-column-ish but tolerant of variable whitespace.
 func parseLine(line string) (Frame, error) {

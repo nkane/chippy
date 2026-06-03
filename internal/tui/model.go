@@ -264,6 +264,17 @@ type Model struct {
 	// that PC.
 	TraceReplay *trace.Replay
 
+	// lastFind is the most recent `:find` expression; a bare `:find` /
+	// `:rfind` repeats it so users can sweep through every match.
+	lastFind string
+
+	// ReplayDiff (optional) is a second trace loaded via `-diff`. When set,
+	// the replay view renders both traces side by side and Diverge marks the
+	// first frame where they disagree. Issue #391.
+	ReplayDiff *trace.Replay
+	Diverge    trace.Divergence
+	ShowDiff   bool // diff overlay open (toggled with `d`)
+
 	W, H int
 }
 
@@ -403,6 +414,34 @@ func (m Model) WithTraceReplay(r *trace.Replay) Model {
 	return m
 }
 
+// WithReplayDiff attaches a second trace for side-by-side diffing against
+// the primary replay (issue #391). Computes the first divergence eagerly so
+// the status line can advertise it on open and `d` can jump to it. No-op
+// without a primary replay or a non-empty diff trace.
+func (m Model) WithReplayDiff(r *trace.Replay) Model {
+	if m.TraceReplay == nil || r == nil || r.Len() == 0 {
+		return m
+	}
+	m.ReplayDiff = r
+	m.Diverge = trace.Diff(m.TraceReplay, r)
+	if m.Diverge.Found {
+		m.Status = fmt.Sprintf("diff loaded — diverges at CYC:%d (frame %d). press d, D jumps here.",
+			m.Diverge.Cycle, m.Diverge.Index+1)
+	} else {
+		m.Status = "diff loaded — traces identical over their overlap"
+	}
+	return m
+}
+
+// replayStatus is the standard "frame N/M" status line for trace replay.
+func (m *Model) replayStatus() string {
+	if m.TraceReplay == nil {
+		return ""
+	}
+	return fmt.Sprintf("trace replay (frame %d/%d)",
+		m.TraceReplay.Index+1, m.TraceReplay.Len())
+}
+
 // applyTraceFrame syncs the CPU's registers from the current Replay
 // frame so every render path reads as if the live CPU were paused at
 // that PC. No-op when TraceReplay is nil.
@@ -464,6 +503,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// gates fire first so the console can't fight them).
 		if m.ConsoleActive {
 			return m.updateConsole(msg)
+		}
+		// Diff overlay: step keys scroll both columns (the view re-centres
+		// on the primary cursor), D jumps to divergence, d/esc/q close.
+		if m.ShowDiff {
+			switch msg.String() {
+			case "ctrl+c":
+				m.saveState()
+				return m, tea.Quit
+			case "s", "right", "n":
+				m.TraceReplay.Step(1)
+				m.applyTraceFrame()
+				m.Status = m.replayStatus()
+				return m, m.scheduleTick()
+			case "<", "left", "p":
+				m.TraceReplay.Step(-1)
+				m.applyTraceFrame()
+				m.Status = m.replayStatus()
+				return m, m.scheduleTick()
+			case "D":
+				if m.Diverge.Found {
+					m.TraceReplay.Index = m.Diverge.Index
+					m.applyTraceFrame()
+					m.Status = fmt.Sprintf("jumped to divergence — CYC:%d (frame %d/%d)",
+						m.Diverge.Cycle, m.Diverge.Index+1, m.TraceReplay.Len())
+				}
+				return m, m.scheduleTick()
+			}
+			// d / esc / q / any other key closes the overlay.
+			m.ShowDiff = false
+			m.Status = "diff view closed"
+			return m, m.scheduleTick()
 		}
 		// Help modal: paging keys advance, any other key dismisses.
 		if m.ShowHelp {
@@ -528,6 +598,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?", "h":
 			m.ShowHelp = true
 			m.Status = "help"
+		case "d":
+			if m.ReplayDiff == nil {
+				m.Status = "diff: load a second trace with -diff"
+				break
+			}
+			m.ShowDiff = !m.ShowDiff
+			if m.ShowDiff {
+				m.Status = "diff view (d closes, D jumps to divergence)"
+			} else {
+				m.Status = "diff view closed"
+			}
+		case "D":
+			if !m.Diverge.Found {
+				m.Status = "diff: no divergence to jump to"
+				break
+			}
+			m.TraceReplay.Index = m.Diverge.Index
+			if m.ReplayDiff != nil {
+				m.ReplayDiff.Index = m.Diverge.Index
+			}
+			m.applyTraceFrame()
+			m.Status = fmt.Sprintf("jumped to divergence — CYC:%d (frame %d/%d)",
+				m.Diverge.Cycle, m.Diverge.Index+1, m.TraceReplay.Len())
 		case ":":
 			m.PromptActive = true
 			m.PromptBuf = ""
@@ -547,8 +640,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.TraceReplay != nil {
 				m.TraceReplay.Step(1)
 				m.applyTraceFrame()
-				m.Status = fmt.Sprintf("trace replay (frame %d/%d)",
-					m.TraceReplay.Index+1, m.TraceReplay.Len())
+				m.Status = m.replayStatus()
 			} else if m.CPU.Halted {
 				m.Status = "halted (press R to reset)"
 			} else {
@@ -617,8 +709,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.TraceReplay != nil {
 				m.TraceReplay.Step(-1)
 				m.applyTraceFrame()
-				m.Status = fmt.Sprintf("trace replay (frame %d/%d)",
-					m.TraceReplay.Index+1, m.TraceReplay.Len())
+				m.Status = m.replayStatus()
 				break
 			}
 			if m.Rewind == nil || m.Rewind.Len() == 0 {
@@ -1255,6 +1346,8 @@ func (m Model) View() string {
 	bodyHeight := innerH
 	var bodyBlock string
 	switch {
+	case m.ShowDiff:
+		bodyBlock = lipgloss.Place(m.W, bodyHeight, lipgloss.Center, lipgloss.Center, m.diffModal(bodyHeight))
 	case m.ShowHelp:
 		bodyBlock = lipgloss.Place(m.W, bodyHeight, lipgloss.Center, lipgloss.Center, m.helpModal())
 	case m.ShowBPs:
@@ -1435,9 +1528,11 @@ func helpPages() [][]helpSection {
 			}},
 			{"Trace replay", [][2]string{
 				{"--trace-replay PATH", "open a recorded trace; step keys scroll frames"},
-				{"s", "advance one trace frame (CPU stays paused)"},
-				{"<", "rewind one trace frame"},
-				{"status", "shows `trace replay (frame N/M)` while active"},
+				{"s / <", "advance / rewind one trace frame (CPU stays paused)"},
+				{":find EXPR", "jump to next frame matching expr (:rfind = backward)"},
+				{":cycle N", "jump to first frame at/after cycle N (binary search)"},
+				{"--diff PATH", "load a 2nd trace; mark first divergence cycle"},
+				{"d / D", "toggle diff side-by-side view / jump to divergence"},
 			}},
 		},
 	}
