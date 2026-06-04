@@ -46,6 +46,17 @@ type AttachConfig struct {
 	// down: either via a `disconnect` request or wire EOF in Serve().
 	// Hosts resume their autonomous run loop. Optional.
 	OnDisconnected func()
+
+	// CustomRequestHandler handles DAP request commands the built-in
+	// dispatch doesn't recognize — letting a host serve domain-specific
+	// debug data (e.g. nessy's PPU / OAM / mapper state) over its own
+	// `vendor/command` requests without forking the protocol. It runs
+	// from dispatch's fallback path under the CPU lock (so reads of live
+	// debuggee state are coherent). Return handled=false to defer to the
+	// standard "not implemented" error; handled=true with a non-nil err
+	// sends an error response, otherwise body is marshalled as the
+	// response body. Optional; nil means unknown commands always error.
+	CustomRequestHandler func(command string, args json.RawMessage) (body any, handled bool, err error)
 }
 
 // AttachExisting wires an already-constructed debuggee into the server
@@ -71,6 +82,7 @@ func (s *Server) AttachExisting(cfg AttachConfig) error {
 	s.cpuMu = cfg.CPUMu
 	s.onAttached = cfg.OnAttached
 	s.onDisconnected = cfg.OnDisconnected
+	s.customHandler = cfg.CustomRequestHandler
 	return nil
 }
 
