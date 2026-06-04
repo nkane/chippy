@@ -44,7 +44,7 @@ Each tagged chippy release ships with:
 
 - **CVE scanning in CI.** Every push runs `govulncheck ./...`; a fresh CVE in the dep graph fails CI before it can ship.
 
-- **Automated dependency updates.** Dependabot tracks Go modules, GitHub Actions, and the VS Code extension's npm deps with weekly grouped PRs.
+- **Automated dependency updates.** Dependabot tracks Go modules and GitHub Actions with weekly grouped PRs.
 
 ## What's out of scope
 
