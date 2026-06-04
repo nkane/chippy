@@ -138,33 +138,6 @@ jobs:
       - name: Run govulncheck
         run: govulncheck ./...
 
-  vscode-ext:
-    name: vscode extension tests
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: extension/vscode-chippy
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: extension/vscode-chippy/package-lock.json
-
-      - name: Install
-        run: npm ci
-
-      - name: Compile
-        run: npm run compile
-
-      - name: Run tests (xvfb for headless VS Code)
-        run: xvfb-run -a npm test
-        env:
-          DISPLAY: ':99.0'
-
   wasm:
     name: wasm build
     runs-on: ubuntu-latest

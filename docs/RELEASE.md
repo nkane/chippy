@@ -19,7 +19,6 @@ The release workflow:
 2. Builds linux/darwin/windows × amd64/arm64 binaries (CGO off — pure Go chippy core).
 3. Generates SPDX SBOMs via syft + cosign-signs every artifact via keyless OIDC.
 4. Pushes Homebrew formula, AUR PKGBUILD, .deb / .rpm / .apk packages.
-5. Publishes the VS Code extension (skipped for `-rc` / `-beta` / `-alpha` suffixes).
 
 Verify a chippy artifact:
 ```sh

@@ -6,9 +6,9 @@ configuration at `chippy -dap stdio` (or `chippy -dap tcp:PORT`).
 
 | Editor | Status | Notes |
 |--------|--------|-------|
-| **VS Code** | ✅ Tested | First-class. Install `extension/vscode-chippy/` from a `.vsix`; example config at `examples/dap/launch.json`. |
+| **VS Code** | ✅ Tested | Add a `chippy` debug config pointed at `chippy -dap stdio`; template at `examples/dap/launch.json`. (No bundled extension is shipped currently.) |
 | **nvim-dap** | ✅ Tested | Example adapter + configuration at `examples/dap/nvim-dap.lua`. Uses the TCP transport. |
-| **Cursor** | ✅ Compatible | Same extension as VS Code; install the `.vsix`. |
+| **Cursor** | ✅ Compatible | Same DAP launch config as VS Code. |
 | **JetBrains (IDEA / GoLand / CLion)** | 🟡 Unverified | DAP supported via the "Debug Adapter Protocol" plugin; no chippy-specific config tested yet. |
 | **Helix** | 🟡 Unverified | DAP supported; debugger config goes in `~/.config/helix/languages.toml`. No chippy-specific tested config. |
 | **vimspector** | 🟡 Unverified | DAP supported; users can adapt `examples/dap/nvim-dap.lua` to vimspector's JSON format. |

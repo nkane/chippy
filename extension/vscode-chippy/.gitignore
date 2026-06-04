@@ -1,5 +1,0 @@
-node_modules/
-out/
-*.vsix
-# package-lock.json IS committed so CI's `npm ci` has a deterministic
-# install. Dependabot manages updates.

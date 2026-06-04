@@ -92,8 +92,8 @@ breakpoints can target `:bp main` or `:bp src.s:42`.
 For a step-debugger experience in VS Code / nvim / JetBrains, see
 [DAP server reference](dap.md). The short version:
 
-- VS Code: install [the chippy extension](https://github.com/nkane/chippy/tree/main/extension/vscode-chippy)
-  and use `examples/dap/launch.json` as a template.
+- VS Code: add a `chippy` debug configuration pointed at `chippy -dap stdio`,
+  using `examples/dap/launch.json` as a template.
 - nvim-dap: copy `examples/dap/nvim-dap.lua` into your config.
 
 Other editors that speak DAP work too — see the [editor matrix](editors.md).

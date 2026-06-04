@@ -32,21 +32,3 @@ updates:
     commit-message:
       prefix: "chore(ci)"
       include: scope
-
-  # VS Code extension npm dependencies
-  - package-ecosystem: npm
-    directory: /extension/vscode-chippy
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    groups:
-      ext-deps:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-    commit-message:
-      prefix: "chore(deps)"
-      include: scope
