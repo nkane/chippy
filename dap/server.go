@@ -95,6 +95,16 @@ type Server struct {
 	onAttached     func()
 	onDisconnected func()
 
+	// customHandler handles request commands the built-in dispatch
+	// switch doesn't recognize. Set via AttachConfig.CustomRequestHandler.
+	// Invoked from the dispatch `default` case under the CPU lock, so a
+	// handler that reads live debuggee state observes a coherent,
+	// mid-instruction-free snapshot. Returning handled=false falls back
+	// to the standard "not implemented" error. Lets a host (e.g. nessy)
+	// expose domain-specific debug state — PPU / OAM / mapper registers —
+	// over its own `vendor/command` requests without forking the protocol.
+	customHandler func(command string, args json.RawMessage) (body any, handled bool, err error)
+
 	// attachedFired records whether handleAttach completed
 	// successfully. fireDisconnected uses this to guarantee the host
 	// only sees `OnDisconnected` when a paired `OnAttached` actually
@@ -251,6 +261,17 @@ func (s *Server) dispatch(req Request) {
 	case "terminate":
 		s.handleTerminate(req)
 	default:
+		if s.customHandler != nil {
+			body, handled, err := s.customHandler(req.Command, req.Arguments)
+			if handled {
+				if err != nil {
+					s.sendErrorResponse(req, err.Error())
+				} else {
+					s.sendResponse(req, body)
+				}
+				return
+			}
+		}
 		s.sendErrorResponse(req, fmt.Sprintf("not implemented: %s", req.Command))
 	}
 }

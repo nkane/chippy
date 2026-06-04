@@ -11,6 +11,12 @@ The v1.0 readiness epic at [#121](https://github.com/nkane/chippy/issues/121)
 tracks the remaining gap. Changes since v0.4.0:
 
 ### Added
+- DAP: `AttachConfig.CustomRequestHandler` extension point — hosts can
+  serve their own `vendor/command` requests over the same DAP connection
+  (invoked from dispatch's fallback path under the CPU lock for coherent
+  state reads). Unknown commands without a handler still return "not
+  implemented". Lets nessy expose NES PPU / OAM / mapper debug state to
+  the TUI panels without forking the protocol. (#416)
 - CPU: WAI ($CB) and STP ($DB) now halt the CPU correctly instead of
   acting as NOPs. WAI wakes on any IRQ/NMI (including masked IRQ —
   falls through to the next instruction without dispatching). STP halts
