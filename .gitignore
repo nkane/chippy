@@ -22,6 +22,9 @@
 # VHS smoke-test renders (generated on demand, never committed).
 test/smoke/out/
 
+# goreleaser build output (snapshot + real releases)
+dist/
+
 # MkDocs build output
 site/
 _site/
