@@ -528,15 +528,16 @@ the decimal path drives C and A).
 Verified against [Klaus Dormann's 6502 functional test
 suite](https://github.com/Klaus2m5/6502_65C02_functional_tests) (the
 de-facto correctness gold standard for 6502 emulators) — passes the full
-~30M-instruction sweep. Run locally with:
+~30M-instruction sweep — plus Frank Kingswood's compact **AllSuiteA** smoke
+ROM as a fast opcode/addressing gate. Run locally with:
 
 ```sh
-go test -tags=klaus -timeout 5m -run TestKlaus ./internal/cpu/...
+go test -tags=klaus -timeout 5m -run 'TestKlaus|TestAllSuiteA' ./cpu/...
 ```
 
-The ROM is GPL-3.0 so it is downloaded on demand into the user cache dir
-on first run rather than vendored. Set `CHIPPY_KLAUS_BIN=/path/to/rom` to
-use a local copy.
+The ROMs are not vendored — they're downloaded on demand into the user
+cache dir on first run. Set `CHIPPY_KLAUS_BIN` / `CHIPPY_ALLSUITE_BIN` to a
+local copy to skip the download.
 
 Stable undocumented ("illegal") opcodes are also implemented:
 `LAX`, `SAX`, `DCP`, `ISC`, `SLO`, `RLA`, `SRE`, `RRA`, `ANC`, `ALR`, `ARR`,
