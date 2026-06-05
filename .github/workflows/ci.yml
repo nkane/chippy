@@ -61,7 +61,7 @@ jobs:
           version: v2.12.2
 
   klaus:
-    name: klaus functional test
+    name: klaus + allsuite cpu tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -72,8 +72,8 @@ jobs:
           go-version: 'stable'
           cache: true
 
-      - name: Run Klaus 6502 functional test
-        run: go test -tags=klaus -timeout 5m -run TestKlaus -v ./cpu/...
+      - name: Run Klaus 6502 functional test + AllSuiteA smoke ROM
+        run: go test -tags=klaus -timeout 5m -run 'TestKlaus|TestAllSuiteA' -v ./cpu/...
 
   dap-integration:
     name: dap integration
