@@ -85,6 +85,21 @@ jobs:
           CHIPPY_INTERRUPT_BIN: ${{ github.workspace }}/cpu/testdata/6502_interrupt_test.bin
         run: go test -tags=klaus -timeout 5m -run 'TestKlaus|TestAllSuiteA' -v ./cpu/...
 
+  lorenz:
+    name: wolfgang lorenz suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          cache: true
+
+      - name: Run Wolfgang Lorenz CPU subset
+        run: go test -tags=lorenz -timeout 5m -run TestLorenzSuite -v ./cpu/...
+
   dap-integration:
     name: dap integration
     runs-on: ubuntu-latest
