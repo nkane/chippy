@@ -543,6 +543,18 @@ interrupt test ships as as65 source only, so chippy vendors a ca65 port at
 `CHIPPY_INTERRUPT_BIN` at the result (build steps in
 `cpu/interrupt_rom_test.go`; CI does this automatically).
 
+The CPU subset of **Wolfgang Lorenz's C64 test suite** (decimal, flag-edge,
+and stable-illegal probes) is also run — the dumps are vendored at
+`cpu/testdata/lorenz/` and each runs standalone against a tiny KERNAL-trap
+harness, so a failure names the exact probe:
+
+```sh
+go test -tags=lorenz -timeout 5m -run TestLorenzSuite ./cpu/...
+```
+
+C64-hardware tests (CIA/SID/VIC, NMI/IRQ sourcing) are out of scope; the
+`arrb` decimal probe is omitted pending an ARR-in-decimal fix.
+
 Stable undocumented ("illegal") opcodes are also implemented:
 `LAX`, `SAX`, `DCP`, `ISC`, `SLO`, `RLA`, `SRE`, `RRA`, `ANC`, `ALR`, `ARR`,
 `SBX`, the `SBC` alias at `$EB`, and the family of multi-byte/multi-cycle
