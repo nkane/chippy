@@ -72,7 +72,17 @@ jobs:
           go-version: 'stable'
           cache: true
 
-      - name: Run Klaus 6502 functional test + AllSuiteA smoke ROM
+      - name: Assemble Klaus interrupt test ROM (cc65)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq cc65
+          cd cpu/testdata
+          ca65 6502_interrupt_test.ca65 -o irq.o
+          ld65 irq.o -o 6502_interrupt_test.bin -C interrupt_test.cfg
+          rm -f irq.o
+
+      - name: Run Klaus functional + interrupt tests + AllSuiteA smoke ROM
+        env:
+          CHIPPY_INTERRUPT_BIN: ${{ github.workspace }}/cpu/testdata/6502_interrupt_test.bin
         run: go test -tags=klaus -timeout 5m -run 'TestKlaus|TestAllSuiteA' -v ./cpu/...
 
   dap-integration:

@@ -528,16 +528,20 @@ the decimal path drives C and A).
 Verified against [Klaus Dormann's 6502 functional test
 suite](https://github.com/Klaus2m5/6502_65C02_functional_tests) (the
 de-facto correctness gold standard for 6502 emulators) — passes the full
-~30M-instruction sweep — plus Frank Kingswood's compact **AllSuiteA** smoke
-ROM as a fast opcode/addressing gate. Run locally with:
+~30M-instruction sweep — plus Klaus's **interrupt test** (IRQ/NMI/BRK via a
+feedback port) and Frank Kingswood's compact **AllSuiteA** smoke ROM. Run
+locally with:
 
 ```sh
 go test -tags=klaus -timeout 5m -run 'TestKlaus|TestAllSuiteA' ./cpu/...
 ```
 
-The ROMs are not vendored — they're downloaded on demand into the user
-cache dir on first run. Set `CHIPPY_KLAUS_BIN` / `CHIPPY_ALLSUITE_BIN` to a
-local copy to skip the download.
+The functional + AllSuiteA ROMs are downloaded on demand into the user
+cache dir (set `CHIPPY_KLAUS_BIN` / `CHIPPY_ALLSUITE_BIN` to skip). The
+interrupt test ships as as65 source only, so chippy vendors a ca65 port at
+`cpu/testdata/6502_interrupt_test.ca65`; assemble it with cc65 and point
+`CHIPPY_INTERRUPT_BIN` at the result (build steps in
+`cpu/interrupt_rom_test.go`; CI does this automatically).
 
 Stable undocumented ("illegal") opcodes are also implemented:
 `LAX`, `SAX`, `DCP`, `ISC`, `SLO`, `RLA`, `SRE`, `RRA`, `ANC`, `ALR`, `ARR`,
