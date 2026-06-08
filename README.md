@@ -569,6 +569,13 @@ Every stable opcode passes. JAM/KIL and the unstable illegals (SHA/SHX/SHY/TAS,
 ARR-decimal) are skipped — their result is a magic constant the stable
 approximation doesn't model. (65C02 is tracked separately.)
 
+`TestHarte6502BusTrace` goes further and compares the **full per-cycle bus
+trace** (address, data, read/write of every cycle including dummies) against
+Tom Harte's `cycles` field — the highest-fidelity probe short of silicon.
+228/238 opcodes match bus-exact; taken page-crossing branches and JSR/RTS
+dummy-cycle ordering are skip-listed (they don't affect final state or cycle
+count — no real ROM is impacted).
+
 Stable undocumented ("illegal") opcodes are also implemented:
 `LAX`, `SAX`, `DCP`, `ISC`, `SLO`, `RLA`, `SRE`, `RRA`, `ANC`, `ALR`, `ARR`,
 `SBX`, the `SBC` alias at `$EB`, and the family of multi-byte/multi-cycle

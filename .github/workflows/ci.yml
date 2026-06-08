@@ -128,7 +128,7 @@ jobs:
           base="https://raw.githubusercontent.com/TomHarte/ProcessorTests/bb11756436da8fd16cce86aef63dc6725f48836f/6502/v1"
           seq 0 255 | xargs -P 8 -I {} sh -c 'op=$(printf "%02x" {}); curl -sfL "'"$base"'/$op.json" -o "harte-data/$op.json"'
 
-      - name: Run Tom Harte 6502 per-opcode tests
+      - name: Run Tom Harte 6502 per-opcode tests (state + bus trace)
         env:
           CHIPPY_HARTE_DIR: ${{ github.workspace }}/harte-data
         run: go test -tags=harte -timeout 5m -run TestHarte6502 -v ./cpu/...
