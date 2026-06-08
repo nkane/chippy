@@ -555,6 +555,20 @@ go test -tags=lorenz -timeout 5m -run TestLorenzSuite ./cpu/...
 C64-hardware tests (CIA/SID/VIC, NMI/IRQ sourcing) are out of scope; the
 `arrb` decimal probe is omitted pending an ARR-in-decimal fix.
 
+Per-opcode, chippy is fuzzed against **Tom Harte's ProcessorTests** — ~10,000
+randomized initial→final cases for each 6502 opcode (registers, memory, cycle
+count). The ~1 GB data set is not vendored; CI downloads + caches it, or point
+`CHIPPY_HARTE_DIR` at a local `6502/v1` directory:
+
+```sh
+CHIPPY_HARTE_DIR=/path/to/6502/v1 go test -tags=harte -run TestHarte6502 ./cpu/...
+# or omit the dir to download (pinned commit) into the user cache
+```
+
+Every stable opcode passes. JAM/KIL and the unstable illegals (SHA/SHX/SHY/TAS,
+ARR-decimal) are skipped — their result is a magic constant the stable
+approximation doesn't model. (65C02 is tracked separately.)
+
 Stable undocumented ("illegal") opcodes are also implemented:
 `LAX`, `SAX`, `DCP`, `ISC`, `SLO`, `RLA`, `SRE`, `RRA`, `ANC`, `ALR`, `ARR`,
 `SBX`, the `SBC` alias at `$EB`, and the family of multi-byte/multi-cycle
