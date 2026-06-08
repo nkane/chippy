@@ -403,8 +403,23 @@ func opROR(c *CPU, addr uint16, m AddrMode) {
 func opJMP(c *CPU, addr uint16, _ AddrMode) { c.PC = addr }
 func opJSR(c *CPU, addr uint16, _ AddrMode) {
 	c.idle(0x100 | uint16(c.SP)) // internal stack-pointer cycle
+	if c.nesCycle {
+		// The per-cycle path asserts an exact tick budget; keep the original
+		// ordering (operand fully read during resolve). The JSR stack/operand
+		// overlap quirk can't arise in NES ROM code, so behaviour is unchanged.
+		c.push16(c.PC - 1)
+		c.PC = addr
+		return
+	}
+	// On NMOS the high operand byte is fetched AFTER the return address is
+	// pushed, so when the stack overlaps the operand the push is observed by
+	// that fetch (Tom Harte `20` overlap cases). resolve(ABS) already read both
+	// bytes + advanced PC; the low byte is latched, so re-read only the high
+	// byte (at PC-1) after the push. Cycle count is table-driven here, so the
+	// extra read does not change it.
+	hiAddr := c.PC - 1
 	c.push16(c.PC - 1)
-	c.PC = addr
+	c.PC = uint16(c.read(hiAddr))<<8 | uint16(byte(addr))
 }
 func opRTS(c *CPU, _ uint16, _ AddrMode) {
 	c.idle(c.PC) // dummy read of next byte

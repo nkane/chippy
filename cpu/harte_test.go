@@ -1,0 +1,196 @@
+//go:build harte
+
+// Tom Harte's ProcessorTests (https://github.com/TomHarte/ProcessorTests) are
+// the modern fuzz-scale per-opcode standard: each of the 256 opcodes ships
+// ~10,000 randomized (initial state -> expected final state + cycle count)
+// cases. Where Klaus / AllSuiteA / Lorenz validate integration, these pin each
+// opcode in isolation across the flag/decimal/overflow corners.
+//
+// The data is large (~1 GB for the 6502 set), so it is NOT vendored. Provide
+// it one of two ways:
+//
+//	CHIPPY_HARTE_DIR=/path/to/6502/v1   # a directory of NN.json files
+//	(unset)                              # download per-opcode to the user
+//	                                     # cache dir, pinned to harteCommit
+//
+// Run a quick subset by capping cases:
+//
+//	CHIPPY_HARTE_MAX_CASES=200 go test -tags=harte -run TestHarte ./cpu/...
+//
+// Scope: 6502 NMOS. JAM/KIL opcodes (chippy NOP-stubs them) and the unstable
+// illegals (SHA/SHX/SHY/TAS, and ARR in decimal mode) are skipped — their
+// "correct" result is a magic constant the stable approximation doesn't model;
+// see the skip list. Bus-trace comparison is out of scope; cycle COUNT is
+// compared. 65C02 is a follow-up (different data set + CMOS variant).
+
+package cpu
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"testing"
+	"time"
+)
+
+const harteCommit = "bb11756436da8fd16cce86aef63dc6725f48836f"
+
+// harteSkip lists opcodes whose Tom Harte cases chippy is not expected to pass:
+//   - $x2 KIL/JAM: halt the CPU; chippy treats them as NOP.
+//   - SHA/SHX/SHY/TAS + ARR(decimal): unstable illegals whose result depends on
+//     a magic constant chippy approximates (issue #424 tracks ARR decimal).
+var harteSkip = map[byte]string{
+	0x02: "JAM", 0x12: "JAM", 0x22: "JAM", 0x32: "JAM",
+	0x42: "JAM", 0x52: "JAM", 0x62: "JAM", 0x72: "JAM",
+	0x92: "JAM", 0xB2: "JAM", 0xD2: "JAM", 0xF2: "JAM",
+	0x6B: "ARR (unstable: decimal magic constant, #424)",
+	0x93: "SHA (unstable)", 0x9F: "SHA (unstable)",
+	0x9B: "TAS (unstable)", 0x9C: "SHY (unstable)", 0x9E: "SHX (unstable)",
+}
+
+type harteState struct {
+	PC, S, A, X, Y, P int
+	RAM               [][2]int
+}
+
+type harteCase struct {
+	Name    string        `json:"name"`
+	Initial harteState    `json:"initial"`
+	Final   harteState    `json:"final"`
+	Cycles  []interface{} `json:"cycles"`
+}
+
+func TestHarte6502(t *testing.T) {
+	maxCases := 0
+	if v := os.Getenv("CHIPPY_HARTE_MAX_CASES"); v != "" {
+		maxCases, _ = strconv.Atoi(v)
+	}
+	for op := 0; op < 256; op++ {
+		op := byte(op)
+		name := fmt.Sprintf("%02x", op)
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if reason, skip := harteSkip[op]; skip {
+				t.Skipf("skip %02x: %s", op, reason)
+			}
+			cases, err := loadHarteCases(t, name)
+			if err != nil {
+				t.Skipf("cases for %02x unavailable: %v", op, err)
+			}
+			runHarteOpcode(t, name, cases, maxCases)
+		})
+	}
+}
+
+func runHarteOpcode(t *testing.T, op string, cases []harteCase, maxCases int) {
+	t.Helper()
+	n := len(cases)
+	if maxCases > 0 && maxCases < n {
+		n = maxCases
+	}
+	for i := 0; i < n; i++ {
+		tc := &cases[i]
+		ram := NewRAM()
+		for _, kv := range tc.Initial.RAM {
+			ram.Write(uint16(kv[0]), byte(kv[1]))
+		}
+		c := New(ram) // VariantNMOS
+		c.PC = uint16(tc.Initial.PC)
+		c.SP = byte(tc.Initial.S)
+		c.A, c.X, c.Y = byte(tc.Initial.A), byte(tc.Initial.X), byte(tc.Initial.Y)
+		c.P = byte(tc.Initial.P)
+
+		cyc := c.Step()
+
+		if diff := harteDiff(c, ram, tc, cyc); diff != "" {
+			t.Fatalf("opcode %s case %q (#%d):\n%s", op, tc.Name, i, diff)
+		}
+	}
+}
+
+// harteDiff returns "" when the post-step state matches the expected final
+// state, or a human-readable diff of the first mismatch otherwise.
+func harteDiff(c *CPU, ram *RAM, tc *harteCase, cyc int) string {
+	f := &tc.Final
+	mism := func(label string, got, want int) string {
+		return fmt.Sprintf("  %-4s got %02X want %02X", label, got, want)
+	}
+	switch {
+	case c.PC != uint16(f.PC):
+		return fmt.Sprintf("  PC   got %04X want %04X", c.PC, f.PC)
+	case c.SP != byte(f.S):
+		return mism("SP", int(c.SP), f.S)
+	case c.A != byte(f.A):
+		return mism("A", int(c.A), f.A)
+	case c.X != byte(f.X):
+		return mism("X", int(c.X), f.X)
+	case c.Y != byte(f.Y):
+		return mism("Y", int(c.Y), f.Y)
+	case c.P != byte(f.P):
+		return fmt.Sprintf("  P    got %08b want %08b", c.P, f.P)
+	case cyc != len(tc.Cycles):
+		return fmt.Sprintf("  CYC  got %d want %d", cyc, len(tc.Cycles))
+	}
+	for _, kv := range f.RAM {
+		if got := ram.Read(uint16(kv[0])); got != byte(kv[1]) {
+			return fmt.Sprintf("  RAM[%04X] got %02X want %02X", kv[0], got, byte(kv[1]))
+		}
+	}
+	return ""
+}
+
+// loadHarteCases returns the cases for one opcode, from CHIPPY_HARTE_DIR if set,
+// otherwise downloading (and caching) the pinned JSON.
+func loadHarteCases(t *testing.T, op string) ([]harteCase, error) {
+	t.Helper()
+	var data []byte
+	var err error
+	if dir := os.Getenv("CHIPPY_HARTE_DIR"); dir != "" {
+		data, err = os.ReadFile(filepath.Join(dir, op+".json"))
+	} else {
+		data, err = harteDownload(t, op)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var cases []harteCase
+	if err := json.Unmarshal(data, &cases); err != nil {
+		return nil, err
+	}
+	return cases, nil
+}
+
+func harteDownload(t *testing.T, op string) ([]byte, error) {
+	t.Helper()
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return nil, err
+	}
+	cacheDir = filepath.Join(cacheDir, "chippy-tests", "harte-6502", harteCommit[:12])
+	cachePath := filepath.Join(cacheDir, op+".json")
+	if data, err := os.ReadFile(cachePath); err == nil {
+		return data, nil
+	}
+	url := fmt.Sprintf("https://raw.githubusercontent.com/TomHarte/ProcessorTests/%s/6502/v1/%s.json",
+		harteCommit, op)
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("http %s: %d", url, resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	_ = os.MkdirAll(cacheDir, 0o755)
+	_ = os.WriteFile(cachePath, data, 0o644)
+	return data, nil
+}

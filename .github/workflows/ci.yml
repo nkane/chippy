@@ -100,6 +100,39 @@ jobs:
       - name: Run Wolfgang Lorenz CPU subset
         run: go test -tags=lorenz -timeout 5m -run TestLorenzSuite -v ./cpu/...
 
+  tomharte:
+    name: tom harte tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          cache: true
+
+      # Tom Harte's 6502 set is ~1 GB; cache it keyed on the pinned commit so
+      # it downloads at most once.
+      - name: Cache Tom Harte 6502 data
+        id: harte-cache
+        uses: actions/cache@v4
+        with:
+          path: harte-data
+          key: harte-6502-bb117564
+
+      - name: Download Tom Harte 6502 data
+        if: steps.harte-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p harte-data
+          base="https://raw.githubusercontent.com/TomHarte/ProcessorTests/bb11756436da8fd16cce86aef63dc6725f48836f/6502/v1"
+          seq 0 255 | xargs -P 8 -I {} sh -c 'op=$(printf "%02x" {}); curl -sfL "'"$base"'/$op.json" -o "harte-data/$op.json"'
+
+      - name: Run Tom Harte 6502 per-opcode tests
+        env:
+          CHIPPY_HARTE_DIR: ${{ github.workspace }}/harte-data
+        run: go test -tags=harte -timeout 5m -run TestHarte6502 -v ./cpu/...
+
   dap-integration:
     name: dap integration
     runs-on: ubuntu-latest
