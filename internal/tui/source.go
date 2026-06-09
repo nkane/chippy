@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+
 	"github.com/nkane/chippy/cpu"
 	"github.com/nkane/chippy/dap"
 )
@@ -93,6 +95,12 @@ type Source interface {
 	// correct values instead of zero-byte BRK chains. Called on
 	// every `stopped` event + once on attach.
 	RefreshMemory() error
+
+	// Registers returns the CPU register snapshot via a single DAP
+	// `variables` round-trip — the data path the Registers panel renders
+	// from (issue #394). LocalSource round-trips an in-process DAP server;
+	// RemoteSource reuses the attach client.
+	Registers() (RegSnapshot, error)
 }
 
 // LocalSource is the in-process Source backing the default TUI mode.
@@ -108,11 +116,37 @@ type Source interface {
 type LocalSource struct {
 	cpu *cpu.CPU
 	ram *cpu.RAM
+
+	// dapClient is an in-process DAP server+client attached to the same
+	// CPU/RAM, used so the Registers panel reads through DAP even in local
+	// mode (issue #394 PoC). Sub-microsecond per the #393 inproc transport.
+	dapClient *dap.InprocClient
 }
 
-// NewLocalSource builds the default Source wired to a real CPU + RAM.
+// NewLocalSource builds the default Source wired to a real CPU + RAM, plus an
+// in-process DAP server so register reads go through the protocol.
 func NewLocalSource(c *cpu.CPU, r *cpu.RAM) *LocalSource {
-	return &LocalSource{cpu: c, ram: r}
+	s := &LocalSource{cpu: c, ram: r}
+	srv, cl := dap.NewInprocServer()
+	if err := srv.AttachExisting(dap.AttachConfig{CPU: c, RAM: r}); err == nil {
+		s.dapClient = cl
+	}
+	return s
+}
+
+// Registers reads the register snapshot through the in-process DAP server.
+// Falls back to a zero snapshot only if the inproc attach failed at
+// construction (it does not in practice).
+func (s *LocalSource) Registers() (RegSnapshot, error) {
+	if s.dapClient == nil {
+		return RegSnapshot{}, fmt.Errorf("local source: no dap client")
+	}
+	rs, err := fetchRegs(s.dapClient)
+	if err != nil {
+		return rs, err
+	}
+	rs.Halted = s.cpu.Halted
+	return rs, nil
 }
 
 // Step advances the CPU one instruction.
