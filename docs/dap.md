@@ -7,7 +7,7 @@ flag.
 
 ## Launching the adapter
 
-Two transports:
+Four transports:
 
 ```sh
 # stdio — editor spawns the binary and pipes stdin/stdout.
@@ -17,10 +17,31 @@ chippy -dap stdio
 # TCP — adapter listens, editor connects out.
 # Used by nvim-dap's default `executable` block.
 chippy -dap tcp:14785
+
+# unix — lowest-overhead out-of-process local transport
+# (nvim-dap / vscode-chippy on the same host).
+chippy -dap unix:/tmp/chippy.sock
+
+# inproc — in-process loopback self-check; the transport itself
+# (dap.NewInprocServer) is the foundation for the embedded TUI-via-DAP build.
+chippy -dap inproc
 ```
 
 `-dap` is mutually exclusive with the TUI: when set, chippy never opens
 the alt-screen and instead speaks JSON-RPC over the chosen channel.
+
+### Transport overhead
+
+A `stepIn` round-trip on the same host (NOP sled, `go test -bench`, Apple M-series):
+
+| Transport | Round-trip | Notes |
+|-----------|------------|-------|
+| `inproc`  | **~0.34 µs** | `dap.NewInprocServer` — Request/Response structs pass straight to the dispatcher; nil-args requests and all responses make the trip with zero serialization. |
+| `unix`    | **~30 µs**   | full JSON wire framing over a unix-domain socket. |
+
+The wire transports (stdio/tcp/unix) are interchangeable — they marshal the
+same JSON-RPC. inproc trades wire compatibility for an ~90× faster local
+round-trip, which the long-term TUI-via-DAP architecture (issue #394) needs.
 
 ## VS Code
 

@@ -27,6 +27,11 @@ type Server struct {
 	in  *bufio.Reader
 	out io.Writer
 
+	// sink, when non-nil, receives Response/Event structs directly instead
+	// of them being marshalled to the wire (the in-process transport — see
+	// inproc.go). Lets a same-process client round-trip without JSON.
+	sink func(any)
+
 	writeMu sync.Mutex
 	seq     int
 
@@ -141,9 +146,17 @@ func (s *Server) unlockCPU() {
 // negotiated DAP channel — stdio in stdio mode, the accepted TCP socket
 // in tcp mode.
 func NewServer(r io.Reader, w io.Writer) *Server {
+	s := newServer()
+	s.in = bufio.NewReader(r)
+	s.out = w
+	return s
+}
+
+// newServer builds a Server with its bookkeeping maps initialised but no
+// transport bound. NewServer adds the wire reader/writer; NewInprocServer
+// (inproc.go) adds the struct sink.
+func newServer() *Server {
 	return &Server{
-		in:           bufio.NewReader(r),
-		out:          w,
 		bpsBySrc:     map[string]map[int]uint16{},
 		bpsInst:      map[uint16]bool{},
 		bpsByName:    map[string]uint16{},
@@ -543,6 +556,10 @@ func (s *Server) sendEvent(name string, body interface{}) {
 }
 
 func (s *Server) writeJSON(v interface{}) {
+	if s.sink != nil {
+		s.sink(v)
+		return
+	}
 	data, err := json.Marshal(v)
 	if err != nil {
 		log.Printf("dap: marshal failed: %v", err)
