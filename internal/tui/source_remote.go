@@ -193,6 +193,17 @@ func (s *RemoteSource) SetBreakpoints(bps []SourceBP) error {
 // PC.
 func (s *RemoteSource) RefreshRegs() error { return s.refreshRegs() }
 
+// Registers reads the register snapshot over the attach client (issue #394).
+// Halted comes from the mirror, which the stopped-event handler keeps current.
+func (s *RemoteSource) Registers() (RegSnapshot, error) {
+	rs, err := fetchRegs(s.client)
+	if err != nil {
+		return rs, err
+	}
+	rs.Halted = s.cpu.Halted
+	return rs, nil
+}
+
 // RefreshMemory pulls the full CPU-bus memory ($0000-$FFFF) via DAP
 // `readMemory` and writes it into the mirror's RAM so display panels
 // (disasm, memory) render correct values. Called once on attach and

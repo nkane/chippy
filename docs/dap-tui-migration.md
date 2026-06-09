@@ -1,0 +1,59 @@
+# TUI-via-DAP migration pattern
+
+Toward the v2.0 ambition — the TUI as a generic DAP client, the 6502 emulator
+as library + DAP server — panels are migrated one at a time off direct
+`cpu.CPU` field access and onto the DAP protocol. The **Registers panel**
+(issue #394) is the proof of concept and the template for the rest.
+
+## The shape
+
+```
+                 ┌──────────────────────────────┐
+   regsView()  ──┤ m.Regs (RegSnapshot)         │   render: pure, reads cache
+                 └──────────────▲───────────────┘
+                                │ m.syncRegs() in Update
+                 ┌──────────────┴───────────────┐
+                 │ Source.Registers()           │   one DAP `variables` request
+                 ├──────────────┬───────────────┤
+        local ───┤ InprocClient │ wire Client   ├─── remote (-dap-attach)
+                 └──────────────┴───────────────┘
+```
+
+1. **A snapshot type** holds exactly what the panel renders — `RegSnapshot`
+   (`internal/tui/regs.go`): `A X Y SP P PC Cycles Halted`.
+2. **`Source.Registers() (RegSnapshot, error)`** fetches it with a single DAP
+   `variables` round-trip (the server's Registers scope already returns all
+   seven values). Transport-agnostic via `remarshal`, which handles both the
+   wire client's JSON body and the inproc client's Go struct.
+   - `LocalSource` owns an in-process DAP server attached to the same CPU/RAM
+     (the #393 inproc transport — sub-microsecond), so **local mode reads
+     through DAP too**. In-process direct field access becomes dead code for
+     this panel.
+   - `RemoteSource` reuses its existing attach `*dap.Client`.
+3. **`m.syncRegs()`** refreshes `m.Regs` in the Update loop — once per render
+   tick, after key actions, and on seed (`New` / `WithSource`). Bubble Tea
+   `View` stays pure: it renders the cached snapshot, never issues I/O.
+4. **`regsView`** renders `m.Regs` — zero `cpu.CPU` access.
+
+## Migrating the next panel
+
+Repeat the four steps. For panels that need more than registers:
+
+- Add a request (or reuse `variables` / `readMemory` / `stackTrace` /
+  `disassemble`) that returns the panel's data in one round-trip.
+- Add a `Source` method returning a snapshot struct; implement for both
+  `LocalSource` (inproc) and `RemoteSource` (wire).
+- Cache the snapshot on the Model; refresh it from `Update`.
+- Render from the cache.
+
+Keep both code paths alive until v2.0 flips the default — the in-process direct
+access is the fallback / reference, and the DAP path is what the future
+generic client uses. Disassembly and memory panels already have
+`RefreshMemory` plumbing to build on; the stack panel is the next obvious
+candidate (`stackTrace` returns frames in one request).
+
+## Cost
+
+The local DAP round-trip is the inproc transport from #393: ~0.34 µs for a
+`variables` request — negligible next to a render tick. Remote is the wire
+cost (~30 µs over a unix socket), still well inside a frame.

@@ -107,7 +107,13 @@ type Model struct {
 	// (RemoteSource — used by `chippy -dap-attach`). Display panels
 	// continue to read CPU + RAM fields directly because the source
 	// keeps them populated as a mirror in both modes.
-	Source      Source
+	Source Source
+
+	// Regs is the register snapshot the Registers panel renders, refreshed
+	// from the Source via a DAP `variables` round-trip (issue #394) — the
+	// panel no longer reads cpu.CPU fields directly.
+	Regs RegSnapshot
+
 	Syms        *symbols.Table
 	Running     bool
 	Breakpoints map[uint16]*Breakpoint
@@ -323,6 +329,7 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 		H:              40,
 	}
 	m.Source = NewLocalSource(c, r)
+	m.syncRegs() // seed the Registers panel before the first render
 	return m
 }
 
@@ -332,6 +339,7 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 // is expected to keep them populated.
 func (m Model) WithSource(s Source) Model {
 	m.Source = s
+	m.syncRegs()
 	return m
 }
 
@@ -828,6 +836,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Status = "stack: raw bytes"
 			}
 		}
+		m.syncRegs() // refresh the DAP-sourced Registers panel after key actions
 		return m, m.scheduleTick()
 
 	case dapEventMsg:
@@ -886,6 +895,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		m.syncRegs() // refresh the DAP-sourced Registers panel once per tick
 		return m, m.scheduleTick()
 	}
 	return m, nil
@@ -1710,24 +1720,27 @@ func (m Model) bpModal() string {
 
 // ---------- panels ----------
 
+// regsView renders the Registers panel from m.Regs — a DAP-sourced snapshot
+// (issue #394), never direct cpu.CPU field access. m.syncRegs() refreshes the
+// snapshot in the Update loop.
 func (m Model) regsView(w, h int) string {
-	c := m.CPU
+	r := m.Regs
 	val := lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Bold(true)
 	row := func(label string, hex string) string {
 		return regStyle.Render(label) + " " + val.Render(hex)
 	}
 	state := lipgloss.NewStyle().Foreground(lipgloss.Color("46")).Bold(true).Render("RUN ")
-	if c.Halted {
+	if r.Halted {
 		state = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true).Render("HALT")
 	} else if m.Running {
 		state = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true).Render("RUN*")
 	}
 	body := fmt.Sprintf("%s   %s   %s\n%s   %s   %s",
-		row("A: ", fmt.Sprintf("$%02X", c.A)),
-		row("X: ", fmt.Sprintf("$%02X", c.X)),
-		row("Y: ", fmt.Sprintf("$%02X", c.Y)),
-		row("SP:", fmt.Sprintf("$%02X", c.SP)),
-		row("PC:", fmt.Sprintf("$%04X", c.PC)),
+		row("A: ", fmt.Sprintf("$%02X", r.A)),
+		row("X: ", fmt.Sprintf("$%02X", r.X)),
+		row("Y: ", fmt.Sprintf("$%02X", r.Y)),
+		row("SP:", fmt.Sprintf("$%02X", r.SP)),
+		row("PC:", fmt.Sprintf("$%04X", r.PC)),
 		state,
 	)
 	return fitPanel("Registers", body, w, h)
