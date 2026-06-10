@@ -841,6 +841,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dapEventMsg:
 		switch msg.ev.Event {
+		case dap.ChippyStateEvent:
+			// Server-pushed live state during a remote free-run: refresh the
+			// Registers panel without a per-frame DAP request (issue #395).
+			var cs dap.ChippyStateBody
+			if err := remarshal(msg.ev.Body, &cs); err == nil {
+				m.Regs = RegSnapshot{
+					A: cs.A, X: cs.X, Y: cs.Y, SP: cs.SP, P: cs.P,
+					PC: cs.PC, Cycles: cs.Cycles, Halted: cs.Halted,
+				}
+				m.CPU.PC = cs.PC // keep the mirror PC current for other panels
+			}
 		case "stopped":
 			wasRunning := m.Running
 			m.Running = false
