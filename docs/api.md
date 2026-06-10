@@ -108,8 +108,11 @@ Parses cc65 / ld65 `.dbg` files.
 The watch / breakpoint-condition expression language, shared by the
 TUI and the DAP server so both evaluate identically.
 
-- `Compile(src string, syms *symbols.Table) (EvalFn, error)`
+- `Compile(src string, syms *symbols.Table, host ...HostVarResolver) (EvalFn, error)`
 - `EvalFn` — `func(*cpu.CPU, cpu.Bus) uint32`.
+- `HostVarResolver` — `func(name string) (get func() uint32, ok bool)`; a
+  host exposes runtime identifiers (e.g. NES `scanline`) to the evaluator
+  (#433).
 
 ## trace
 
@@ -127,6 +130,9 @@ A Debug Adapter Protocol server — drives the CPU from any DAP client
   dispatch loop over a stream (stdio / TCP).
 - `AttachExisting(cfg AttachConfig)` — attach to an already-running
   CPU (the shared-`cpuMu` model nessy + chippy `:dap` use).
+- Host hooks (#419): `AttachConfig.CustomRequestHandler` (host DAP
+  requests), `SetHostVars(expr.HostVarResolver)` (host identifiers for
+  conditions), `SetStopPredicate(func() bool)` (host step granularity).
 - `Capabilities` — the advertised feature set (the
   `internal/dap/transcript_test.go` goldens pin this against drift).
 - Request / response / event types + `ReadMessage` / `WriteMessage`

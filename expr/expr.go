@@ -50,15 +50,27 @@ import (
 // (breakpoint conditions).
 type EvalFn func(*cpu.CPU, cpu.Bus) uint32
 
-// Compile parses src into an EvalFn. Symbol references resolve against
-// syms at compile time so the evaluator stays allocation-free at hot-path
-// breakpoint check time.
-func Compile(src string, syms *symbols.Table) (EvalFn, error) {
+// HostVarResolver lets a hosting process expose named runtime values to the
+// expression evaluator (issue #433). Given an identifier it returns a getter
+// that reads the live value, or false when it doesn't know the name. The
+// getter is invoked at eval time, so it sees current host state — e.g. nessy
+// resolves `scanline` / `dot` / `frame` against its PPU so a conditional
+// breakpoint like `scanline == 30` works against state the 6502 core can't see.
+type HostVarResolver func(name string) (get func() uint32, ok bool)
+
+// Compile parses src into an EvalFn. Symbol references resolve against syms at
+// compile time so the evaluator stays allocation-free at hot-path breakpoint
+// check time. An optional HostVarResolver supplies host-defined identifiers
+// (resolved after CPU registers/flags, before symbols).
+func Compile(src string, syms *symbols.Table, host ...HostVarResolver) (EvalFn, error) {
 	toks, err := tokenize(src)
 	if err != nil {
 		return nil, err
 	}
 	p := &condParser{toks: toks, syms: syms}
+	if len(host) > 0 {
+		p.host = host[0]
+	}
 	expr, err := p.parseOr()
 	if err != nil {
 		return nil, err
@@ -276,6 +288,7 @@ type condParser struct {
 	toks []tok
 	pos  int
 	syms *symbols.Table
+	host HostVarResolver
 }
 
 func (p *condParser) peek() (tok, bool) {
@@ -642,6 +655,11 @@ func (p *condParser) identEval(name string) (EvalFn, error) {
 		return flagBit(0x02), nil
 	case "C":
 		return flagBit(0x01), nil
+	}
+	if p.host != nil {
+		if get, ok := p.host(name); ok {
+			return func(*cpu.CPU, cpu.Bus) uint32 { return get() }, nil
+		}
 	}
 	if p.syms != nil {
 		if addr, ok := p.syms.LookupName(name); ok {

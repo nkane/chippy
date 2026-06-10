@@ -163,6 +163,20 @@ falls back to polling when paused; `vscode-chippy` (or any host) can subscribe
 for the same live update. Following the Mesen / DAP-extension convention, the
 event is additive — never required for correctness.
 
+## Host debug hooks
+
+For a downstream emulator (e.g. nessy) building an NES-aware debugger on the
+chippy core, three opt-in extension points keep the core CPU-generic (#419):
+
+| Hook | Use |
+|------|-----|
+| `AttachConfig.CustomRequestHandler` (#416) | serve the host's own `vendor/command` DAP requests over the same connection. |
+| `Server.SetHostVars(expr.HostVarResolver)` (#433) | register host identifiers (e.g. `scanline`, `dot`, `frame`) that conditional-breakpoint / `evaluate` expressions resolve at eval time — `scanline == 30` works against PPU state the 6502 can't see. |
+| `Server.SetStopPredicate(func() bool)` (#433) | a host stop condition checked once per continue-loop iteration; lets the host build NES step granularity (run-to-NMI, step-scanline, step-frame) through the server's pause/ownership model. Arm it, send `continue`, disarm on the `stopped`. |
+
+`cpu.SetAccessHook` (#421, access heatmap) and `RAM.Freeze` (#422,
+write-suppress) are the matching core-level hooks — see the API reference.
+
 ## Known gaps
 
 - `attach` requires the host process to wire a debuggee via `Server.AttachExisting`. The cross-process / in-TUI flow is filed at #97.

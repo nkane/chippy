@@ -36,7 +36,7 @@ func (s *Server) handleEvaluate(req Request) {
 		s.sendErrorResponse(req, "empty expression")
 		return
 	}
-	fn, err := expr.Compile(args.Expression, s.syms)
+	fn, err := expr.Compile(args.Expression, s.syms, s.hostVars)
 	if err != nil {
 		s.sendErrorResponse(req, fmt.Sprintf("compile: %v", err))
 		return

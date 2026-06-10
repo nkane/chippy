@@ -142,6 +142,12 @@ func (s *Server) runLoopIter() (string, string) {
 	if s.cpu.Halted {
 		return "stop", "exception"
 	}
+	// Host stop condition (issue #433): NES step granularity (run-to-NMI,
+	// step-scanline, …) the host expresses without a side-loop. Checked
+	// post-step under cpuMu so the host sees the just-advanced state.
+	if s.stopPredicate != nil && s.stopPredicate() {
+		return "stop", "step"
+	}
 	if s.isBreakpoint(s.cpu.PC) {
 		meta := s.lookupBPMeta(s.cpu.PC)
 		fire, logLine := s.shouldFireBP(meta)
