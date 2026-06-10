@@ -75,6 +75,13 @@ func (m *Model) syncRegs() {
 	if m.Source == nil {
 		return
 	}
+	// During a remote free-run the server streams `chippy-state` events
+	// (issue #395); the dapEventMsg handler updates m.Regs, so don't also
+	// poll a `variables` request every tick. Local mode has no server run
+	// loop, so it keeps polling the (sub-microsecond) inproc client.
+	if m.Running && m.Source.Attached() {
+		return
+	}
 	if rs, err := m.Source.Registers(); err == nil {
 		m.Regs = rs
 	}

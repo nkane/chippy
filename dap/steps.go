@@ -2,9 +2,14 @@ package dap
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/nkane/chippy/cpu"
 )
+
+// chippyStateInterval throttles the custom `chippy-state` live-state event to
+// at most ~60 Hz so a fast free-run can't flood the channel.
+const chippyStateInterval = time.Second / 60
 
 // Step controls — continue / next / stepIn / stepOut / pause — plus the
 // thin `threads` handler that 6502 needs (always one virtual thread).
@@ -79,6 +84,7 @@ func (s *Server) runLoop() {
 		close(s.runDone)
 	}()
 	reason := "pause"
+	var lastState time.Time
 	for {
 		if s.pauseRequested.Load() {
 			reason = "pause"
@@ -92,12 +98,31 @@ func (s *Server) runLoop() {
 			reason = reasonAtBreak
 			break
 		}
+		// Stream live state to subscribers, throttled, so panels update
+		// during the run without per-frame polling (issue #395).
+		if time.Since(lastState) >= chippyStateInterval {
+			s.sendChippyState()
+			lastState = time.Now()
+		}
 	}
 	s.sendEvent("stopped", StoppedEventBody{
 		Reason:            reason,
 		ThreadID:          1,
 		AllThreadsStopped: true,
 	})
+}
+
+// sendChippyState pushes a `chippy-state` event with the current register
+// file. Reads regs under cpuMu so the snapshot can't tear across an
+// instruction, then sends outside the lock.
+func (s *Server) sendChippyState() {
+	s.lockCPU()
+	body := ChippyStateBody{
+		A: s.cpu.A, X: s.cpu.X, Y: s.cpu.Y, SP: s.cpu.SP, P: s.cpu.P,
+		PC: s.cpu.PC, Cycles: s.cpu.Cycles, Halted: s.cpu.Halted,
+	}
+	s.unlockCPU()
+	s.sendEvent(ChippyStateEvent, body)
 }
 
 // runLoopIter runs one iteration of the continue loop under cpuMu.

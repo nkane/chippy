@@ -135,6 +135,34 @@ require("dap").adapters.chippy = {
 | `setExceptionBreakpoints`        | #83   | Toggles "pause on BRK" via the `brk` filter. Run loop checks for `$00` opcode before each `cpu.Step()`. |
 | `exceptionInfo`                  | #83   | Describes the last-fired exception (`brk` with PC). |
 
+## Custom events
+
+### `chippy-state` (live state streaming, #395)
+
+A server→client **custom event** pushed during a free-run (`continue`) so a
+client refreshes its panels without polling `variables` every frame. It's
+chippy-specific — standard DAP clients ignore unknown events, so this is safe
+to emit on a shared channel. Throttled server-side to **≤60 Hz**.
+
+```jsonc
+{
+  "type": "event",
+  "event": "chippy-state",
+  "body": {
+    "a": 0, "x": 0, "y": 0, "sp": 253, "p": 36,   // raw bytes, not "$XX"
+    "pc": 32769,
+    "cycles": 12044,
+    "halted": false,
+    "dirtyRanges": []        // reserved: changed [start,end) memory ranges
+  }
+}
+```
+
+The chippy TUI subscribes while running (driving the Registers panel) and
+falls back to polling when paused; `vscode-chippy` (or any host) can subscribe
+for the same live update. Following the Mesen / DAP-extension convention, the
+event is additive — never required for correctness.
+
 ## Known gaps
 
 - `attach` requires the host process to wire a debuggee via `Server.AttachExisting`. The cross-process / in-TUI flow is filed at #97.

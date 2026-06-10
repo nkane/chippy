@@ -125,6 +125,35 @@ type StoppedEventBody struct {
 	AllThreadsStopped bool   `json:"allThreadsStopped,omitempty"`
 }
 
+// ChippyStateEvent is the name of chippy's custom live-state event.
+const ChippyStateEvent = "chippy-state"
+
+// ChippyStateBody is the body of the custom `chippy-state` event — a
+// server→client push of live CPU state during free-run, so a client (the
+// chippy TUI, vscode-chippy) updates its panels without per-frame `variables`
+// polling. It is chippy-specific; standard DAP clients ignore unknown events.
+// Throttled server-side to ≤60 Hz. Values are raw (not "$XX" strings) since
+// both ends are chippy.
+type ChippyStateBody struct {
+	A      byte   `json:"a"`
+	X      byte   `json:"x"`
+	Y      byte   `json:"y"`
+	SP     byte   `json:"sp"`
+	P      byte   `json:"p"`
+	PC     uint16 `json:"pc"`
+	Cycles uint64 `json:"cycles"`
+	Halted bool   `json:"halted"`
+	// DirtyRanges is reserved for streaming changed memory to the memory /
+	// disassembly panels; empty in this version.
+	DirtyRanges []MemRange `json:"dirtyRanges,omitempty"`
+}
+
+// MemRange is a half-open [Start, End) byte range.
+type MemRange struct {
+	Start uint16 `json:"start"`
+	End   uint16 `json:"end"`
+}
+
 // TerminatedEventBody is the body of a `terminated` event.
 type TerminatedEventBody struct {
 	Restart bool `json:"restart,omitempty"`
