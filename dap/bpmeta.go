@@ -33,7 +33,7 @@ func (s *Server) buildBPMeta(condText, hitText, logMessage string) (*bpMeta, err
 		LogMessage: logMessage,
 	}
 	if condText != "" {
-		fn, err := expr.Compile(condText, s.syms)
+		fn, err := expr.Compile(condText, s.syms, s.hostVars)
 		if err != nil {
 			return nil, fmt.Errorf("condition: %w", err)
 		}
@@ -101,7 +101,7 @@ func (s *Server) formatLogMessage(msg string) string {
 			break
 		}
 		exprSrc := msg[i+1 : i+1+j]
-		fn, err := expr.Compile(exprSrc, s.syms)
+		fn, err := expr.Compile(exprSrc, s.syms, s.hostVars)
 		if err != nil {
 			out.WriteString("{!" + err.Error() + "}")
 		} else {

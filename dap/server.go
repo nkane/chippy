@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/nkane/chippy/cpu"
+	"github.com/nkane/chippy/expr"
 	"github.com/nkane/chippy/loader"
 	"github.com/nkane/chippy/peripheral"
 	"github.com/nkane/chippy/symbols"
@@ -31,6 +32,14 @@ type Server struct {
 	// of them being marshalled to the wire (the in-process transport — see
 	// inproc.go). Lets a same-process client round-trip without JSON.
 	sink func(any)
+
+	// Host debug hooks (issue #433). hostVars exposes host-defined
+	// identifiers (e.g. NES `scanline`) to conditional-breakpoint / evaluate
+	// expressions; stopPredicate, when non-nil, is checked each run-loop
+	// iteration so a host can express NES step granularity (run-to-NMI,
+	// step-scanline) through the server's run loop. Both guarded by cpuMu.
+	hostVars      expr.HostVarResolver
+	stopPredicate func() bool
 
 	writeMu sync.Mutex
 	seq     int

@@ -101,3 +101,28 @@ func TestSubtraction_WrapsConsistentlyWithUnaryMinus(t *testing.T) {
 		t.Fatalf("-1 should be $FF (byte-width unary minus); got $%X", b)
 	}
 }
+
+func TestCompile_HostVar(t *testing.T) {
+	var scan uint32 = 10
+	resolver := func(name string) (func() uint32, bool) {
+		if name == "scanline" {
+			return func() uint32 { return scan }, true
+		}
+		return nil, false
+	}
+	fn, err := Compile("scanline == 30", nil, resolver)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if got := fn(nil, nil); got != 0 {
+		t.Errorf("scanline==30 with scan=10 -> %d; want 0", got)
+	}
+	scan = 30 // getter reads live host state
+	if got := fn(nil, nil); got != 1 {
+		t.Errorf("scanline==30 with scan=30 -> %d; want 1", got)
+	}
+	// Host vars don't shadow CPU registers, and unknown names still error.
+	if _, err := Compile("bogus", nil, resolver); err == nil {
+		t.Error("unknown identifier should error even with a host resolver")
+	}
+}
