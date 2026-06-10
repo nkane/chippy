@@ -57,6 +57,8 @@ builds against:
   an inner fallback `Bus`; fans `Tick` out to peripherals.
 - `RAM` — flat 64 KiB store with an optional copy-on-write page shadow
   (powers reverse-step). `SaveFullState`/`LoadFullState`.
+  `Freeze(addr, value)` / `Unfreeze` / `Frozen` / `FrozenAddrs` —
+  debugger write-suppress (#422); opt-in, zero-cost when nothing frozen.
 - `Instr`, `AddrMode`, `Opcodes`/`OpcodesCMOS` tables.
 - `Snapshot` + `SnapshotRing` — per-step rewind ring (page deltas).
 - Disassembly: `Disasm`, `DisasmCPU`, `DisasmWithSyms`, `WalkBack`.

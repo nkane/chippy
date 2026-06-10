@@ -14,6 +14,10 @@ type Bus interface {
 type RAM struct {
 	Data   [0x10000]byte
 	shadow map[byte][256]byte // nil = shadow tracking disabled
+	// frozen is the debugger "freeze" set (issue #422): writes to these
+	// addresses are suppressed so the value holds. nil/empty by default —
+	// the Write fast path is a single len check when nothing is frozen.
+	frozen map[uint16]struct{}
 }
 
 func NewRAM() *RAM { return &RAM{} }
@@ -21,6 +25,11 @@ func NewRAM() *RAM { return &RAM{} }
 func (r *RAM) Read(addr uint16) byte { return r.Data[addr] }
 
 func (r *RAM) Write(addr uint16, v byte) {
+	if len(r.frozen) != 0 {
+		if _, ok := r.frozen[addr]; ok {
+			return // frozen: suppress the write (debugger freeze)
+		}
+	}
 	if r.shadow != nil {
 		page := byte(addr >> 8)
 		if _, ok := r.shadow[page]; !ok {
@@ -40,6 +49,40 @@ func (r *RAM) Load(addr uint16, data []byte) {
 	for i, b := range data {
 		r.Data[int(addr)+i] = b
 	}
+}
+
+// Freeze locks a CPU-bus address to value: it sets the byte and then
+// suppresses all subsequent CPU writes to it, so the value holds across
+// frames (debugger freeze / cheats, issue #422). Re-freezing updates the
+// held value. The set sits directly in Data (no shadow epoch) since a freeze
+// is a debugger action, not a program write. Opt-in: with nothing frozen the
+// Write hot path is a single len check.
+func (r *RAM) Freeze(addr uint16, value byte) {
+	if r.frozen == nil {
+		r.frozen = make(map[uint16]struct{})
+	}
+	r.Data[addr] = value
+	r.frozen[addr] = struct{}{}
+}
+
+// Unfreeze removes an address from the freeze set; writes resume.
+func (r *RAM) Unfreeze(addr uint16) {
+	delete(r.frozen, addr)
+}
+
+// Frozen reports whether addr is currently frozen.
+func (r *RAM) Frozen(addr uint16) bool {
+	_, ok := r.frozen[addr]
+	return ok
+}
+
+// FrozenAddrs returns the currently frozen addresses (unordered).
+func (r *RAM) FrozenAddrs() []uint16 {
+	out := make([]uint16, 0, len(r.frozen))
+	for a := range r.frozen {
+		out = append(out, a)
+	}
+	return out
 }
 
 // EnableShadow turns on the page-level write barrier. Idempotent.
