@@ -84,7 +84,7 @@ func (c *CPU) Step() int {
 	// (asserted below). Other variants keep the post-instruction batch
 	// tick — their byte-for-byte behavior is unchanged.
 	c.instrCycles = 0
-	op := c.read(c.PC) // cycle 1: opcode fetch
+	op := c.fetch(c.PC) // cycle 1: opcode fetch (AccessExec for the access hook)
 	c.PC++
 	in := c.opcodes[op]
 	addr, pageCrossed := c.resolve(in.Mode)

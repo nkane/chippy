@@ -55,6 +55,11 @@ type CPU struct {
 	// the no-ticker fast path stays single-digit-ns.
 	busTicker Ticker
 
+	// accessHook, when non-nil, is invoked on every bus access with the
+	// address + AccessKind (issue #421). nil by default — a host opts in via
+	// SetAccessHook. See access.go.
+	accessHook func(addr uint16, kind AccessKind)
+
 	// ppuRunner drives PPU dot advance with master-clock deadlines
 	// (#372 redesign). Set via SetPPURunner after the PPU is built.
 	// When non-nil, read/write/idle split the cycle's master-clock
@@ -370,7 +375,14 @@ const (
 // equivalent point (after PPU pre-advance, before bus access). PPU.Tick
 // is a no-op when SetCPUDriven(true) lands so MMIO's fan-out doesn't
 // double-advance.
-func (c *CPU) read(addr uint16) byte {
+// read performs a data read (AccessRead). fetch performs an opcode fetch
+// (AccessExec). Both route through busRead so the per-byte access hook (#421)
+// sees the right kind; the hook is nil by default, so this is a single
+// not-taken branch on the hot path when no debugger is attached.
+func (c *CPU) read(addr uint16) byte  { return c.busRead(addr, AccessRead) }
+func (c *CPU) fetch(addr uint16) byte { return c.busRead(addr, AccessExec) }
+
+func (c *CPU) busRead(addr uint16, kind AccessKind) byte {
 	if c.nesCycle {
 		// Drain any pending DMA window before the actual read so the
 		// bus-steal cycles land on the right side of this read in
@@ -385,6 +397,9 @@ func (c *CPU) read(addr uint16) byte {
 		}
 		c.busTicker.Tick(1)
 		v := c.Bus.Read(addr)
+		if c.accessHook != nil {
+			c.accessHook(addr, kind)
+		}
 		c.masterClock += cpuEndReadShift
 		if c.ppuRunner != nil {
 			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
@@ -392,7 +407,11 @@ func (c *CPU) read(addr uint16) byte {
 		c.sampleNMI()
 		return v
 	}
-	return c.Bus.Read(addr)
+	v := c.Bus.Read(addr)
+	if c.accessHook != nil {
+		c.accessHook(addr, kind)
+	}
+	return v
 }
 
 func (c *CPU) write(addr uint16, v byte) {
@@ -404,6 +423,9 @@ func (c *CPU) write(addr uint16, v byte) {
 		}
 		c.busTicker.Tick(1)
 		c.Bus.Write(addr, v)
+		if c.accessHook != nil {
+			c.accessHook(addr, AccessWrite)
+		}
 		c.masterClock += cpuEndWriteShift
 		if c.ppuRunner != nil {
 			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
@@ -412,6 +434,9 @@ func (c *CPU) write(addr uint16, v byte) {
 		return
 	}
 	c.Bus.Write(addr, v)
+	if c.accessHook != nil {
+		c.accessHook(addr, AccessWrite)
+	}
 }
 
 // idle burns one cycle the way the 6502 does on internal / fix-up /
@@ -427,6 +452,9 @@ func (c *CPU) idle(addr uint16) {
 		}
 		c.busTicker.Tick(1)
 		_ = c.Bus.Read(addr)
+		if c.accessHook != nil {
+			c.accessHook(addr, AccessRead)
+		}
 		c.masterClock += cpuEndReadShift
 		if c.ppuRunner != nil {
 			c.ppuRunner.Run(c.masterClock - cpuPPUOffset)
