@@ -61,6 +61,9 @@ builds against:
 - `Snapshot` + `SnapshotRing` — per-step rewind ring (page deltas).
 - Disassembly: `Disasm`, `DisasmCPU`, `DisasmWithSyms`, `WalkBack`.
 - `Tracer` / `FileTracer` — per-instruction execution trace hook.
+- `SetAccessHook(func(addr uint16, kind AccessKind))` — opt-in per-byte bus
+  access tracking (`AccessRead`/`AccessWrite`/`AccessExec`) for a host
+  debugger heatmap. nil by default; zero hot-path cost when unset.
 
 ```go
 ram := cpu.NewRAM()
