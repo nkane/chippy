@@ -60,6 +60,7 @@ nav:
       - Editor matrix: editors.md
   - Internals:
       - Architecture (context dump): context.md
+      - Decision records (ADRs): adr/README.md
   - Mascot:
       - mascot-prompts.md
   - Playground: https://nkane.dev/chippy/playground/
