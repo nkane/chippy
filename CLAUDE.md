@@ -15,6 +15,7 @@ Go-based TUI 6502 emulator + debugger (Bubble Tea, Lipgloss). Targets ca65/cc65 
 ## Release tag scheme
 - chippy ships under bare `vX.Y.Z` tags. Goreleaser via `.goreleaser.chippy.yml` (last released: `v1.5.0` — DAP onramp + complete CPU ROM coverage, epic #402; host debug hooks, epic #419. nessy carved out into [github.com/nkane/nessy](https://github.com/nkane/nessy) post-v1.2.0; VS Code extension removed v1.4.1).
 - Full process in [`docs/RELEASE.md`](docs/RELEASE.md).
+- **Every release gets an ADR.** Cutting a tag includes adding `docs/adr/NNNN-vX.Y.Z.md` (next sequence number) capturing that release's decisions, and a row in `docs/adr/README.md`. The tag does not go out without it.
 
 ## Docs are part of every PR (not a follow-up)
 Every PR ships with the documentation changes its diff implies. Update **in the same PR**, never as a separate cleanup:
@@ -23,6 +24,7 @@ Every PR ships with the documentation changes its diff implies. Update **in the 
 - **`docs/context.md`** — the architecture / progress / decisions handoff doc. When a PR merges, move the issue from "Open issues" to "Merged PRs of note", drop any "in progress" stubs that referred to it, and add an architecture section if the PR introduced a new subsystem (e.g. MMIO, trace).
 - **TUI help modal** (`internal/tui/model.go` `helpModal()`) — when a new `:command`, keybinding, or panel ships.
 - **Code-level doc comments** — when an exported type/function changes shape or contract.
+- **`docs/adr/`** — when the PR embeds an architectural decision (a choice with trade-offs, a new abstraction / extension seam / pattern, a protocol or dependency change, or a reversal). Add or update an ADR (Context / Decision / Consequences) in the same PR; fold per-release decisions into that release's ADR. Mechanical fixes/refactors don't need one. ADRs are numbered `docs/adr/NNNN-*.md` with an index in `docs/adr/README.md`.
 - **This file (`CLAUDE.md`)** — when load-bearing invariants change, or when a convention itself changes.
 
 A PR that adds a feature without updating its docs is incomplete. Reviewers will flag it; pre-empt by updating in the same diff.
