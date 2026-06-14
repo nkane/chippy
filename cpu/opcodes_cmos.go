@@ -57,6 +57,19 @@ func init() {
 	// JMP (abs,X)
 	set(0x7C, "JMP", IAX, 3, 6, false, opJMP)
 
+	// JMP (abs) — 65C02 takes 6 cycles (NMOS 5) and fixes the page-wrap bug
+	// (handled per-variant in resolve(IND)).
+	set(0x6C, "JMP", IND, 3, 6, false, opJMP)
+
+	// 65C02 optimized the absolute,X read-modify-write SHIFTS/ROTATES to 6
+	// cycles, +1 only when the index crosses a page (NMOS always took 7).
+	// INC/DEC abs,X ($DE/$FE) did NOT get this and stay 7, so they are left
+	// as inherited from the NMOS table.
+	set(0x1E, "ASL", ABX, 3, 6, true, opASL)
+	set(0x3E, "ROL", ABX, 3, 6, true, opROL)
+	set(0x5E, "LSR", ABX, 3, 6, true, opLSR)
+	set(0x7E, "ROR", ABX, 3, 6, true, opROR)
+
 	// New addressing modes for existing ops:
 	// BIT immediate / ZPX / ABX
 	set(0x89, "BIT", IMM, 2, 2, false, opBITimm)
@@ -82,30 +95,22 @@ func init() {
 		set(byte(0x87+bit*0x10), "SMB", ZP, 2, 5, false, func(c *CPU, addr uint16, _ AddrMode) {
 			c.write(addr, c.read(addr)|(1<<b))
 		})
-		set(byte(0x0F+bit*0x10), "BBR", ZPR, 3, 5, false, func(c *CPU, _ uint16, _ AddrMode) {
+		// BBR/BBS take a flat 6 cycles on real 65C02 silicon (Tom Harte
+		// wdc65c02) — no taken / page-cross penalty, unlike a normal branch.
+		set(byte(0x0F+bit*0x10), "BBR", ZPR, 3, 6, false, func(c *CPU, _ uint16, _ AddrMode) {
 			zp := c.read(c.PC)
 			off := int8(c.read(c.PC + 1))
 			c.PC += 2
-			target := uint16(int32(c.PC) + int32(off))
 			if c.read(uint16(zp))&(1<<b) == 0 {
-				c.extraCycles++
-				if (c.PC & 0xFF00) != (target & 0xFF00) {
-					c.extraCycles++
-				}
-				c.PC = target
+				c.PC = uint16(int32(c.PC) + int32(off))
 			}
 		})
-		set(byte(0x8F+bit*0x10), "BBS", ZPR, 3, 5, false, func(c *CPU, _ uint16, _ AddrMode) {
+		set(byte(0x8F+bit*0x10), "BBS", ZPR, 3, 6, false, func(c *CPU, _ uint16, _ AddrMode) {
 			zp := c.read(c.PC)
 			off := int8(c.read(c.PC + 1))
 			c.PC += 2
-			target := uint16(int32(c.PC) + int32(off))
 			if c.read(uint16(zp))&(1<<b) != 0 {
-				c.extraCycles++
-				if (c.PC & 0xFF00) != (target & 0xFF00) {
-					c.extraCycles++
-				}
-				c.PC = target
+				c.PC = uint16(int32(c.PC) + int32(off))
 			}
 		})
 	}
@@ -164,7 +169,10 @@ func cmosNOPs(set func(op byte, name string, mode AddrMode, bytes, cycles int, p
 			// the only other "???" $xC slots; both are 3-byte/4-cycle
 			// ABS NOPs (+1 on page cross).
 			if op == 0x5C {
-				set(byte(op), "NOP", ABS, 3, 8, false, opNOP3)
+				// WDC $5C: 3-byte, 4-cycle NOP (Tom Harte wdc65c02). The
+				// often-cited "8 cycles" is the W65C816 figure; the real
+				// W65C02S takes 4.
+				set(byte(op), "NOP", ABS, 3, 4, false, opNOP3)
 			} else {
 				set(byte(op), "NOP", ABS, 3, 4, true, opNOP3)
 			}
@@ -225,11 +233,14 @@ func adcDecimalCMOS(c *CPU, v byte, carry uint16) {
 		al = ((al + 0x06) & 0x0F) + 0x10
 	}
 	res := (a & 0xF0) + (uint16(v) & 0xF0) + al
+	// V is set from the result BEFORE the high-nibble decimal correction
+	// (the partial binary-ish sum), matching silicon; N/Z come from the final
+	// decimal result on CMOS.
+	c.setFlag(FlagV, ((a^res)&^(a^uint16(v)))&0x80 != 0)
 	if res >= 0xA0 {
 		res += 0x60
 	}
 	c.setFlag(FlagC, res >= 0x100)
-	c.setFlag(FlagV, ((a^res)&^(a^uint16(v)))&0x80 != 0)
 	c.A = byte(res & 0xFF)
 	c.setZN(c.A)
 	c.extraCycles++ // CMOS BCD takes one extra cycle

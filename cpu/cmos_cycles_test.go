@@ -82,10 +82,11 @@ func TestCMOSCycles_OfficialOps(t *testing.T) {
 		{"SMB0", 0x87, []byte{0x10}, 0, 0, nil, 5},
 		{"SMB7", 0xF7, []byte{0x10}, 0, 0, nil, 5},
 
-		// BBR / BBS — branch-on-bit-{reset,set}. 5 cycles base; +1 on
-		// taken branch (no page-cross +1 in our model — matches WDC).
+		// BBR / BBS — branch-on-bit-{reset,set}. Flat 6 cycles on real
+		// W65C02S silicon (Tom Harte wdc65c02, #426) — no taken / page-cross
+		// penalty.
 		{"BBR0 not taken", 0x0F, []byte{0x10, 0x05}, 0, 0,
-			func(r *RAM) { r.Write(0x10, 0x01) /* bit 0 set → no branch */ }, 5},
+			func(r *RAM) { r.Write(0x10, 0x01) /* bit 0 set → no branch */ }, 6},
 		{"BBR0 taken", 0x0F, []byte{0x10, 0x05}, 0, 0,
 			func(r *RAM) { r.Write(0x10, 0xFE) /* bit 0 clear → branch */ }, 6},
 		{"BBS0 taken", 0x8F, []byte{0x10, 0x05}, 0, 0,
@@ -159,8 +160,9 @@ func TestCMOSCycles_NOPFills(t *testing.T) {
 		{"NOP $54 (2b/4c)", 0x54, []byte{0x10}, 0, 0, nil, 4},
 		{"NOP $D4 (2b/4c)", 0xD4, []byte{0x10}, 0, 0, nil, 4},
 		{"NOP $F4 (2b/4c)", 0xF4, []byte{0x10}, 0, 0, nil, 4},
-		// Quirky $5C — 3 bytes, 8 cycles per WDC silicon.
-		{"NOP $5C (3b/8c)", 0x5C, []byte{0x00, 0x20}, 0, 0, nil, 8},
+		// Quirky $5C — 3 bytes, 4 cycles on real W65C02S silicon (Tom Harte
+		// wdc65c02, #426). The "8 cycles" figure is the W65C816.
+		{"NOP $5C (3b/4c)", 0x5C, []byte{0x00, 0x20}, 0, 0, nil, 4},
 		// ABS NOPs (3 bytes, 4 cycles): $DC, $FC.
 		{"NOP $DC (3b/4c)", 0xDC, []byte{0x00, 0x20}, 0, 0, nil, 4},
 		{"NOP $FC (3b/4c)", 0xFC, []byte{0x00, 0x20}, 0, 0, nil, 4},

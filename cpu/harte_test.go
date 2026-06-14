@@ -17,12 +17,14 @@
 //
 //	CHIPPY_HARTE_MAX_CASES=200 go test -tags=harte -run TestHarte ./cpu/...
 //
-// Scope: 6502 NMOS. JAM/KIL opcodes (chippy NOP-stubs them) and the unstable
-// illegals (SHA/SHX/SHY/TAS, and ARR in decimal mode) are skipped — their
-// "correct" result is a magic constant the stable approximation doesn't model;
-// see the skip list. TestHarte6502 compares final state + cycle COUNT;
+// Scope: 6502 NMOS + WDC 65C02. JAM/KIL opcodes (chippy NOP-stubs them) and the
+// unstable illegals (SHA/SHX/SHY/TAS, and ARR in decimal mode) are skipped —
+// their "correct" result is a magic constant the stable approximation doesn't
+// model; see the skip list. TestHarte6502 compares final state + cycle COUNT;
 // TestHarte6502BusTrace (issue #400) compares the full per-cycle bus trace.
-// 65C02 is a follow-up (different data set + CMOS variant).
+// TestHarte65C02 (issue #426) runs the wdc65c02 set against VariantCMOS65C02 —
+// state + cycle count; WAI/STP are skipped (halts) and invalid-BCD decimal
+// ADC/SBC cases are dropped per-case (chip-specific undefined results).
 
 package cpu
 
@@ -40,7 +42,8 @@ import (
 
 const harteCommit = "bb11756436da8fd16cce86aef63dc6725f48836f"
 
-// harteSkip lists opcodes whose Tom Harte cases chippy is not expected to pass:
+// harteSkip lists 6502 NMOS opcodes whose Tom Harte cases chippy is not
+// expected to pass:
 //   - $x2 KIL/JAM: halt the CPU; chippy treats them as NOP.
 //   - SHA/SHX/SHY/TAS: unstable illegals whose result depends on a magic
 //     constant chippy only approximates. (ARR decimal was fixed in #424.)
@@ -50,6 +53,70 @@ var harteSkip = map[byte]string{
 	0x92: "JAM", 0xB2: "JAM", 0xD2: "JAM", 0xF2: "JAM",
 	0x93: "SHA (unstable)", 0x9F: "SHA (unstable)",
 	0x9B: "TAS (unstable)", 0x9C: "SHY (unstable)", 0x9E: "SHX (unstable)",
+}
+
+// harteSkip65C02 lists WDC 65C02 opcodes chippy is not expected to match
+// against the wdc65c02 set. Populated empirically (see TestHarte65C02).
+var harteSkip65C02 = map[byte]string{
+	0xCB: "WAI (halts until IRQ/NMI — not a single-step final state)",
+	0xDB: "STP (halts until reset — not a single-step final state)",
+}
+
+// harteSuite describes one ProcessorTests data set: its repo subpath under the
+// pinned commit, the CPU variant to run it against, and the opcodes to skip.
+type harteSuite struct {
+	label   string // human label + download-cache namespace
+	subpath string // repo path under harteCommit, e.g. "6502/v1"
+	envDir  string // env var pointing at a local copy of the data dir
+	variant Variant
+	skip    map[byte]string
+	// skipCase, when non-nil, drops individual cases an opcode is not
+	// expected to match (vs. skip, which drops a whole opcode).
+	skipCase func(op byte, tc *harteCase) bool
+}
+
+var harte6502 = harteSuite{
+	label:   "6502",
+	subpath: "6502/v1",
+	envDir:  "CHIPPY_HARTE_DIR",
+	variant: VariantNMOS,
+	skip:    harteSkip,
+}
+
+var harte65C02 = harteSuite{
+	label:    "wdc65c02",
+	subpath:  "wdc65c02/v1",
+	envDir:   "CHIPPY_HARTE_65C02_DIR",
+	variant:  VariantCMOS65C02,
+	skip:     harteSkip65C02,
+	skipCase: cmosDecimalInvalidBCD,
+}
+
+// cmosDecimalInvalidBCD reports whether a decimal-mode ADC/SBC case uses an
+// invalid-BCD operand (a nibble > 9). The 65C02's result and flags for such
+// inputs are documented-undefined and chip-specific; chippy implements the
+// canonical Bruce Clark valid-BCD algorithm, which Tom Harte's wdc65c02 set
+// confirms matches silicon for every VALID-BCD case. Only the invalid-BCD
+// cases diverge, so they are dropped (the "data-dependent" cases). The
+// effective operand is resolved with the production addressing path.
+func cmosDecimalInvalidBCD(op byte, tc *harteCase) bool {
+	if tc.Initial.P&0x08 == 0 { // decimal mode off
+		return false
+	}
+	in := OpcodesCMOS[op]
+	if in.Name != "ADC" && in.Name != "SBC" {
+		return false
+	}
+	ram := NewRAM()
+	for _, kv := range tc.Initial.RAM {
+		ram.Write(uint16(kv[0]), byte(kv[1]))
+	}
+	c := NewVariant(ram, VariantCMOS65C02)
+	c.PC = uint16(tc.Initial.PC) + 1 // resolve expects PC past the opcode byte
+	c.A, c.X, c.Y = byte(tc.Initial.A), byte(tc.Initial.X), byte(tc.Initial.Y)
+	addr, _ := c.resolve(in.Mode)
+	badBCD := func(b byte) bool { return b&0x0F > 9 || b>>4 > 9 }
+	return badBCD(byte(tc.Initial.A)) || badBCD(ram.Read(addr))
 }
 
 type harteState struct {
@@ -64,7 +131,10 @@ type harteCase struct {
 	Cycles  [][]interface{} `json:"cycles"` // [addr, value, "read"|"write"] per cycle
 }
 
-func TestHarte6502(t *testing.T) {
+func TestHarte6502(t *testing.T)  { runHarteSuite(t, harte6502) }
+func TestHarte65C02(t *testing.T) { runHarteSuite(t, harte65C02) }
+
+func runHarteSuite(t *testing.T, suite harteSuite) {
 	maxCases := 0
 	if v := os.Getenv("CHIPPY_HARTE_MAX_CASES"); v != "" {
 		maxCases, _ = strconv.Atoi(v)
@@ -74,31 +144,36 @@ func TestHarte6502(t *testing.T) {
 		name := fmt.Sprintf("%02x", op)
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			if reason, skip := harteSkip[op]; skip {
+			if reason, skip := suite.skip[op]; skip {
 				t.Skipf("skip %02x: %s", op, reason)
 			}
-			cases, err := loadHarteCases(t, name)
+			cases, err := loadHarteCases(t, suite, name)
 			if err != nil {
 				t.Skipf("cases for %02x unavailable: %v", op, err)
 			}
-			runHarteOpcode(t, name, cases, maxCases)
+			runHarteOpcode(t, suite, op, name, cases, maxCases)
 		})
 	}
 }
 
-func runHarteOpcode(t *testing.T, op string, cases []harteCase, maxCases int) {
+func runHarteOpcode(t *testing.T, suite harteSuite, opByte byte, op string, cases []harteCase, maxCases int) {
 	t.Helper()
 	n := len(cases)
 	if maxCases > 0 && maxCases < n {
 		n = maxCases
 	}
+	skipped := 0
 	for i := 0; i < n; i++ {
 		tc := &cases[i]
+		if suite.skipCase != nil && suite.skipCase(opByte, tc) {
+			skipped++
+			continue
+		}
 		ram := NewRAM()
 		for _, kv := range tc.Initial.RAM {
 			ram.Write(uint16(kv[0]), byte(kv[1]))
 		}
-		c := New(ram) // VariantNMOS
+		c := NewVariant(ram, suite.variant)
 		c.PC = uint16(tc.Initial.PC)
 		c.SP = byte(tc.Initial.S)
 		c.A, c.X, c.Y = byte(tc.Initial.A), byte(tc.Initial.X), byte(tc.Initial.Y)
@@ -109,6 +184,9 @@ func runHarteOpcode(t *testing.T, op string, cases []harteCase, maxCases int) {
 		if diff := harteDiff(c, ram, tc, cyc); diff != "" {
 			t.Fatalf("opcode %s case %q (#%d):\n%s", op, tc.Name, i, diff)
 		}
+	}
+	if skipped > 0 {
+		t.Logf("opcode %s: ran %d/%d cases (%d invalid-BCD decimal cases dropped)", op, n-skipped, n, skipped)
 	}
 }
 
@@ -143,16 +221,16 @@ func harteDiff(c *CPU, ram *RAM, tc *harteCase, cyc int) string {
 	return ""
 }
 
-// loadHarteCases returns the cases for one opcode, from CHIPPY_HARTE_DIR if set,
-// otherwise downloading (and caching) the pinned JSON.
-func loadHarteCases(t *testing.T, op string) ([]harteCase, error) {
+// loadHarteCases returns the cases for one opcode, from the suite's local data
+// dir (env var) if set, otherwise downloading (and caching) the pinned JSON.
+func loadHarteCases(t *testing.T, suite harteSuite, op string) ([]harteCase, error) {
 	t.Helper()
 	var data []byte
 	var err error
-	if dir := os.Getenv("CHIPPY_HARTE_DIR"); dir != "" {
+	if dir := os.Getenv(suite.envDir); dir != "" {
 		data, err = os.ReadFile(filepath.Join(dir, op+".json"))
 	} else {
-		data, err = harteDownload(t, op)
+		data, err = harteDownload(t, suite, op)
 	}
 	if err != nil {
 		return nil, err
@@ -164,19 +242,19 @@ func loadHarteCases(t *testing.T, op string) ([]harteCase, error) {
 	return cases, nil
 }
 
-func harteDownload(t *testing.T, op string) ([]byte, error) {
+func harteDownload(t *testing.T, suite harteSuite, op string) ([]byte, error) {
 	t.Helper()
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		return nil, err
 	}
-	cacheDir = filepath.Join(cacheDir, "chippy-tests", "harte-6502", harteCommit[:12])
+	cacheDir = filepath.Join(cacheDir, "chippy-tests", "harte-"+suite.label, harteCommit[:12])
 	cachePath := filepath.Join(cacheDir, op+".json")
 	if data, err := os.ReadFile(cachePath); err == nil {
 		return data, nil
 	}
-	url := fmt.Sprintf("https://raw.githubusercontent.com/TomHarte/ProcessorTests/%s/6502/v1/%s.json",
-		harteCommit, op)
+	url := fmt.Sprintf("https://raw.githubusercontent.com/TomHarte/ProcessorTests/%s/%s/%s.json",
+		harteCommit, suite.subpath, op)
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -254,7 +332,7 @@ func TestHarte6502BusTrace(t *testing.T) {
 			if reason, skip := harteBusSkip[op]; skip {
 				t.Skipf("skip %02x bus trace: %s", op, reason)
 			}
-			cases, err := loadHarteCases(t, name)
+			cases, err := loadHarteCases(t, harte6502, name)
 			if err != nil {
 				t.Skipf("cases for %02x unavailable: %v", op, err)
 			}
