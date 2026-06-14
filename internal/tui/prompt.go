@@ -294,6 +294,25 @@ func (m *Model) runCommand(line string) string {
 		if err != nil {
 			return err.Error()
 		}
+		// Struct overlay: :watch X [label] as {field:width, ...}  (#409).
+		// Everything after `as` is the brace spec; tokens between the addr and
+		// `as` are the label (defaults to the symbol name).
+		for i := 1; i < len(args); i++ {
+			if strings.ToLower(args[i]) != "as" {
+				continue
+			}
+			fields, ferr := parseStructSpec(strings.Join(args[i+1:], " "))
+			if ferr != nil {
+				return ferr.Error()
+			}
+			label := strings.Join(args[1:i], " ")
+			if label == "" && m.Syms != nil {
+				label = m.Syms.Lookup(addr)
+			}
+			m.Watches = append(m.Watches, Watch{Kind: "mem", Addr: addr, Label: label, Width: 1, Fields: fields})
+			m.saveState()
+			return fmt.Sprintf("watch +$%04X {%d}", addr, len(fields))
+		}
 		width := 1
 		count := 0
 		var rest []string
@@ -500,6 +519,99 @@ func parseCountToken(s string) (int, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// maxStructFields caps members in a struct-overlay watch (#409) so a bogus
+// spec can't flood the watch panel.
+const maxStructFields = 32
+
+// parseStructSpec parses the `{field:width, ...}` body of a struct-overlay
+// watch. Each member is `name[@offset]:width` where width is byte|word (or
+// b/w/8/16). Offsets auto-advance by width unless an explicit `@N` overrides
+// the running cursor (decimal or $hex).
+func parseStructSpec(spec string) ([]WatchField, error) {
+	spec = strings.TrimSpace(spec)
+	if !strings.HasPrefix(spec, "{") || !strings.HasSuffix(spec, "}") {
+		return nil, fmt.Errorf("struct overlay must be {field:width, ...}")
+	}
+	body := strings.TrimSpace(spec[1 : len(spec)-1])
+	var fields []WatchField
+	off := 0
+	for _, raw := range strings.Split(body, ",") {
+		member := strings.TrimSpace(raw)
+		if member == "" {
+			continue
+		}
+		f, err := parseStructField(member, off)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, f)
+		off = f.Offset + f.Width
+		if len(fields) > maxStructFields {
+			return nil, fmt.Errorf("too many fields (max %d)", maxStructFields)
+		}
+	}
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("empty struct overlay")
+	}
+	return fields, nil
+}
+
+func parseStructField(s string, defaultOffset int) (WatchField, error) {
+	colon := strings.IndexByte(s, ':')
+	if colon < 0 {
+		return WatchField{}, fmt.Errorf("field %q needs name:width", s)
+	}
+	namePart := strings.TrimSpace(s[:colon])
+	typePart := strings.TrimSpace(s[colon+1:])
+	offset := defaultOffset
+	if at := strings.IndexByte(namePart, '@'); at >= 0 {
+		o, err := parseOffset(namePart[at+1:])
+		if err != nil {
+			return WatchField{}, fmt.Errorf("field %q: bad offset: %v", s, err)
+		}
+		offset = o
+		namePart = strings.TrimSpace(namePart[:at])
+	}
+	if namePart == "" {
+		return WatchField{}, fmt.Errorf("field %q missing name", s)
+	}
+	width, ok := parseWidthToken(typePart)
+	if !ok {
+		return WatchField{}, fmt.Errorf("field %q: width must be byte|word", s)
+	}
+	return WatchField{Name: namePart, Offset: offset, Width: width}, nil
+}
+
+// parseWidthToken maps a member width keyword to a byte count.
+func parseWidthToken(s string) (int, bool) {
+	switch strings.ToLower(s) {
+	case "byte", "b", "8", "u8":
+		return 1, true
+	case "word", "w", "16", "u16":
+		return 2, true
+	}
+	return 0, false
+}
+
+// parseOffset accepts a decimal or $hex / 0xhex byte offset.
+func parseOffset(s string) (int, error) {
+	s = strings.TrimSpace(s)
+	var v uint64
+	var err error
+	switch {
+	case strings.HasPrefix(s, "$"):
+		v, err = strconv.ParseUint(s[1:], 16, 16)
+	case strings.HasPrefix(s, "0x"), strings.HasPrefix(s, "0X"):
+		v, err = strconv.ParseUint(s[2:], 16, 16)
+	default:
+		v, err = strconv.ParseUint(s, 10, 16)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return int(v), nil
 }
 
 func parseByte(s string) (byte, error) {
