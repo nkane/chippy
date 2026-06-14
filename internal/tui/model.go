@@ -94,6 +94,19 @@ type Watch struct {
 	// from an explicit `xN` token on `:watch`; when a sym `size=` is present
 	// it seeds the default.
 	Count int `json:"count,omitempty"`
+	// Fields, when non-empty, marks a struct-overlay watch: each member is
+	// rendered as a named row at Addr+Offset. cc65 .dbg carries no struct
+	// member layout (V2.18 collapses all csym types to void), so the layout
+	// is user-declared via `:watch X as {field:width, ...}` (issue #409).
+	// A struct watch takes precedence over Count.
+	Fields []WatchField `json:"fields,omitempty"`
+}
+
+// WatchField is one member of a struct-overlay watch (issue #409).
+type WatchField struct {
+	Name   string `json:"name,omitempty"`
+	Offset int    `json:"offset,omitempty"` // byte offset from the watch Addr
+	Width  int    `json:"width,omitempty"`  // 1 = byte, 2 = word (LE)
 }
 
 type Model struct {
@@ -1518,6 +1531,7 @@ func helpPages() [][]helpSection {
 				{":pc X", "set CPU PC"},
 				{":run X", "run until addr (one-shot bp + go)"},
 				{":watch X [byte|word] [xN] [label]", "add value watch (xN expands an array; also :watch reg <name>)"},
+				{":watch X as {f:byte,g:word}", "struct overlay: named member rows at X+offset (#409)"},
 				{":rmwatch X", "remove a watch (also :rmwatch reg <name>)"},
 				{":clearwatch", "remove ALL watches"},
 				{":speed Hz", "throttle to Hz (0 = max; try :speed 60)"},
@@ -1788,6 +1802,10 @@ const maxWatchElemRows = 8
 func (m Model) watchRowCount() int {
 	n := 0
 	for _, wt := range m.Watches {
+		if wt.Kind == "mem" && len(wt.Fields) > 0 {
+			n += 1 + len(wt.Fields) // header + one row per member
+			continue
+		}
 		if wt.Kind == "mem" && wt.Count > 1 {
 			shown := wt.Count
 			if shown > maxWatchElemRows {
@@ -1806,6 +1824,10 @@ func (m Model) watchView(w, h int) string {
 	valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Bold(true)
 	var b strings.Builder
 	for _, wt := range m.Watches {
+		if wt.Kind == "mem" && len(wt.Fields) > 0 {
+			m.writeStructWatch(&b, wt, nameStyle, valStyle)
+			continue
+		}
 		if wt.Kind == "mem" && wt.Count > 1 {
 			m.writeArrayWatch(&b, wt, nameStyle, valStyle)
 			continue
@@ -1864,6 +1886,24 @@ func (m Model) writeArrayWatch(b *strings.Builder, wt Watch, nameStyle, valStyle
 	}
 	if wt.Count > shown {
 		fmt.Fprintf(b, "  %s\n", nameStyle.Render(fmt.Sprintf("… +%d more", wt.Count-shown)))
+	}
+}
+
+// writeStructWatch renders a struct-overlay watch (issue #409) as a header
+// row plus one indented row per declared member, read at Addr+Offset.
+func (m Model) writeStructWatch(b *strings.Builder, wt Watch, nameStyle, valStyle lipgloss.Style) {
+	name := wt.Label
+	if name == "" {
+		name = fmt.Sprintf("$%04X", wt.Addr)
+	}
+	fmt.Fprintf(b, "%s %s\n",
+		nameStyle.Render(fmt.Sprintf("%-10s", name)),
+		valStyle.Faint(true).Render(fmt.Sprintf("{%d}", len(wt.Fields))))
+	for _, f := range wt.Fields {
+		addr := wt.Addr + uint16(f.Offset)
+		fmt.Fprintf(b, "  %s %s\n",
+			nameStyle.Render(fmt.Sprintf("%-8s", f.Name)),
+			valStyle.Render(m.fmtMemValue(addr, f.Width)))
 	}
 }
 

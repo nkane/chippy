@@ -32,6 +32,17 @@
     {
       "kind": "reg",
       "reg": "A"
+    },
+    {
+      "kind": "mem",
+      "addr": 1024,
+      "label": "player",
+      "width": 1,
+      "fields": [
+        {"name": "hp", "width": 1},
+        {"name": "x", "offset": 1, "width": 2},
+        {"name": "y", "offset": 3, "width": 2}
+      ]
     }
   ],
   "target_hz": 60,

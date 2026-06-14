@@ -355,6 +355,7 @@ The watch panel shows live values of registers and memory cells.
 | `:watch $0200 byte player x`             | Watch with custom label             |
 | `:watch grid word x16`                   | Array watch: 16 LE words from `grid` |
 | `:watch buf x8 sprite`                   | Array watch: 8 bytes, labelled       |
+| `:watch player as {hp:byte, x:word, y:word}` | Struct overlay: named member rows |
 | `:watch reg A`                           | Watch CPU register                  |
 | `:watch reg A accumulator`               | Register watch with label           |
 | `:rmwatch $0200` / `:rmwatch reg A`      | Remove a single watch               |
@@ -368,6 +369,13 @@ count. When the `.dbg` carries a `size=` for the symbol, chippy seeds the
 count automatically — but cc65 omits `size=` for most data globals, so
 `xN` is usually required. Long arrays render the first few elements and
 collapse the rest into a `… +N more` line.
+
+**Struct overlays** (`:watch X as {field:width, …}`) expand into named member
+rows read at `X + offset`. cc65's `.dbg` carries no struct member layout (all
+`csym` types collapse to void), so the layout is user-declared. Each member is
+`name:width` where width is `byte` or `word`; offsets auto-advance by width.
+Override an offset with `name@N:width` (decimal or `$hex`) — handy for padded
+or union layouts. Overlays persist in the watch state like any other watch.
 
 ### Trace replay
 

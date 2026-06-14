@@ -39,14 +39,22 @@ func TestLoadState_GoldenV1(t *testing.T) {
 	if m.TargetHz != 60 {
 		t.Errorf("TargetHz want 60; got %d", m.TargetHz)
 	}
-	if len(m.Watches) != 2 {
-		t.Fatalf("Watches want 2; got %d", len(m.Watches))
+	if len(m.Watches) != 3 {
+		t.Fatalf("Watches want 3; got %d", len(m.Watches))
 	}
 	if m.Watches[0].Label != "score" || m.Watches[0].Addr != 0x2000 || m.Watches[0].Width != 2 {
 		t.Errorf("watch[0] = %+v", m.Watches[0])
 	}
 	if m.Watches[1].Reg != "A" || m.Watches[1].Kind != "reg" {
 		t.Errorf("watch[1] = %+v", m.Watches[1])
+	}
+	// Struct-overlay watch (issue #409): fields decode with their offsets.
+	sw := m.Watches[2]
+	if sw.Label != "player" || sw.Addr != 0x0400 || len(sw.Fields) != 3 {
+		t.Fatalf("watch[2] = %+v", sw)
+	}
+	if sw.Fields[1] != (WatchField{Name: "x", Offset: 1, Width: 2}) {
+		t.Errorf("struct field[1] = %+v", sw.Fields[1])
 	}
 	if _, ok := m.Breakpoints[0x8000]; !ok {
 		t.Errorf("missing bp at $8000")
