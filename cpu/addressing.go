@@ -4,22 +4,23 @@ package cpu
 type AddrMode int
 
 const (
-	IMP AddrMode = iota // implied
-	ACC                 // accumulator
-	IMM                 // immediate
-	ZP                  // zero page
-	ZPX                 // zero page,X
-	ZPY                 // zero page,Y
-	REL                 // relative
-	ABS                 // absolute
-	ABX                 // absolute,X
-	ABY                 // absolute,Y
-	IND                 // (indirect)
-	IZX                 // (indirect,X)
-	IZY                 // (indirect),Y
-	IZP                 // (zero page) — 65C02
-	IAX                 // (absolute,X) — 65C02 JMP
-	ZPR                 // zp, rel — 65C02 BBR/BBS (3 bytes)
+	IMP    AddrMode = iota // implied
+	ACC                    // accumulator
+	IMM                    // immediate
+	ZP                     // zero page
+	ZPX                    // zero page,X
+	ZPY                    // zero page,Y
+	REL                    // relative
+	ABS                    // absolute
+	ABX                    // absolute,X
+	ABY                    // absolute,Y
+	IND                    // (indirect)
+	IZX                    // (indirect,X)
+	IZY                    // (indirect),Y
+	IZP                    // (zero page) — 65C02
+	IAX                    // (absolute,X) — 65C02 JMP
+	ZPR                    // zp, rel — 65C02 BBR/BBS (3 bytes)
+	JSRABS                 // absolute, JSR-only: high operand byte fetched after the stack pushes (#428)
 )
 
 // resolve fetches operand address (and pageCrossed) for a given mode.
@@ -53,6 +54,13 @@ func (c *CPU) resolve(m AddrMode) (addr uint16, pageCrossed bool) {
 		hi := uint16(c.read(c.PC + 1))
 		c.PC += 2
 		addr = lo | hi<<8
+	case JSRABS:
+		// JSR fetches the low operand byte (cycle 2) but defers the high
+		// byte until after the return address is pushed (cycle 6). Read only
+		// the low byte here and leave PC at the high byte; opJSR reads it.
+		// addr carries the latched low byte.
+		addr = uint16(c.read(c.PC))
+		c.PC++
 	case ABX:
 		lo := uint16(c.read(c.PC))
 		hi := uint16(c.read(c.PC + 1))

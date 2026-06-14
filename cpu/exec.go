@@ -402,30 +402,23 @@ func opROR(c *CPU, addr uint16, m AddrMode) {
 
 func opJMP(c *CPU, addr uint16, _ AddrMode) { c.PC = addr }
 func opJSR(c *CPU, addr uint16, _ AddrMode) {
+	// resolve(JSRABS) read only the low operand byte (latched in addr) and
+	// left PC at the high byte. The 6502 cycle order is: internal stack op,
+	// push the return address (PC, pointing at the high operand byte), THEN
+	// fetch the high byte. Reading it last is what makes both the Tom Harte
+	// `20` per-cycle bus trace (#428) and the stack/operand overlap quirk
+	// (#427) come out right — if a push lands on the high operand byte, the
+	// fetch observes the written value.
 	c.idle(0x100 | uint16(c.SP)) // internal stack-pointer cycle
-	if c.nesCycle {
-		// The per-cycle path asserts an exact tick budget; keep the original
-		// ordering (operand fully read during resolve). The JSR stack/operand
-		// overlap quirk can't arise in NES ROM code, so behaviour is unchanged.
-		c.push16(c.PC - 1)
-		c.PC = addr
-		return
-	}
-	// On NMOS the high operand byte is fetched AFTER the return address is
-	// pushed, so when the stack overlaps the operand the push is observed by
-	// that fetch (Tom Harte `20` overlap cases). resolve(ABS) already read both
-	// bytes + advanced PC; the low byte is latched, so re-read only the high
-	// byte (at PC-1) after the push. Cycle count is table-driven here, so the
-	// extra read does not change it.
-	hiAddr := c.PC - 1
-	c.push16(c.PC - 1)
-	c.PC = uint16(c.read(hiAddr))<<8 | uint16(byte(addr))
+	c.push16(c.PC)
+	c.PC = uint16(c.read(c.PC))<<8 | (addr & 0x00FF)
 }
 func opRTS(c *CPU, _ uint16, _ AddrMode) {
-	c.idle(c.PC) // dummy read of next byte
-	c.idle(0x100 | uint16(c.SP))
-	c.PC = c.pop16() + 1
-	c.idle(c.PC) // internal cycle: PC increment
+	c.idle(c.PC)                 // dummy read of next byte
+	c.idle(0x100 | uint16(c.SP)) // dummy stack read before the pulls
+	pc := c.pop16()
+	c.idle(pc) // internal PC-increment cycle: dummy read at the pulled PC
+	c.PC = pc + 1
 }
 func opRTI(c *CPU, _ uint16, _ AddrMode) {
 	c.idle(c.PC)                 // dummy read of next byte
@@ -462,8 +455,10 @@ func branch(c *CPU, addr uint16, take bool) {
 	c.extraCycles++
 	c.idle(c.PC)
 	if (c.PC & 0xFF00) != (addr & 0xFF00) {
+		// Page-cross fix-up cycle: the 6502 dummy-reads the PRE-fixup address
+		// (old PCH | new PCL) before correcting the high byte (#428).
 		c.extraCycles++
-		c.idle(addr)
+		c.idle((c.PC & 0xFF00) | (addr & 0x00FF))
 	}
 	c.PC = addr
 }

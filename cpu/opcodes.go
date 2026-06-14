@@ -173,7 +173,7 @@ func init() {
 	// jumps
 	set(0x4C, "JMP", ABS, 3, 3, false, opJMP)
 	set(0x6C, "JMP", IND, 3, 5, false, opJMP)
-	set(0x20, "JSR", ABS, 3, 6, false, opJSR)
+	set(0x20, "JSR", JSRABS, 3, 6, false, opJSR)
 	set(0x60, "RTS", IMP, 1, 6, false, opRTS)
 	set(0x40, "RTI", IMP, 1, 6, false, opRTI)
 	// branches

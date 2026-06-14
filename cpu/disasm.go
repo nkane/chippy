@@ -120,7 +120,7 @@ func disasmWithTable(bus Bus, addr uint16, table *[256]Instr, sym SymLookup) (st
 	case REL:
 		target := uint16(int32(addr+2) + int32(int8(b1)))
 		operand = name(target, fmt.Sprintf("$%04X", target))
-	case ABS:
+	case ABS, JSRABS:
 		t := uint16(b2)<<8 | uint16(b1)
 		operand = name(t, fmt.Sprintf("$%04X", t))
 	case ABX:
