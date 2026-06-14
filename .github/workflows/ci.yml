@@ -37,7 +37,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest'
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage.out
           fail_ci_if_error: false
@@ -116,7 +116,7 @@ jobs:
       # it downloads at most once.
       - name: Cache Tom Harte 6502 data
         id: harte-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: harte-data
           key: harte-6502-bb117564
