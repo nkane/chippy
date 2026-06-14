@@ -210,20 +210,13 @@ func harteDownload(t *testing.T, op string) ([]byte, error) {
 // mode; for a faithful NMOS trace we keep VariantNMOS (so decimal works) and
 // enable the per-cycle path directly for the single-instruction step.
 
-// harteBusSkip extends harteSkip with the opcodes whose per-cycle bus TRACE
-// (not just final state) diverges. chippy passes 228/238 bus-exact; the
-// remainder are well-understood quirks tracked for a follow-up:
-//   - taken page-crossing branches drive the dummy read at a different address
-//     than silicon (the pre-fixup address).
-//   - JSR/RTS interleave the operand fetch / stack ops in an order the
-//     instruction-stepped model collapses.
-var harteBusSkip = map[byte]string{
-	0x10: "BPL dummy-read addr", 0x30: "BMI dummy-read addr",
-	0x50: "BVC dummy-read addr", 0x70: "BVS dummy-read addr",
-	0x90: "BCC dummy-read addr", 0xB0: "BCS dummy-read addr",
-	0xD0: "BNE dummy-read addr", 0xF0: "BEQ dummy-read addr",
-	0x20: "JSR cycle ordering", 0x60: "RTS cycle ordering",
-}
+// harteBusSkip extends harteSkip with opcodes whose per-cycle bus TRACE (not
+// just final state) diverges. As of #428 chippy passes all 238 6502 opcodes
+// bus-exact, so this is empty: the branch page-cross dummy read now targets
+// the pre-fixup address (old PCH | new PCL), and JSR/RTS interleave the
+// operand fetch / stack ops in silicon order. Entries land here only when a
+// new divergence is found.
+var harteBusSkip = map[byte]string{}
 
 // busRecorder is a 64 KiB RAM that records every access as the per-cycle CPU
 // path drives it, plus a no-op Ticker so nesCycle engages.
