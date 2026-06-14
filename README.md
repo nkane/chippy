@@ -552,8 +552,7 @@ harness, so a failure names the exact probe:
 go test -tags=lorenz -timeout 5m -run TestLorenzSuite ./cpu/...
 ```
 
-C64-hardware tests (CIA/SID/VIC, NMI/IRQ sourcing) are out of scope; the
-`arrb` decimal probe is omitted pending an ARR-in-decimal fix.
+C64-hardware tests (CIA/SID/VIC, NMI/IRQ sourcing) are out of scope.
 
 Per-opcode, chippy is fuzzed against **Tom Harte's ProcessorTests** — ~10,000
 randomized initial→final cases for each 6502 opcode (registers, memory, cycle
@@ -565,9 +564,9 @@ CHIPPY_HARTE_DIR=/path/to/6502/v1 go test -tags=harte -run TestHarte6502 ./cpu/.
 # or omit the dir to download (pinned commit) into the user cache
 ```
 
-Every stable opcode passes. JAM/KIL and the unstable illegals (SHA/SHX/SHY/TAS,
-ARR-decimal) are skipped — their result is a magic constant the stable
-approximation doesn't model. (65C02 is tracked separately.)
+Every stable opcode passes. JAM/KIL and the unstable illegals (SHA/SHX/SHY/TAS)
+are skipped — their result is a magic constant the stable approximation doesn't
+model. (65C02 is tracked separately.)
 
 `TestHarte6502BusTrace` goes further and compares the **full per-cycle bus
 trace** (address, data, read/write of every cycle including dummies) against

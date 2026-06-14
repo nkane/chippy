@@ -42,13 +42,12 @@ const harteCommit = "bb11756436da8fd16cce86aef63dc6725f48836f"
 
 // harteSkip lists opcodes whose Tom Harte cases chippy is not expected to pass:
 //   - $x2 KIL/JAM: halt the CPU; chippy treats them as NOP.
-//   - SHA/SHX/SHY/TAS + ARR(decimal): unstable illegals whose result depends on
-//     a magic constant chippy approximates (issue #424 tracks ARR decimal).
+//   - SHA/SHX/SHY/TAS: unstable illegals whose result depends on a magic
+//     constant chippy only approximates. (ARR decimal was fixed in #424.)
 var harteSkip = map[byte]string{
 	0x02: "JAM", 0x12: "JAM", 0x22: "JAM", 0x32: "JAM",
 	0x42: "JAM", 0x52: "JAM", 0x62: "JAM", 0x72: "JAM",
 	0x92: "JAM", 0xB2: "JAM", 0xD2: "JAM", 0xF2: "JAM",
-	0x6B: "ARR (unstable: decimal magic constant, #424)",
 	0x93: "SHA (unstable)", 0x9F: "SHA (unstable)",
 	0x9B: "TAS (unstable)", 0x9C: "SHY (unstable)", 0x9E: "SHX (unstable)",
 }

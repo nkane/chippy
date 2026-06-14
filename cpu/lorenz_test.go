@@ -6,10 +6,10 @@
 // pure-CPU subset.
 //
 // chippy vendors the CPU-only subset (cpu/testdata/lorenz/) — the opcode,
-// decimal, and stable-illegal probes. The C64-hardware tests (CIA/SID/VIC
-// timers, NMI/IRQ sourcing, banking) are out of scope; Klaus's interrupt ROM
-// (interrupt_rom_test.go) covers IRQ/NMI/BRK. The decimal-mode ARR probe
-// (`arrb`) is omitted pending an ARR-in-decimal fix (see the tracking issue).
+// decimal, and stable-illegal probes (including the decimal-mode ARR probe
+// `arrb`, fixed in #424). The C64-hardware tests (CIA/SID/VIC timers, NMI/IRQ
+// sourcing, banking) are out of scope; Klaus's interrupt ROM
+// (interrupt_rom_test.go) covers IRQ/NMI/BRK.
 //
 // Harness (per http://www.softwolves.com/arkiv/cbm-hackers/7/7114.html, and
 // floooh/chips-test m6502-wltest.c): load the dump at its 2-byte header

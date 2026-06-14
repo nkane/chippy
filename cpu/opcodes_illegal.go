@@ -163,20 +163,40 @@ func opALR(c *CPU, addr uint16, _ AddrMode) {
 	c.setZN(c.A)
 }
 
-// opARR: A := ROR(A & imm). Then a C/V quirk:
+// opARR: A := ROR(A & imm), with quirky flags.
 //
-//	C := bit 6 of result
-//	V := bit 6 XOR bit 5 of result
+// Binary: C = bit 6 of result, V = bit 6 XOR bit 5 of result.
 //
-// (Decimal-mode ARR has even weirder behaviour; we implement the binary
-// case here. Real software almost never uses ARR in decimal mode.)
+// Decimal (#424, per 64doc / no-more-secrets): N/Z/V still come from the
+// binary rotate of the AND result, but A and C take a per-nibble BCD fixup —
+// low nibble +6 when (t&0x0F)+(t&0x01) > 5, high nibble +6 (and C set) when
+// (t&0xF0)+(t&0x10) > 0x50.
 func opARR(c *CPU, addr uint16, _ AddrMode) {
-	c.A &= c.read(addr)
+	t := c.A & c.read(addr)
 	carryIn := byte(0)
 	if c.hasFlag(FlagC) {
 		carryIn = 0x80
 	}
-	c.A = (c.A >> 1) | carryIn
+	res := (t >> 1) | carryIn
+
+	if c.hasFlag(FlagD) {
+		c.setZN(res)
+		c.setFlag(FlagV, (t^res)&0x40 != 0)
+		// int math — the high-nibble sum ($F0+$10) overflows a byte.
+		if int(t&0x0F)+int(t&0x01) > 0x05 {
+			res = res&0xF0 | (res+0x06)&0x0F
+		}
+		if int(t&0xF0)+int(t&0x10) > 0x50 {
+			res += 0x60
+			c.setFlag(FlagC, true)
+		} else {
+			c.setFlag(FlagC, false)
+		}
+		c.A = res
+		return
+	}
+
+	c.A = res
 	c.setZN(c.A)
 	c.setFlag(FlagC, c.A&0x40 != 0)
 	c.setFlag(FlagV, ((c.A>>6)^(c.A>>5))&1 != 0)
