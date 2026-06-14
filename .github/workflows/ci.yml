@@ -133,6 +133,26 @@ jobs:
           CHIPPY_HARTE_DIR: ${{ github.workspace }}/harte-data
         run: go test -tags=harte -timeout 5m -run TestHarte6502 -v ./cpu/...
 
+      # WDC 65C02 set (CMOS variant, #426), cached + run the same way.
+      - name: Cache Tom Harte 65C02 data
+        id: harte-cache-65c02
+        uses: actions/cache@v5
+        with:
+          path: harte-data-65c02
+          key: harte-wdc65c02-bb117564
+
+      - name: Download Tom Harte 65C02 data
+        if: steps.harte-cache-65c02.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p harte-data-65c02
+          base="https://raw.githubusercontent.com/TomHarte/ProcessorTests/bb11756436da8fd16cce86aef63dc6725f48836f/wdc65c02/v1"
+          seq 0 255 | xargs -P 8 -I {} sh -c 'op=$(printf "%02x" {}); curl -sfL "'"$base"'/$op.json" -o "harte-data-65c02/$op.json"'
+
+      - name: Run Tom Harte 65C02 per-opcode tests (state + cycle count)
+        env:
+          CHIPPY_HARTE_65C02_DIR: ${{ github.workspace }}/harte-data-65c02
+        run: go test -tags=harte -timeout 5m -run TestHarte65C02 -v ./cpu/...
+
   dap-integration:
     name: dap integration
     runs-on: ubuntu-latest
