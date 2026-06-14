@@ -18,7 +18,7 @@ The release workflow:
 1. Runs goreleaser via `.goreleaser.chippy.yml`.
 2. Builds linux/darwin/windows × amd64/arm64 binaries (CGO off — pure Go chippy core).
 3. Generates SPDX SBOMs via syft + cosign-signs every artifact via keyless OIDC.
-4. Pushes Homebrew formula, AUR PKGBUILD, .deb / .rpm / .apk packages.
+4. Pushes Homebrew cask, AUR PKGBUILD, .deb / .rpm / .apk packages.
 
 Verify a chippy artifact:
 ```sh

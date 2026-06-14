@@ -423,8 +423,8 @@ chippy -rom <file> [-addr 0x8000] [-reset 0xADDR] [-cfg linker.cfg] [-dbg syms.d
 - `.gitignore` — ignores `*.bin/*.o/*.dbg/*.prg/*.hex/*.lst/*.map`
 - `.github/workflows/ci.yml` — 3-OS test matrix + lint + Codecov + `klaus` job (ubuntu-only)
 - `.github/workflows/release.yml` — goreleaser on tag push
-- `.goreleaser.yml` — multi-arch binaries + brew formula publish
-- `nkane/homebrew-tap` repo — `Formula/chippy.rb` auto-updated by goreleaser
+- `.goreleaser.yml` — multi-arch binaries + brew cask publish
+- `nkane/homebrew-tap` repo — `Casks/chippy.rb` auto-updated by goreleaser (migrated formula→cask in #413; goreleaser deprecated `brews:` for pre-built binaries)
 
 ---
 

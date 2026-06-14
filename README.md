@@ -59,11 +59,11 @@ Compared to:
 
 ## Install
 
-### Homebrew (macOS / Linux)
+### Homebrew (macOS)
 
 ```sh
 brew tap nkane/tap
-brew install chippy
+brew install --cask chippy
 ```
 
 ### Debian / Ubuntu
