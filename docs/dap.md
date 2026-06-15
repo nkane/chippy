@@ -153,15 +153,29 @@ to emit on a shared channel. Throttled server-side to **≤60 Hz**.
     "pc": 32769,
     "cycles": 12044,
     "halted": false,
-    "dirtyRanges": []        // reserved: changed [start,end) memory ranges
+    "dirtyRanges": [                       // memory written since the last event
+      { "start": 768, "end": 769, "data": "qg==" }   // [start,end) + base64 bytes
+    ]
   }
 }
 ```
 
-The chippy TUI subscribes while running (driving the Registers panel) and
-falls back to polling when paused; `vscode-chippy` (or any host) can subscribe
-for the same live update. Following the Mesen / DAP-extension convention, the
-event is additive — never required for correctness.
+`dirtyRanges` (#440) carries the memory written since the previous event,
+coalesced into half-open `[start, end)` spans with the current bytes inline
+(base64). During a free-run the server arms an `AccessWrite` hook
+(`cpu.SetAccessHook`, #421) that stamps a dirty bitmap; each throttled
+`chippy-state` flushes the coalesced spans and clears. The hook composes with a
+host's own access hook (chained, restored on stop) and is removed when the run
+ends — zero per-write cost when not running. `start + len(data)` is
+authoritative (a span ending at `$FFFF` wraps `end`).
+
+The chippy TUI subscribes while running: it refreshes the Registers panel and
+**applies the `dirtyRanges` deltas to its mirror RAM**, so the memory and
+disassembly panels stay live without a per-frame `readMemory`. The `stopped`
+event still does a full-RAM reconcile as the authoritative final sync.
+`vscode-chippy` (or any host) can subscribe for the same live update. Following
+the Mesen / DAP-extension convention, the event is additive — never required
+for correctness.
 
 ## Host debug hooks
 

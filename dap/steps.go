@@ -79,7 +79,9 @@ func (s *Server) handleContinue(req Request) {
 // Breakpoint reads are guarded by bpMu inside isBreakpoint so concurrent
 // setBreakpoints requests stay safe.
 func (s *Server) runLoop() {
+	s.installDirtyHook()
 	defer func() {
+		s.removeDirtyHook()
 		s.running.Store(false)
 		close(s.runDone)
 	}()
@@ -113,16 +115,85 @@ func (s *Server) runLoop() {
 }
 
 // sendChippyState pushes a `chippy-state` event with the current register
-// file. Reads regs under cpuMu so the snapshot can't tear across an
-// instruction, then sends outside the lock.
+// file plus the memory written since the previous event (issue #440). Reads
+// regs and flushes the dirty spans under cpuMu so the snapshot can't tear
+// across an instruction, then sends outside the lock.
 func (s *Server) sendChippyState() {
 	s.lockCPU()
 	body := ChippyStateBody{
 		A: s.cpu.A, X: s.cpu.X, Y: s.cpu.Y, SP: s.cpu.SP, P: s.cpu.P,
 		PC: s.cpu.PC, Cycles: s.cpu.Cycles, Halted: s.cpu.Halted,
+		DirtyRanges: s.flushDirtyRanges(),
 	}
 	s.unlockCPU()
 	s.sendEvent(ChippyStateEvent, body)
+}
+
+// installDirtyHook arms the AccessWrite dirty-memory tracker for a free-run.
+// Composes with any host-installed access hook (issue #433) by chaining, and
+// resets the dirty bitmap so a prior run's tail (flushed only by the final
+// stopped reconcile) doesn't leak into this run.
+func (s *Server) installDirtyHook() {
+	if s.dirty == nil {
+		s.dirty = make([]bool, 0x10000)
+	} else {
+		clear(s.dirty)
+	}
+	s.dirtyLo, s.dirtyHi = 0x10000, -1
+	s.prevAccessHook = s.cpu.AccessHook()
+	prev := s.prevAccessHook
+	s.cpu.SetAccessHook(func(addr uint16, kind cpu.AccessKind) {
+		if prev != nil {
+			prev(addr, kind)
+		}
+		if kind == cpu.AccessWrite {
+			a := int(addr)
+			s.dirty[a] = true
+			if a < s.dirtyLo {
+				s.dirtyLo = a
+			}
+			if a > s.dirtyHi {
+				s.dirtyHi = a
+			}
+		}
+	})
+}
+
+// removeDirtyHook restores the access hook that was installed before the run.
+func (s *Server) removeDirtyHook() {
+	s.cpu.SetAccessHook(s.prevAccessHook)
+	s.prevAccessHook = nil
+}
+
+// flushDirtyRanges coalesces the dirty bitmap into half-open [Start, End)
+// spans, snapshots each span's current bytes, clears the scanned bits, and
+// resets the bounds. Must be called under cpuMu. Returns nil when nothing
+// changed. The dirtyHi bound keeps the scan proportional to the touched
+// region, not the full 64 KiB.
+func (s *Server) flushDirtyRanges() []MemRange {
+	if s.dirtyLo > s.dirtyHi {
+		return nil
+	}
+	var ranges []MemRange
+	i := s.dirtyLo
+	for i <= s.dirtyHi {
+		if !s.dirty[i] {
+			i++
+			continue
+		}
+		start := i
+		for i <= s.dirtyHi && s.dirty[i] {
+			s.dirty[i] = false
+			i++
+		}
+		data := make([]byte, i-start)
+		for j := start; j < i; j++ {
+			data[j-start] = s.ram.Read(uint16(j))
+		}
+		ranges = append(ranges, MemRange{Start: uint16(start), End: uint16(i), Data: data})
+	}
+	s.dirtyLo, s.dirtyHi = 0x10000, -1
+	return ranges
 }
 
 // runLoopIter runs one iteration of the continue loop under cpuMu.

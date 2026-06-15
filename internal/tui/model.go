@@ -864,6 +864,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					PC: cs.PC, Cycles: cs.Cycles, Halted: cs.Halted,
 				}
 				m.CPU.PC = cs.PC // keep the mirror PC current for other panels
+				// Apply streamed memory deltas (issue #440) so the memory and
+				// disassembly panels stay live during a remote run without a
+				// per-frame readMemory; the stopped event does a final
+				// full-RAM reconcile. Start+len(Data) is authoritative.
+				for _, r := range cs.DirtyRanges {
+					if len(r.Data) > 0 {
+						m.RAM.Load(r.Start, r.Data)
+					}
+				}
 			}
 		case "stopped":
 			wasRunning := m.Running

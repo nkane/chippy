@@ -144,15 +144,21 @@ type ChippyStateBody struct {
 	PC     uint16 `json:"pc"`
 	Cycles uint64 `json:"cycles"`
 	Halted bool   `json:"halted"`
-	// DirtyRanges is reserved for streaming changed memory to the memory /
-	// disassembly panels; empty in this version.
+	// DirtyRanges carries the memory written since the previous chippy-state
+	// event, coalesced into spans (issue #440). Each span ships its current
+	// bytes inline so the client applies the delta to its mirror without a
+	// follow-up readMemory. Empty when no memory changed in the window.
 	DirtyRanges []MemRange `json:"dirtyRanges,omitempty"`
 }
 
-// MemRange is a half-open [Start, End) byte range.
+// MemRange is a half-open [Start, End) byte range. When carried on a
+// chippy-state event its Data holds the End-Start bytes at Start (base64 on
+// the wire); consumers should treat Start+len(Data) as authoritative since a
+// span ending at $FFFF makes End wrap.
 type MemRange struct {
 	Start uint16 `json:"start"`
 	End   uint16 `json:"end"`
+	Data  []byte `json:"data,omitempty"`
 }
 
 // TerminatedEventBody is the body of a `terminated` event.
