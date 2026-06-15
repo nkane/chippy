@@ -39,3 +39,11 @@ func (k AccessKind) String() string {
 func (c *CPU) SetAccessHook(fn func(addr uint16, kind AccessKind)) {
 	c.accessHook = fn
 }
+
+// AccessHook returns the currently-installed access hook (nil when unset).
+// Lets a caller chain its own hook in front of an existing one — e.g. the
+// DAP server's dirty-memory tracker (issue #440) composing with a host's
+// heatmap hook — and restore the prior hook afterward.
+func (c *CPU) AccessHook() func(addr uint16, kind AccessKind) {
+	return c.accessHook
+}

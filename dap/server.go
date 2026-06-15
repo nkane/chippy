@@ -64,6 +64,15 @@ type Server struct {
 	varRefs   map[int]arrayRef
 	varRefSeq int
 
+	// Dirty-memory tracking for the chippy-state event (issue #440). During
+	// a free-run the run loop installs an AccessWrite hook that stamps dirty
+	// (a 64 KiB bitmap, bounded by dirtyLo/dirtyHi to keep coalescing cheap);
+	// each throttled chippy-state flushes the coalesced spans + their bytes
+	// and clears. Touched only on the run-loop goroutine under cpuMu.
+	dirty            []bool
+	dirtyLo, dirtyHi int
+	prevAccessHook   func(uint16, cpu.AccessKind)
+
 	// terminated flips true on disconnect / terminate. Serve returns when
 	// either the wire closes or this flag goes true.
 	terminated bool
