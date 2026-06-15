@@ -120,8 +120,8 @@ require("dap").adapters.chippy = {
 | `stepBack`                       | #79   | Pops one snapshot from the 256-entry rewind ring and restores CPU+RAM. Only pre-step paths push — `continue` runs aren't reversible. |
 | `threads`                        | #50   | One virtual thread (`id=1`, name=`cpu`). |
 | `stackTrace`                     | #48   | Walks JSR frames via `cpu.DetectStackFrame`. |
-| `scopes`                         | #48   | Two scopes per frame: Registers, Flags. |
-| `variables`                      | #48   | ref=1 → A/X/Y/SP/PC/P/Cycles; ref=2 → 8 P-flag bits. |
+| `scopes`                         | #48, #410 | Registers, Flags, and (when a `.dbg` is loaded) Globals. |
+| `variables`                      | #48, #410 | ref=1 → A/X/Y/SP/PC/P/Cycles; ref=2 → 8 P-flag bits; ref=3 → data symbols (sized `.dbg` globals + data-range symbols, code labels filtered). A symbol with `size>1` expands into indexed byte children via a dynamically-allocated `variablesReference` (paged with `start`/`count`; `supportsVariablePaging`). |
 | `setVariable`                    | #48   | Writes hex / decimal to a register or flag bit. |
 | `setBreakpoints`                 | #49, #81 | Source-line bps resolved through the `.dbg` source map. Honors `condition` / `hitCondition` (integer) / `logMessage` (with `{expr}` interpolation). |
 | `setInstructionBreakpoints`      | #49, #81 | Address bps (`$XX`, `0xXX`, decimal). Same modifier support as source bps. |

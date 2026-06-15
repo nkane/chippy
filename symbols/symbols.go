@@ -66,6 +66,28 @@ func (t *Table) LookupName(name string) (uint16, bool) {
 // Has reports whether any symbols are loaded.
 func (t *Table) Has() bool { return t != nil && len(t.byAddr) > 0 }
 
+// Sym is one symbol-table entry. Size is the cc65 `size=` extent, or 0 when
+// the .dbg didn't record one.
+type Sym struct {
+	Name string
+	Addr uint16
+	Size int
+}
+
+// Symbols returns every symbol, sorted by address. Used by the DAP Globals
+// scope (issue #410) to enumerate data symbols.
+func (t *Table) Symbols() []Sym {
+	if t == nil {
+		return nil
+	}
+	out := make([]Sym, 0, len(t.byAddr))
+	for addr, name := range t.byAddr {
+		out = append(out, Sym{Name: name, Addr: addr, Size: t.sizeByAd[addr]})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Addr < out[j].Addr })
+	return out
+}
+
 // NamesWithPrefix returns all symbol names whose string starts with prefix,
 // sorted lexicographically. Used for tab-completion in the TUI prompt.
 func (t *Table) NamesWithPrefix(prefix string) []string {

@@ -18,7 +18,22 @@ import (
 const (
 	refRegisters = 1
 	refFlags     = 2
+	refGlobals   = 3
+	// refDynamicBase is the first dynamically-allocated variablesReference
+	// (array-child handles). Kept clear of the static refs above.
+	refDynamicBase = 1000
+	// maxGlobals / maxArrayChildren bound the Globals scope so a huge symbol
+	// table or a bogus `size=` can't flood the Variables pane.
+	maxGlobals       = 1024
+	maxArrayChildren = 4096
 )
+
+// arrayRef records what a dynamic variablesReference expands to: Count
+// consecutive bytes starting at Addr, rendered as name[0..Count-1].
+type arrayRef struct {
+	Addr  uint16
+	Count int
+}
 
 func (s *Server) handleStackTrace(req Request) {
 	if s.cpu == nil {
@@ -90,10 +105,16 @@ func (s *Server) handleScopes(req Request) {
 	type body struct {
 		Scopes []Scope `json:"scopes"`
 	}
-	s.sendResponse(req, body{Scopes: []Scope{
+	scopes := []Scope{
 		{Name: "Registers", VariablesReference: refRegisters, Expensive: false},
 		{Name: "Flags", VariablesReference: refFlags, Expensive: false},
-	}})
+	}
+	// Globals scope (issue #410): only when symbols are loaded, else the
+	// pane would show an empty heading for ROMs launched without a .dbg.
+	if s.syms.Has() {
+		scopes = append(scopes, Scope{Name: "Globals", VariablesReference: refGlobals, Expensive: false})
+	}
+	s.sendResponse(req, body{Scopes: scopes})
 }
 
 func (s *Server) handleVariables(req Request) {
@@ -114,9 +135,108 @@ func (s *Server) handleVariables(req Request) {
 		s.sendResponse(req, body{Variables: s.regsVariables()})
 	case refFlags:
 		s.sendResponse(req, body{Variables: s.flagsVariables()})
+	case refGlobals:
+		s.sendResponse(req, body{Variables: s.globalsVariables()})
 	default:
+		if ar, ok := s.varRefs[args.VariablesReference]; ok {
+			s.sendResponse(req, body{Variables: s.arrayChildren(ar, args.Start, args.Count)})
+			return
+		}
 		s.sendErrorResponse(req, fmt.Sprintf("unknown variablesReference: %d", args.VariablesReference))
 	}
+}
+
+// globalsVariables enumerates data symbols for the Globals scope (issue #410).
+// A symbol becomes an expandable array when cc65 recorded a `size=` > 1;
+// otherwise it's a scalar byte. Code labels (addresses that map to a source
+// line) are filtered out — they're instructions, not data. Rebuilds the
+// dynamic variablesReference table on each call.
+func (s *Server) globalsVariables() []Variable {
+	s.varRefs = map[int]arrayRef{}
+	s.varRefSeq = refDynamicBase
+	out := make([]Variable, 0, 16)
+	for _, sym := range s.syms.Symbols() {
+		if len(out) >= maxGlobals {
+			break
+		}
+		// Keep data: anything cc65 sized, or anything in a flagged data
+		// range; drop pure code labels.
+		sized := sym.Size > 0
+		if !sized && !s.srcMap.IsData(sym.Addr) {
+			continue
+		}
+		if s.isCodeAddr(sym.Addr) {
+			continue
+		}
+		if sym.Size > 1 {
+			count := sym.Size
+			if count > maxArrayChildren {
+				count = maxArrayChildren
+			}
+			ref := s.allocArrayRef(sym.Addr, count)
+			out = append(out, Variable{
+				Name:               sym.Name,
+				Value:              fmt.Sprintf("$%04X [%d bytes]", sym.Addr, sym.Size),
+				Type:               "array",
+				VariablesReference: ref,
+				IndexedVariables:   count,
+			})
+			continue
+		}
+		out = append(out, Variable{
+			Name:  sym.Name,
+			Value: fmt.Sprintf("$%02X", s.ram.Read(sym.Addr)),
+			Type:  "byte",
+		})
+	}
+	return out
+}
+
+// arrayChildren returns the indexed byte children of an array ref, honoring
+// the client's [start, start+count) paging window (count 0 = to the end).
+func (s *Server) arrayChildren(ar arrayRef, start, count int) []Variable {
+	if start < 0 {
+		start = 0
+	}
+	end := ar.Count
+	if count > 0 && start+count < end {
+		end = start + count
+	}
+	if start > ar.Count {
+		start = ar.Count
+	}
+	out := make([]Variable, 0, end-start)
+	for i := start; i < end; i++ {
+		addr := ar.Addr + uint16(i)
+		out = append(out, Variable{
+			Name:  fmt.Sprintf("[%d]", i),
+			Value: fmt.Sprintf("$%02X", s.ram.Read(addr)),
+			Type:  "byte",
+		})
+	}
+	return out
+}
+
+// allocArrayRef assigns the next dynamic variablesReference for an array.
+func (s *Server) allocArrayRef(addr uint16, count int) int {
+	if s.varRefs == nil {
+		s.varRefs = map[int]arrayRef{}
+		s.varRefSeq = refDynamicBase
+	}
+	ref := s.varRefSeq
+	s.varRefSeq++
+	s.varRefs[ref] = arrayRef{Addr: addr, Count: count}
+	return ref
+}
+
+// isCodeAddr reports whether addr maps to a source line — i.e. it's an
+// instruction, not a data global. Returns false when no source map is loaded.
+func (s *Server) isCodeAddr(addr uint16) bool {
+	if s.srcMap == nil {
+		return false
+	}
+	_, ok := s.srcMap.PCToSrc[addr]
+	return ok
 }
 
 func (s *Server) regsVariables() []Variable {

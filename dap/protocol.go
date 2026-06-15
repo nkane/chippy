@@ -84,6 +84,7 @@ type Capabilities struct {
 	SupportsLoadedSourcesRequest       bool `json:"supportsLoadedSourcesRequest"`
 	SupportsCompletionsRequest         bool `json:"supportsCompletionsRequest"`
 	SupportsBreakpointLocationsRequest bool `json:"supportsBreakpointLocationsRequest"`
+	SupportsVariablePaging             bool `json:"supportsVariablePaging"`
 }
 
 // LaunchArguments is the chippy-specific subset of a `launch` request body.
@@ -193,6 +194,10 @@ type Variable struct {
 	Value              string `json:"value"`
 	Type               string `json:"type,omitempty"`
 	VariablesReference int    `json:"variablesReference,omitempty"`
+	// IndexedVariables hints the element count of an expandable indexed
+	// collection (array), letting the client page large arrays via the
+	// `start`/`count` fields of a follow-up `variables` request.
+	IndexedVariables int `json:"indexedVariables,omitempty"`
 }
 
 // StackTraceArguments is the request body for `stackTrace`.
@@ -207,9 +212,13 @@ type ScopesArguments struct {
 	FrameID int `json:"frameId"`
 }
 
-// VariablesArguments is the request body for `variables`.
+// VariablesArguments is the request body for `variables`. Start/Count are the
+// optional paging window a client uses to fetch a slice of a large indexed
+// collection (array children); Count == 0 means "all from Start".
 type VariablesArguments struct {
 	VariablesReference int `json:"variablesReference"`
+	Start              int `json:"start,omitempty"`
+	Count              int `json:"count,omitempty"`
 }
 
 // SetVariableArguments is the request body for `setVariable`.

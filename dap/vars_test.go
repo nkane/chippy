@@ -2,8 +2,13 @@ package dap
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nkane/chippy/symbols"
 )
 
 func TestVars_StackTraceTopFrame(t *testing.T) {
@@ -183,5 +188,118 @@ func TestParseDAPNumber(t *testing.T) {
 		if got != c.want {
 			t.Errorf("parseDAPNumber(%q): want %d, got %d", c.in, c.want, got)
 		}
+	}
+}
+
+// withSyms loads a tiny .dbg into the server so the Globals scope (issue
+// #410) has data symbols to enumerate.
+func withSyms(t *testing.T, s *Server, dbg string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "test.dbg")
+	if err := os.WriteFile(path, []byte(dbg), 0o644); err != nil {
+		t.Fatalf("write dbg: %v", err)
+	}
+	tbl, err := symbols.LoadDbg(path)
+	if err != nil {
+		t.Fatalf("load dbg: %v", err)
+	}
+	s.syms = tbl
+}
+
+func varsReq(seq int, args string) Request {
+	return Request{
+		ProtocolMessage: ProtocolMessage{Seq: seq, Type: "request"},
+		Command:         "variables",
+		Arguments:       json.RawMessage(args),
+	}
+}
+
+func TestVars_GlobalsScopeOnlyWhenSyms(t *testing.T) {
+	s, _, out := newStoppedServer(t, []byte{0xEA})
+	withSyms(t, s, "sym\tname=\"score\",val=0x0010,size=1\n")
+	s.handleScopes(Request{
+		ProtocolMessage: ProtocolMessage{Seq: 1, Type: "request"},
+		Command:         "scopes",
+		Arguments:       json.RawMessage(`{"frameId":0}`),
+	})
+	if !strings.Contains(out.String(), `"name":"Globals"`) {
+		t.Fatalf("Globals scope missing when syms loaded:\n%s", out.String())
+	}
+}
+
+func TestVars_GlobalsScalarAndArray(t *testing.T) {
+	s, _, out := newStoppedServer(t, []byte{0xEA})
+	withSyms(t, s,
+		"sym\tname=\"score\",val=0x0010,size=1\n"+
+			"sym\tname=\"buf\",val=0x0400,size=4\n")
+	s.ram.Write(0x0010, 0x7F)
+
+	s.handleVariables(varsReq(1, `{"variablesReference":3}`))
+	body := out.String()
+	if !strings.Contains(body, `"name":"score"`) || !strings.Contains(body, `"value":"$7F"`) {
+		t.Fatalf("scalar global score=$7F missing:\n%s", body)
+	}
+	// Array global is expandable: nonzero variablesReference + indexedVariables.
+	if !strings.Contains(body, `"name":"buf"`) || !strings.Contains(body, `"indexedVariables":4`) {
+		t.Fatalf("array global buf missing/not expandable:\n%s", body)
+	}
+}
+
+func TestVars_GlobalsArrayChildren(t *testing.T) {
+	s, _, out := newStoppedServer(t, []byte{0xEA})
+	withSyms(t, s, "sym\tname=\"buf\",val=0x0400,size=4\n")
+	for i := 0; i < 4; i++ {
+		s.ram.Write(0x0400+uint16(i), byte(0xA0+i))
+	}
+	// Enumerate the scope to allocate the array ref.
+	s.handleVariables(varsReq(1, `{"variablesReference":3}`))
+	if len(s.varRefs) != 1 {
+		t.Fatalf("expected 1 dynamic array ref, got %d", len(s.varRefs))
+	}
+	var ref int
+	for r := range s.varRefs {
+		ref = r
+	}
+	out.Reset()
+	s.handleVariables(varsReq(2, fmt.Sprintf(`{"variablesReference":%d}`, ref)))
+	body := out.String()
+	for _, want := range []string{`"name":"[0]","value":"$A0"`, `"name":"[3]","value":"$A3"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("array child %s missing:\n%s", want, body)
+		}
+	}
+}
+
+func TestVars_GlobalsArrayPaging(t *testing.T) {
+	s, _, out := newStoppedServer(t, []byte{0xEA})
+	withSyms(t, s, "sym\tname=\"buf\",val=0x0400,size=8\n")
+	for i := 0; i < 8; i++ {
+		s.ram.Write(0x0400+uint16(i), byte(i))
+	}
+	s.handleVariables(varsReq(1, `{"variablesReference":3}`))
+	var ref int
+	for r := range s.varRefs {
+		ref = r
+	}
+	out.Reset()
+	// Window [2, 4): indices 2 and 3 only.
+	s.handleVariables(varsReq(2, fmt.Sprintf(`{"variablesReference":%d,"start":2,"count":2}`, ref)))
+	body := out.String()
+	if !strings.Contains(body, `"name":"[2]"`) || !strings.Contains(body, `"name":"[3]"`) {
+		t.Fatalf("paged window missing [2]/[3]:\n%s", body)
+	}
+	if strings.Contains(body, `"name":"[0]"`) || strings.Contains(body, `"name":"[4]"`) {
+		t.Fatalf("paged window leaked out-of-range elements:\n%s", body)
+	}
+}
+
+func TestVars_GlobalsFiltersCodeLabels(t *testing.T) {
+	// A sized symbol that maps to a source line is code, not data — dropped.
+	s, _, out := newStoppedServer(t, []byte{0xEA})
+	withSyms(t, s, "sym\tname=\"main\",val=0x8000,size=20\n")
+	s.srcMap = &symbols.SourceMap{PCToSrc: map[uint16]symbols.SrcLoc{0x8000: {File: "main.c", Line: 1}}}
+	s.handleVariables(varsReq(1, `{"variablesReference":3}`))
+	if strings.Contains(out.String(), `"name":"main"`) {
+		t.Fatalf("code label 'main' should be filtered from Globals:\n%s", out.String())
 	}
 }

@@ -56,6 +56,14 @@ type Server struct {
 	textOut *peripheral.TextOutput
 	keyIn   *peripheral.KeyboardInput
 
+	// Dynamic variablesReference allocation for the Globals scope (issue
+	// #410). Registers/Flags use static refs; array-child handles are
+	// allocated per symbol and rebuilt whenever the Globals scope is
+	// enumerated. Touched only from request handlers (the serial dispatch
+	// loop), never the run-loop goroutine, so no extra lock.
+	varRefs   map[int]arrayRef
+	varRefSeq int
+
 	// terminated flips true on disconnect / terminate. Serve returns when
 	// either the wire closes or this flag goes true.
 	terminated bool
@@ -325,6 +333,7 @@ func (s *Server) handleInitialize(req Request) {
 		SupportsCompletionsRequest:         true,
 		SupportsSetVariable:                true,
 		SupportsExceptionInfoRequest:       true,
+		SupportsVariablePaging:             true,
 	}
 	resp := capsWithFilters{
 		Capabilities: caps,
