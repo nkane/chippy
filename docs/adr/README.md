@@ -21,6 +21,7 @@ reversed or refined are marked *Superseded by* with a link.
 | [0006](0006-v1.4.0.md) | v1.4.0 | 2026-06-04 | DAP custom-request extension point (for nessy) |
 | [0007](0007-v1.4.1.md) | v1.4.1 | 2026-06-04 | Remove VS Code extension (MS marketplace block) |
 | [0008](0008-v1.5.0.md) | v1.5.0 | 2026-06-11 | DAP onramp + complete CPU ROM coverage + host debug hooks (epics #402, #419) |
+| [0009](0009-v1.6.0.md) | v1.6.0 | 2026-06-16 | Accuracy tail (238/238 6502 bus-exact, 65C02 Tom Harte) + debugger UX (struct overlay, DAP array children, dirtyRanges) (epic #438) |
 
 ## Conventions captured across releases
 
