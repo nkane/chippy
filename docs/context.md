@@ -1,8 +1,21 @@
 # chippy — Project Context Dump
 
-> Snapshot of the running understanding of this project. Generated 2026-05-11.
+> Snapshot of the running understanding of this project. Generated 2026-05-11;
+> last refreshed 2026-06-16 (post-v1.6.0, v1.7 planned).
 > Treat this as a handoff document — anything not visible from `git log` or
 > the code itself should live here.
+
+## 0. Where we are right now (session handoff)
+
+- **v1.6.0 shipped** 2026-06-16 (tag `v1.6.0`, GitHub release + Homebrew **cask** live, ADR `0009-v1.6.0.md`). Closed epic #438: ARR decimal (#424), 238/238 6502 bus-exact (#428), 65C02 Tom Harte + 5 CMOS fixes (#426), struct overlay watch (#409), DAP array children (#410), chippy-state dirtyRanges (#440), goreleaser cask (#413).
+- **v1.7.0 planned** — epic **#458** + 9 sub-issues filed (all labelled `v1.7`):
+  - Theme A (TUI-via-DAP migration, the v2.0 arc): #449 stack→`stackTrace`, #450 flags→`variables`, #451 memory→`readMemory`+dirtyRanges, #452 disasm→`disassemble`.
+  - Theme B (DAP parity): #453 data breakpoints (`setDataBreakpoints`/`dataBreakpointInfo`, expose TUI mem-watch), #454 `setVariable` on memory + Globals array children.
+  - Theme C (accuracy): #455 `TestHarte65C02BusTrace` (CMOS per-cycle bus-exactness, mirror #428).
+  - Theme D (headline): #456 65816 variant (16-bit, emu/native), #457 hosted WASM playground (Pages).
+- **Suggested opener:** #449 (smallest, unblocks rest of Theme A). After all of Theme A lands, v2.0 flips the TUI default to DAP-only + deletes the dead direct-render path.
+- **0 open issues outside the v1.7 set.** `main` clean at the v1.6.0 prep merge.
+- **ADRs current** through v1.6.0 (0001–0009); v1.7 will be `0010-v1.7.0.md`. Pre-1.0 0.x tags fold into ADR 0001.
 
 ---
 
@@ -13,7 +26,7 @@
 - **Module:** `github.com/nkane/chippy`
 - **Repo:** https://github.com/nkane/chippy (public, primary branch `main`)
 - **License:** MIT (`LICENSE` in repo root)
-- **Latest release:** v0.0.1 (installable via Homebrew tap)
+- **Latest release:** v1.6.0 (2026-06-16; `brew install --cask nkane/tap/chippy`). See `docs/adr/0009-v1.6.0.md`.
 - **Go version:** 1.26.2 in `go.mod`; CI uses `stable`
 
 ### Vision
@@ -306,8 +319,9 @@ Bus chain: `CPU → tui.WBus → cpu.MMIO → cpu.RAM`
 - CPU stall hook + $4014 OAMDMA (issue #204, nessy v0.2): new `cpu.Stall(int)` API plus a `pendingStall` field on `CPU`. `Step()` drains the full counter as one block — bus ticker fires once, `Cycles` advances, no opcode executes. NMI/IRQ service still preempts a queued stall so a peripheral that asserts an interrupt mid-DMA gets serviced first (matches the rest of the interrupt path). New `internal/nes/dma/` package with `OAMDMA` — a `cpu.Peripheral` claiming `$4014-$4014`. On write of byte `$XX`, walks 256 bytes from CPU page `$XX00-$XXFF` through the bus into the PPU's OAM cursor, then charges 513 stall cycles. Wired into `cmd/nessy/wiring.go` alongside cart + joypad + PPU; the `nesBus` struct gains a `dma` field for introspection. New PPU accessor `OAM(byte) byte` for side-effect-free test assertion. Tests cover `Stall`'s queue/drain/NMI-preempt semantics (`internal/cpu/stall_test.go`), the DMA peripheral via fakes + a real MMIO round-trip (`internal/nes/dma/oamdma_test.go`), and an end-to-end STA `$4014` against the live NES bus that verifies OAM contents + post-DMA stall drain (`cmd/nessy/wiring_test.go`). nestest + perfgate + Klaus all still pass. Out of scope for v0.2: the 514-cycle odd-CPU-cycle alignment penalty, DMC sample-DMA contention timing, per-byte sub-cycle accounting.
 
 ### Open issues
-- #22 (homebrew-core) — blocked on stars
-- Post-DAP follow-ups: #63 VIA 6522, #64 trace replay, #65 mem-watch conditional expressions
+- **v1.7.0 epic #458** + sub-issues #449–#457 (see §0 for the breakdown). Suggested order: #449 → #450 → #451 → #452 (Theme A), then #453/#454 (DAP parity), #455 (CMOS bus trace), #456/#457 (65816, WASM playground).
+- #22 (homebrew-core) — still blocked on ~30 stars (release hygiene, not code).
+- **Deferred to v2.0:** flip the TUI default to DAP-only + delete the in-process direct render path (depends on Theme A complete); 65816 native-mode completeness if #456 ships emulation-first; MMIO/cart-bus freeze beyond RAM (#422 scoped to RAM).
 
 ---
 
