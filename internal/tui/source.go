@@ -5,6 +5,7 @@ import (
 
 	"github.com/nkane/chippy/cpu"
 	"github.com/nkane/chippy/dap"
+	"github.com/nkane/chippy/symbols"
 )
 
 // Source abstracts the CPU + bus pair the TUI drives. LocalSource (this
@@ -101,6 +102,11 @@ type Source interface {
 	// from (issue #394). LocalSource round-trips an in-process DAP server;
 	// RemoteSource reuses the attach client.
 	Registers() (RegSnapshot, error)
+
+	// Stack returns the stack-page frame snapshot via a single DAP
+	// `stackTrace` round-trip — the data path the Stack panel renders from
+	// (issue #449). Same transport split as Registers.
+	Stack() (StackSnapshot, error)
 }
 
 // LocalSource is the in-process Source backing the default TUI mode.
@@ -118,20 +124,34 @@ type LocalSource struct {
 	ram *cpu.RAM
 
 	// dapClient is an in-process DAP server+client attached to the same
-	// CPU/RAM, used so the Registers panel reads through DAP even in local
-	// mode (issue #394 PoC). Sub-microsecond per the #393 inproc transport.
+	// CPU/RAM, used so the Registers + Stack panels read through DAP even in
+	// local mode (issues #394, #449). Sub-microsecond per the #393 inproc
+	// transport. dapServer is retained so SetSymbols can push the symbol
+	// table + source map in after construction (they load after New).
 	dapClient *dap.InprocClient
+	dapServer *dap.Server
 }
 
 // NewLocalSource builds the default Source wired to a real CPU + RAM, plus an
-// in-process DAP server so register reads go through the protocol.
+// in-process DAP server so register + stack reads go through the protocol.
 func NewLocalSource(c *cpu.CPU, r *cpu.RAM) *LocalSource {
 	s := &LocalSource{cpu: c, ram: r}
 	srv, cl := dap.NewInprocServer()
 	if err := srv.AttachExisting(dap.AttachConfig{CPU: c, RAM: r}); err == nil {
 		s.dapClient = cl
+		s.dapServer = srv
 	}
 	return s
+}
+
+// SetSymbols pushes the symbol table + source map into the in-process DAP
+// server so stackTrace frames carry callee names + source lines in local
+// mode (issue #449). Called from the Model's WithSymbols / WithSourceMap
+// builders, which run after New (and thus after NewLocalSource attaches).
+func (s *LocalSource) SetSymbols(syms *symbols.Table, srcMap *symbols.SourceMap) {
+	if s.dapServer != nil {
+		s.dapServer.SetSymbols(syms, srcMap)
+	}
 }
 
 // Registers reads the register snapshot through the in-process DAP server.
@@ -147,6 +167,15 @@ func (s *LocalSource) Registers() (RegSnapshot, error) {
 	}
 	rs.Halted = s.cpu.Halted
 	return rs, nil
+}
+
+// Stack reads the stack-page frame snapshot through the in-process DAP server
+// (issue #449).
+func (s *LocalSource) Stack() (StackSnapshot, error) {
+	if s.dapClient == nil {
+		return StackSnapshot{}, fmt.Errorf("local source: no dap client")
+	}
+	return fetchStack(s.dapClient)
 }
 
 // Step advances the CPU one instruction.

@@ -53,7 +53,7 @@ func (s *Server) handleStackTrace(req Request) {
 	a := uint16(s.cpu.SP) + 1
 	for a <= 0xFF && len(frames) < frameCap {
 		sp := uint16(0x0100) | a
-		retAddr, _, ok := cpu.DetectStackFrame(s.ram, sp)
+		retAddr, target, ok := cpu.DetectStackFrame(s.ram, sp)
 		if !ok {
 			a++
 			continue
@@ -61,8 +61,15 @@ func (s *Server) handleStackTrace(req Request) {
 		// retAddr is the address RTS will jump to. The caller's PC at the
 		// JSR site is retAddr - 1 (the operand byte of the JSR). For the
 		// stack-trace `Name` we still report retAddr so the user sees
-		// where the routine will resume.
-		frames = append(frames, s.frameForPC(len(frames), retAddr))
+		// where the routine will resume; ChippyStackAddr / ChippyCallee
+		// carry the stack-page slot and the called routine's symbol for the
+		// chippy TUI's stack-page panel (issue #449).
+		f := s.frameForPC(len(frames), retAddr)
+		f.ChippyStackAddr = fmt.Sprintf("$%04X", sp)
+		if s.syms != nil {
+			f.ChippyCallee = s.syms.Lookup(target)
+		}
+		frames = append(frames, f)
 		a += 2
 	}
 	s.sendResponse(req, body{StackFrames: frames, TotalFrames: len(frames)})

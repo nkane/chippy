@@ -182,6 +182,18 @@ type StackFrame struct {
 	Line                        int     `json:"line,omitempty"`
 	Column                      int     `json:"column,omitempty"`
 	InstructionPointerReference string  `json:"instructionPointerReference,omitempty"`
+
+	// ChippyStackAddr (chippy extension; standard DAP clients ignore unknown
+	// fields) is the "$01XX" address in the 6502 stack page where this frame's
+	// pushed return-address pair begins. Empty for frame 0 (the live PC, which
+	// is not a stack-page entry). Lets the chippy TUI render its stack-page
+	// panel layout directly from the stackTrace response (issue #449).
+	ChippyStackAddr string `json:"chippyStackAddr,omitempty"`
+	// ChippyCallee (chippy extension) is the symbol at this frame's JSR call
+	// target — the routine that was invoked — distinct from Name, which names
+	// the routine that resumes at the return address. Empty when no symbol
+	// covers the target (issue #449).
+	ChippyCallee string `json:"chippyCallee,omitempty"`
 }
 
 // Scope groups variables under a named heading in the editor's Variables

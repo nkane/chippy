@@ -119,7 +119,7 @@ require("dap").adapters.chippy = {
 | `next` / `stepIn` / `stepOut`    | #50   | Step-over runs to PC+3 past a JSR; step-out runs until SP rises. |
 | `stepBack`                       | #79   | Pops one snapshot from the 256-entry rewind ring and restores CPU+RAM. Only pre-step paths push — `continue` runs aren't reversible. |
 | `threads`                        | #50   | One virtual thread (`id=1`, name=`cpu`). |
-| `stackTrace`                     | #48   | Walks JSR frames via `cpu.DetectStackFrame`. |
+| `stackTrace`                     | #48, #449 | Walks JSR frames via `cpu.DetectStackFrame`. Each frame adds two chippy-extension fields (additive; standard clients ignore them): `chippyStackAddr` (`$01XX` stack-page slot of the pushed return pair) and `chippyCallee` (symbol at the JSR target). The chippy TUI's stack panel renders from these (#449). |
 | `scopes`                         | #48, #410 | Registers, Flags, and (when a `.dbg` is loaded) Globals. |
 | `variables`                      | #48, #410 | ref=1 → A/X/Y/SP/PC/P/Cycles; ref=2 → 8 P-flag bits; ref=3 → data symbols (sized `.dbg` globals + data-range symbols, code labels filtered). A symbol with `size>1` expands into indexed byte children via a dynamically-allocated `variablesReference` (paged with `start`/`count`; `supportsVariablePaging`). |
 | `setVariable`                    | #48   | Writes hex / decimal to a register or flag bit. |

@@ -46,11 +46,28 @@ Repeat the four steps. For panels that need more than registers:
 - Cache the snapshot on the Model; refresh it from `Update`.
 - Render from the cache.
 
-Keep both code paths alive until v2.0 flips the default — the in-process direct
-access is the fallback / reference, and the DAP path is what the future
+Keep both code paths alive until #461 flips the default (v1.7) — the in-process
+direct access is the fallback / reference, and the DAP path is what the future
 generic client uses. Disassembly and memory panels already have
-`RefreshMemory` plumbing to build on; the stack panel is the next obvious
-candidate (`stackTrace` returns frames in one request).
+`RefreshMemory` plumbing to build on.
+
+## Migrated panels
+
+- **Registers** (#394) — `variables` (Registers scope). The proof of concept.
+- **Stack** (#449) — `stackTrace`. `Source.Stack()` / `fetchStack` /
+  `m.syncStack()` / `StackSnapshot`. The DAP `stackTrace` response gained two
+  additive chippy-extension fields so the snapshot can reproduce the panel's
+  hardware-stack-page layout (not just a flat call list): `chippyStackAddr`
+  (the `$01XX` slot of each pushed pair) and `chippyCallee` (the symbol at the
+  JSR target, distinct from the frame `Name` = symbol at the return address).
+  Frame detection / symbol / source-map lookups now live server-side
+  (`cpu.DetectStackFrame` + the server's syms/srcMap); the panel only
+  positions the snapshot frames over the page and renders the gaps as runs,
+  with raw bytes still read from the DAP-fed RAM mirror (#451 formalizes that).
+  Local mode pushes the symbol table + source map into its in-process server
+  via `LocalSource.SetSymbols` (the symbols load after `New`).
+
+**Next:** flags panel → `variables` (Flags scope), #450.
 
 ## Cost
 
