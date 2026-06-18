@@ -210,6 +210,12 @@ func (s *RemoteSource) Stack() (StackSnapshot, error) {
 	return fetchStack(s.client)
 }
 
+// Flags reads the decomposed P-register snapshot over the attach client
+// (issue #450).
+func (s *RemoteSource) Flags() (FlagsSnapshot, error) {
+	return fetchFlags(s.client)
+}
+
 // RefreshMemory pulls the full CPU-bus memory ($0000-$FFFF) via DAP
 // `readMemory` and writes it into the mirror's RAM so display panels
 // (disasm, memory) render correct values. Called once on attach and
