@@ -66,8 +66,16 @@ generic client uses. Disassembly and memory panels already have
   with raw bytes still read from the DAP-fed RAM mirror (#451 formalizes that).
   Local mode pushes the symbol table + source map into its in-process server
   via `LocalSource.SetSymbols` (the symbols load after `New`).
+- **Flags** (#450) — `variables` (Flags scope, ref=2). `Source.Flags()` /
+  `fetchFlags` / `m.syncFlags()` / `FlagsSnapshot` (eight bools). The server
+  decomposes `P` into N/V/U/B/D/I/Z/C bit values; `flagsView` renders the
+  cached snapshot instead of bit-testing `cpu.CPU.P`. During a remote free-run
+  the `chippy-state` event (#395) already carries the raw `P`, so the handler
+  decomposes it client-side via `flagsFromP` — keeping the Flags panel as live
+  as Registers without a per-frame round-trip (the Flags scope stays the
+  authoritative source on stop).
 
-**Next:** flags panel → `variables` (Flags scope), #450.
+**Next:** memory panel → `readMemory` + `dirtyRanges`, #451.
 
 ## Cost
 

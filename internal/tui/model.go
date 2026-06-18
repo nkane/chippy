@@ -132,6 +132,11 @@ type Model struct {
 	// #449) — the panel no longer runs DetectStackFrame / symbol lookups.
 	Stack StackSnapshot
 
+	// Flags is the decomposed P-register snapshot the Flags panel renders,
+	// refreshed from the Source via a DAP `variables` (Flags scope) round-trip
+	// (issue #450) — the panel no longer bit-tests cpu.CPU.P directly.
+	Flags FlagsSnapshot
+
 	Syms        *symbols.Table
 	Running     bool
 	Breakpoints map[uint16]*Breakpoint
@@ -349,6 +354,7 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 	m.Source = NewLocalSource(c, r)
 	m.syncRegs()  // seed the Registers panel before the first render
 	m.syncStack() // seed the Stack panel before the first render
+	m.syncFlags() // seed the Flags panel before the first render
 	return m
 }
 
@@ -360,6 +366,7 @@ func (m Model) WithSource(s Source) Model {
 	m.Source = s
 	m.syncRegs()
 	m.syncStack()
+	m.syncFlags()
 	return m
 }
 
@@ -870,6 +877,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.syncRegs()  // refresh the DAP-sourced Registers panel after key actions
 		m.syncStack() // refresh the DAP-sourced Stack panel after key actions
+		m.syncFlags() // refresh the DAP-sourced Flags panel after key actions
 		return m, m.scheduleTick()
 
 	case dapEventMsg:
@@ -883,7 +891,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					A: cs.A, X: cs.X, Y: cs.Y, SP: cs.SP, P: cs.P,
 					PC: cs.PC, Cycles: cs.Cycles, Halted: cs.Halted,
 				}
-				m.CPU.PC = cs.PC // keep the mirror PC current for other panels
+				m.Flags = flagsFromP(cs.P) // keep the Flags panel live during a remote run (#450)
+				m.CPU.PC = cs.PC           // keep the mirror PC current for other panels
 				// Apply streamed memory deltas (issue #440) so the memory and
 				// disassembly panels stay live during a remote run without a
 				// per-frame readMemory; the stopped event does a final
@@ -901,6 +910,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_ = m.Source.RefreshMemory()
 			m.syncRegs()  // pull post-stop regs into the snapshot the panel renders
 			m.syncStack() // and the post-stop stack frames (issue #449)
+			m.syncFlags() // and the post-stop P-flag bits (issue #450)
 			// Only overwrite Status when we were running — single
 			// step paths have their own "stepped" / "hit bp"
 			// messages and don't want this generic one stomping
@@ -952,6 +962,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.syncRegs()  // refresh the DAP-sourced Registers panel once per tick
 		m.syncStack() // refresh the DAP-sourced Stack panel once per tick
+		m.syncFlags() // refresh the DAP-sourced Flags panel once per tick
 		return m, m.scheduleTick()
 	}
 	return m, nil
@@ -1803,8 +1814,11 @@ func (m Model) regsView(w, h int) string {
 	return fitPanel("Registers", body, w, h)
 }
 
+// flagsView renders the Flags panel from m.Flags — a DAP-sourced snapshot of
+// the decomposed P bits (issue #450), never direct cpu.CPU.P access.
+// m.syncFlags() refreshes the cache in the Update loop, so View stays pure.
 func (m Model) flagsView(w, h int) string {
-	c := m.CPU
+	f := m.Flags
 	flag := func(name string, on bool) string {
 		if on {
 			return flagOn.Render(name)
@@ -1812,14 +1826,14 @@ func (m Model) flagsView(w, h int) string {
 		return flagOff.Render(strings.ToLower(name))
 	}
 	body := fmt.Sprintf("%s %s %s %s  %s %s %s %s",
-		flag("N", c.P&cpu.FlagN != 0),
-		flag("V", c.P&cpu.FlagV != 0),
-		flag("U", c.P&cpu.FlagU != 0),
-		flag("B", c.P&cpu.FlagB != 0),
-		flag("D", c.P&cpu.FlagD != 0),
-		flag("I", c.P&cpu.FlagI != 0),
-		flag("Z", c.P&cpu.FlagZ != 0),
-		flag("C", c.P&cpu.FlagC != 0),
+		flag("N", f.N),
+		flag("V", f.V),
+		flag("U", f.U),
+		flag("B", f.B),
+		flag("D", f.D),
+		flag("I", f.I),
+		flag("Z", f.Z),
+		flag("C", f.C),
 	)
 	return fitPanel("Flags", body, w, h)
 }

@@ -107,6 +107,12 @@ type Source interface {
 	// `stackTrace` round-trip — the data path the Stack panel renders from
 	// (issue #449). Same transport split as Registers.
 	Stack() (StackSnapshot, error)
+
+	// Flags returns the decomposed P-register snapshot via a single DAP
+	// `variables` round-trip against the Flags scope — the data path the
+	// Flags panel renders from (issue #450). Same transport split as
+	// Registers.
+	Flags() (FlagsSnapshot, error)
 }
 
 // LocalSource is the in-process Source backing the default TUI mode.
@@ -176,6 +182,15 @@ func (s *LocalSource) Stack() (StackSnapshot, error) {
 		return StackSnapshot{}, fmt.Errorf("local source: no dap client")
 	}
 	return fetchStack(s.dapClient)
+}
+
+// Flags reads the decomposed P-register snapshot through the in-process DAP
+// server (issue #450).
+func (s *LocalSource) Flags() (FlagsSnapshot, error) {
+	if s.dapClient == nil {
+		return FlagsSnapshot{}, fmt.Errorf("local source: no dap client")
+	}
+	return fetchFlags(s.dapClient)
 }
 
 // Step advances the CPU one instruction.
