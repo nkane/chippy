@@ -127,6 +127,11 @@ type Model struct {
 	// panel no longer reads cpu.CPU fields directly.
 	Regs RegSnapshot
 
+	// Stack is the stack-page frame snapshot the Stack panel renders,
+	// refreshed from the Source via a DAP `stackTrace` round-trip (issue
+	// #449) — the panel no longer runs DetectStackFrame / symbol lookups.
+	Stack StackSnapshot
+
 	Syms        *symbols.Table
 	Running     bool
 	Breakpoints map[uint16]*Breakpoint
@@ -342,7 +347,8 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 		H:              40,
 	}
 	m.Source = NewLocalSource(c, r)
-	m.syncRegs() // seed the Registers panel before the first render
+	m.syncRegs()  // seed the Registers panel before the first render
+	m.syncStack() // seed the Stack panel before the first render
 	return m
 }
 
@@ -353,6 +359,7 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 func (m Model) WithSource(s Source) Model {
 	m.Source = s
 	m.syncRegs()
+	m.syncStack()
 	return m
 }
 
@@ -381,6 +388,12 @@ func (m Model) WithWBus(w *WBus) Model {
 
 func (m Model) WithSymbols(s *symbols.Table) Model {
 	m.Syms = s
+	// Push the table into the in-process DAP server so local-mode stackTrace
+	// frames carry callee names (issue #449); refresh the cached snapshot.
+	if ls, ok := m.Source.(*LocalSource); ok {
+		ls.SetSymbols(s, nil)
+		m.syncStack()
+	}
 	return m
 }
 
@@ -502,6 +515,12 @@ func (m Model) WithSourceMap(sm *symbols.SourceMap) Model {
 	m.PCToSrc = sm.PCToSrc
 	m.SourceFiles = sm.Files
 	m.DataRanges = sm.DataRanges
+	// Push the source map into the in-process DAP server so local-mode
+	// stackTrace frames carry source lines (issue #449); refresh the cache.
+	if ls, ok := m.Source.(*LocalSource); ok {
+		ls.SetSymbols(nil, sm)
+		m.syncStack()
+	}
 	return m
 }
 
@@ -849,7 +868,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Status = "stack: raw bytes"
 			}
 		}
-		m.syncRegs() // refresh the DAP-sourced Registers panel after key actions
+		m.syncRegs()  // refresh the DAP-sourced Registers panel after key actions
+		m.syncStack() // refresh the DAP-sourced Stack panel after key actions
 		return m, m.scheduleTick()
 
 	case dapEventMsg:
@@ -879,6 +899,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Running = false
 			_ = m.Source.RefreshRegs()
 			_ = m.Source.RefreshMemory()
+			m.syncRegs()  // pull post-stop regs into the snapshot the panel renders
+			m.syncStack() // and the post-stop stack frames (issue #449)
 			// Only overwrite Status when we were running — single
 			// step paths have their own "stepped" / "hit bp"
 			// messages and don't want this generic one stomping
@@ -928,7 +950,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		m.syncRegs() // refresh the DAP-sourced Registers panel once per tick
+		m.syncRegs()  // refresh the DAP-sourced Registers panel once per tick
+		m.syncStack() // refresh the DAP-sourced Stack panel once per tick
 		return m, m.scheduleTick()
 	}
 	return m, nil
