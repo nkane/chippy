@@ -274,6 +274,11 @@ type Model struct {
 	DisasmFollow bool
 	DisasmAnchor uint16
 
+	// Disasm is the DAP-sourced instruction window the disassembly panel
+	// renders (issue #452), refreshed by m.syncDisasm — disasmView no longer
+	// calls cpu.DisasmCPU.
+	Disasm DisasmSnapshot
+
 	// Source viewport: same pattern as disasm. SourceFollow=true (default)
 	// re-centers on the current PC's source line every frame. User scroll
 	// keys flip it off and pin SourceAnchorFile + SourceAnchorLine as the
@@ -325,12 +330,6 @@ type Model struct {
 	W, H int
 }
 
-type disasmCacheEntry struct {
-	anchor       uint16
-	above, below int
-	addrs        []uint16
-}
-
 func New(c *cpu.CPU, r *cpu.RAM) Model {
 	r.EnableShadow() // CoW page tracking powers the rewind ring (issue #66).
 	// Pick theme from NO_COLOR env at start; CLI / state-file overrides
@@ -359,10 +358,11 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 		H:              40,
 	}
 	m.Source = NewLocalSource(c, r)
-	m.syncRegs()  // seed the Registers panel before the first render
-	m.syncStack() // seed the Stack panel before the first render
-	m.syncFlags() // seed the Flags panel before the first render
-	m.syncMem()   // seed the Memory panel before the first render
+	m.syncRegs()   // seed the Registers panel before the first render
+	m.syncStack()  // seed the Stack panel before the first render
+	m.syncFlags()  // seed the Flags panel before the first render
+	m.syncMem()    // seed the Memory panel before the first render
+	m.syncDisasm() // seed the Disassembly panel before the first render
 	return m
 }
 
@@ -376,6 +376,7 @@ func (m Model) WithSource(s Source) Model {
 	m.syncStack()
 	m.syncFlags()
 	m.syncMem()
+	m.syncDisasm()
 	return m
 }
 
@@ -402,13 +403,22 @@ func (m Model) WithWBus(w *WBus) Model {
 	return m
 }
 
+// symbolSink is implemented by Sources that own an in-process DAP server
+// (LocalSource on the core, RemoteSource on the mirror) — symbols load after
+// New, so the builders push them in afterwards (issues #449, #452).
+type symbolSink interface {
+	SetSymbols(syms *symbols.Table, srcMap *symbols.SourceMap)
+}
+
 func (m Model) WithSymbols(s *symbols.Table) Model {
 	m.Syms = s
-	// Push the table into the in-process DAP server so local-mode stackTrace
-	// frames carry callee names (issue #449); refresh the cached snapshot.
-	if ls, ok := m.Source.(*LocalSource); ok {
-		ls.SetSymbols(s, nil)
+	// Push the table into the in-process DAP server so stackTrace frames carry
+	// callee names (#449) and disassemble lines carry symbol labels (#452);
+	// refresh the affected snapshots.
+	if sink, ok := m.Source.(symbolSink); ok {
+		sink.SetSymbols(s, nil)
 		m.syncStack()
+		m.syncDisasm()
 	}
 	return m
 }
@@ -531,11 +541,13 @@ func (m Model) WithSourceMap(sm *symbols.SourceMap) Model {
 	m.PCToSrc = sm.PCToSrc
 	m.SourceFiles = sm.Files
 	m.DataRanges = sm.DataRanges
-	// Push the source map into the in-process DAP server so local-mode
-	// stackTrace frames carry source lines (issue #449); refresh the cache.
-	if ls, ok := m.Source.(*LocalSource); ok {
-		ls.SetSymbols(nil, sm)
+	// Push the source map into the in-process DAP server so stackTrace frames
+	// carry source lines (#449) and disassemble renders data ranges as `.byte`
+	// + carries source lines (#452); refresh the affected snapshots.
+	if sink, ok := m.Source.(symbolSink); ok {
+		sink.SetSymbols(nil, sm)
 		m.syncStack()
+		m.syncDisasm()
 	}
 	return m
 }
@@ -884,10 +896,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Status = "stack: raw bytes"
 			}
 		}
-		m.syncRegs()  // refresh the DAP-sourced Registers panel after key actions
-		m.syncStack() // refresh the DAP-sourced Stack panel after key actions
-		m.syncFlags() // refresh the DAP-sourced Flags panel after key actions
-		m.syncMem()   // refresh the DAP-sourced Memory panel after key actions
+		m.syncRegs()   // refresh the DAP-sourced Registers panel after key actions
+		m.syncStack()  // refresh the DAP-sourced Stack panel after key actions
+		m.syncFlags()  // refresh the DAP-sourced Flags panel after key actions
+		m.syncMem()    // refresh the DAP-sourced Memory panel after key actions
+		m.syncDisasm() // refresh the DAP-sourced Disassembly panel after key actions
 		return m, m.scheduleTick()
 
 	case dapEventMsg:
@@ -913,16 +926,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				m.refreshMemWindow() // keep the Memory panel live during a remote run (#451)
+				m.syncDisasm()       // follow the streamed PC in the Disassembly panel (#452)
 			}
 		case "stopped":
 			wasRunning := m.Running
 			m.Running = false
 			_ = m.Source.RefreshRegs()
 			_ = m.Source.RefreshMemory()
-			m.syncRegs()  // pull post-stop regs into the snapshot the panel renders
-			m.syncStack() // and the post-stop stack frames (issue #449)
-			m.syncFlags() // and the post-stop P-flag bits (issue #450)
-			m.syncMem()   // and the post-stop memory window (issue #451)
+			m.syncRegs()   // pull post-stop regs into the snapshot the panel renders
+			m.syncStack()  // and the post-stop stack frames (issue #449)
+			m.syncFlags()  // and the post-stop P-flag bits (issue #450)
+			m.syncMem()    // and the post-stop memory window (issue #451)
+			m.syncDisasm() // and the post-stop disassembly window (issue #452)
 			// Only overwrite Status when we were running — single
 			// step paths have their own "stepped" / "hit bp"
 			// messages and don't want this generic one stomping
@@ -972,10 +987,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		m.syncRegs()  // refresh the DAP-sourced Registers panel once per tick
-		m.syncStack() // refresh the DAP-sourced Stack panel once per tick
-		m.syncFlags() // refresh the DAP-sourced Flags panel once per tick
-		m.syncMem()   // refresh the DAP-sourced Memory panel once per tick
+		m.syncRegs()   // refresh the DAP-sourced Registers panel once per tick
+		m.syncStack()  // refresh the DAP-sourced Stack panel once per tick
+		m.syncFlags()  // refresh the DAP-sourced Flags panel once per tick
+		m.syncMem()    // refresh the DAP-sourced Memory panel once per tick
+		m.syncDisasm() // refresh the DAP-sourced Disassembly panel once per tick
 		return m, m.scheduleTick()
 	}
 	return m, nil
@@ -1995,101 +2011,61 @@ func (m Model) disasmView(w, h int) string {
 		rows = 1
 	}
 
-	var lookup cpu.SymLookup
-	if m.Syms != nil {
-		lookup = m.Syms.Lookup
+	// Window comes from the DAP-sourced snapshot (issue #452); position the
+	// anchor ~1/3 down the viewport. Anchor = PC when following, else pinned.
+	pc := m.Regs.PC
+	above := rows / 3
+	lines := m.Disasm.Lines
+
+	// Locate the anchor line so the slice keeps it ~1/3 down the panel.
+	ai := 0
+	for i, ln := range lines {
+		if ln.addr == m.Disasm.Anchor {
+			ai = i
+			break
+		}
+	}
+	start := ai - above
+	if start < 0 {
+		start = 0
 	}
 
-	// Build a list of instruction addresses spanning a window around the
-	// anchor. Anchor = PC when following; otherwise user-pinned address.
-	pc := m.CPU.PC
-	above := rows / 3 // keep ~1/3 of viewport above the current line
-	below := rows - above - 1
-
-	anchor := pc
-	if !m.DisasmFollow {
-		anchor = m.DisasmAnchor
-	}
-
-	addrs := m.cachedDisasmAddrs(anchor, above, below)
-
-	// Render.
 	var b strings.Builder
 	written := 0
-	for _, a := range addrs {
+	for _, ln := range lines[start:] {
 		if written >= rows {
 			break
 		}
 		// Symbol label line (doesn't count as an instruction; show inline).
-		if m.Syms != nil {
-			if name := m.Syms.Lookup(a); name != "" {
-				b.WriteString(labelStyle.Render(name+":") + "\n")
-				written++
-				if written >= rows {
-					break
-				}
+		if ln.symbol != "" {
+			b.WriteString(labelStyle.Render(ln.symbol+":") + "\n")
+			written++
+			if written >= rows {
+				break
 			}
-		}
-		text, _ := cpu.DisasmCPUWithSyms(m.CPU, a, lookup)
-		if m.isDataAddr(a) {
-			text = fmt.Sprintf(".byte $%02X", m.RAM.Read(a))
 		}
 		// Marker column: PC cursor wins, then breakpoint sigil, else blank.
 		// Wide emoji (2 cells) consumes the marker slot; we drop the leading
 		// space to keep the address column aligned with non-PC rows.
 		var marker string
-		switch a {
+		switch ln.addr {
 		case pc:
 			marker = "\U0001F449"
 		default:
-			if bp, ok := m.Breakpoints[a]; ok {
+			if bp, ok := m.Breakpoints[ln.addr]; ok {
 				marker = bp.marker()
 			} else {
 				marker = "  "
 			}
 		}
-		line := fmt.Sprintf("%s %s  %s", marker, dimAddr.Render(fmt.Sprintf("$%04X", a)), text)
-		if a == pc {
+		line := fmt.Sprintf("%s %s  %s", marker, dimAddr.Render(fmt.Sprintf("$%04X", ln.addr)), ln.text)
+		if ln.addr == pc {
 			line = curLine.Render(line)
 		}
 		b.WriteString(line + "\n")
 		written++
 	}
 	return fitPanel("Disassembly", strings.TrimRight(b.String(), "\n"), w, h)
-}
-
-// disasmAddrsAround returns a list of instruction start addresses such that
-// `pc` appears at position `above` in the list (or earlier near the bottom of
-// memory). The list contains up to above+1+below entries.
-//
-// 6502 has variable-length instructions, so backwards disasm is approximate.
-// We scan forward from pc-MaxLook with a step-of-1 candidate, and pick the
-// alignment that produces the longest contiguous decode that lands exactly on
-// pc. This works well for normal code; it can mis-align in data regions, but
-// the worst case is a few wrong lines at the top of the window.
-func disasmAddrsAround(c *cpu.CPU, pc uint16, above, below int, isData func(uint16) bool) []uint16 {
-	// Walk back collecting instruction starts.
-	back := walkBack(c, pc, above)
-	addrs := append([]uint16{}, back...)
-	addrs = append(addrs, pc)
-	// Walk forward from PC.
-	cur := pc
-	for i := 0; i < below; i++ {
-		var step uint32
-		if isData != nil && isData(cur) {
-			step = 1
-		} else {
-			_, n := cpu.DisasmCPUWithSyms(c, cur, nil)
-			step = uint32(n)
-		}
-		next := uint32(cur) + step
-		if next > 0xFFFF {
-			break
-		}
-		cur = uint16(next)
-		addrs = append(addrs, cur)
-	}
-	return addrs
 }
 
 // walkBack returns up to `n` instruction-start addresses immediately preceding
@@ -2103,24 +2079,6 @@ func disasmAddrsAround(c *cpu.CPU, pc uint16, above, below int, isData func(uint
 func walkBack(c *cpu.CPU, pc uint16, n int) []uint16 {
 	return cpu.WalkBack(c, pc, n)
 }
-
-// cachedDisasmAddrs wraps disasmAddrsAround with a one-entry cache. While the
-// CPU is running at high Hz, this view is repainted ~60x/sec; recomputing
-// walkBack each frame is wasteful when the anchor hasn't moved. The cache is
-// package-level because View() takes a value receiver and can't mutate m.
-func (m Model) cachedDisasmAddrs(anchor uint16, above, below int) []uint16 {
-	if disasmCacheGlobal.addrs != nil &&
-		disasmCacheGlobal.anchor == anchor &&
-		disasmCacheGlobal.above == above &&
-		disasmCacheGlobal.below == below {
-		return disasmCacheGlobal.addrs
-	}
-	addrs := disasmAddrsAround(m.CPU, anchor, above, below, m.isDataAddr)
-	disasmCacheGlobal = disasmCacheEntry{anchor: anchor, above: above, below: below, addrs: addrs}
-	return addrs
-}
-
-var disasmCacheGlobal disasmCacheEntry
 
 // isDataAddr reports whether addr is inside a known data segment from .dbg.
 func (m Model) isDataAddr(addr uint16) bool {

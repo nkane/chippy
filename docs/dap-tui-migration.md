@@ -86,8 +86,24 @@ generic client uses. Disassembly and memory panels already have
   WBus/CPU bus) is unchanged; remote writes are #454. `m.RAM` stays the
   render-backing mirror; the change is the panel reads its window through the
   Source.
+- **Disassembly** (#452) — `disassemble`. `Source.Disassemble()` / `fetchDisasm`
+  / `m.syncDisasm()` / `DisasmSnapshot` (instruction lines + anchor). `disasmView`
+  renders text/symbol from the snapshot, applying its own PC/breakpoint markers
+  and styling; the `walkBack`/`disasmAddrsAround` render path and its cache are
+  gone. The server's `disassemble` now renders source-map data ranges as
+  `.byte $XX` (step 1) so it matches the panel for any client. Both Sources own
+  an inproc DAP server — LocalSource on the live core, **RemoteSource on its
+  mirror** — so disasm follows the streamed PC during a remote run with no
+  per-tick wire round-trip (the mirror is current via chippy-state regs + #440
+  dirtyRanges). Symbols/source-map are pushed into both via the `symbolSink`
+  interface. Residual for #461: `disasmScroll`'s anchor navigation still calls
+  `cpu.WalkBack`/`cpu.DisasmWithSyms` on the mirror — not the render path.
 
-**Next:** disassembly panel → `disassemble`, #452.
+## Status: complete
+
+All five panels (registers, stack, flags, memory, disassembly) are DAP-sourced.
+The in-process direct render path is dead code; **#461** flips the default to
+DAP-only and deletes it (the v2.0 arc, now in v1.7).
 
 ## Cost
 
