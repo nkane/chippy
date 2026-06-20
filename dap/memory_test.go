@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/nkane/chippy/symbols"
 )
 
 func TestMem_DisassembleForward(t *testing.T) {
@@ -26,6 +28,34 @@ func TestMem_DisassembleForward(t *testing.T) {
 		`"instructionBytes":"EA"`,
 		`"address":"$8003"`,
 		`"instructionBytes":"4C 00 80"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected %s in body:\n%s", want, body)
+		}
+	}
+}
+
+func TestMem_DisassembleDataRangeAsBytes(t *testing.T) {
+	// $8000-$8001 is a data range; $8002 is code (NOP). Data bytes render as
+	// `.byte $XX` one-per-line; the walk steps by 1 through the range (#452).
+	s, _, out := newStoppedServer(t, []byte{0xA9, 0x42, 0xEA}) // would decode as LDA #$42 ; NOP
+	s.srcMap = &symbols.SourceMap{
+		PCToSrc:    map[uint16]symbols.SrcLoc{},
+		DataRanges: []symbols.Range{{Start: 0x8000, End: 0x8002}},
+	}
+
+	req := Request{
+		ProtocolMessage: ProtocolMessage{Seq: 1, Type: "request"},
+		Command:         "disassemble",
+		Arguments:       json.RawMessage(`{"memoryReference":"$8000","instructionCount":3}`),
+	}
+	s.handleDisassemble(req)
+
+	body := out.String()
+	for _, want := range []string{
+		`"address":"$8000"`, `.byte $A9`,
+		`"address":"$8001"`, `.byte $42`,
+		`"address":"$8002"`, `NOP`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected %s in body:\n%s", want, body)

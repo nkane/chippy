@@ -12,6 +12,7 @@ import (
 
 	"github.com/nkane/chippy/cpu"
 	"github.com/nkane/chippy/dap"
+	"github.com/nkane/chippy/symbols"
 )
 
 // remoteThreadID is the conventional DAP thread ID chippy's server
@@ -45,6 +46,15 @@ type RemoteSource struct {
 	stopped  chan dap.Event
 	external chan dap.Event
 	closed   atomic.Bool
+
+	// mirrorClient is an in-process DAP server+client attached to the mirror
+	// CPU/RAM, used to disassemble the local mirror (issue #452). The mirror
+	// stays current via streamed regs (chippy-state) + memory (readMemory on
+	// stop, #440 dirtyRanges during a run), so the disasm panel renders DAP
+	// instructions without a per-tick wire round-trip — matching how
+	// LocalSource disassembles the live core.
+	mirrorClient *dap.InprocClient
+	mirrorServer *dap.Server
 }
 
 // NewRemoteSource wraps a connected `dap.Client` and starts the event
@@ -61,8 +71,31 @@ func NewRemoteSource(client *dap.Client, c *cpu.CPU, r *cpu.RAM, addr string) *R
 		stopped:  make(chan dap.Event, 16),
 		external: make(chan dap.Event, 64),
 	}
+	srv, cl := dap.NewInprocServer()
+	if err := srv.AttachExisting(dap.AttachConfig{CPU: c, RAM: r}); err == nil {
+		s.mirrorClient = cl
+		s.mirrorServer = srv
+	}
 	go s.demuxEvents()
 	return s
+}
+
+// SetSymbols pushes the symbol table + source map into the mirror DAP server
+// so disassemble lines carry symbol labels + data `.byte` rendering in remote
+// mode (issue #452). Called via the Model's WithSymbols / WithSourceMap.
+func (s *RemoteSource) SetSymbols(syms *symbols.Table, srcMap *symbols.SourceMap) {
+	if s.mirrorServer != nil {
+		s.mirrorServer.SetSymbols(syms, srcMap)
+	}
+}
+
+// Disassemble renders instructions around anchor from the mirror via the
+// in-process DAP server (issue #452).
+func (s *RemoteSource) Disassemble(anchor uint16, above, below int) (DisasmSnapshot, error) {
+	if s.mirrorClient == nil {
+		return DisasmSnapshot{}, fmt.Errorf("remote source: no mirror dap client")
+	}
+	return fetchDisasm(s.mirrorClient, anchor, above, below)
 }
 
 // Events returns the TUI-facing event stream. The TUI subscribes via a

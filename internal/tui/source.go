@@ -120,6 +120,13 @@ type Source interface {
 	// current by RefreshMemory on stop + #440 dirtyRanges during a run), so
 	// a remote free-run needs no per-frame round-trip.
 	ReadMemory(addr uint16, count int) ([]byte, error)
+
+	// Disassemble returns instruction lines spanning [anchor-above,
+	// anchor+below] via a DAP `disassemble` round-trip — the data path the
+	// disassembly panel renders from (issue #452). LocalSource disassembles
+	// the live core via its inproc server; RemoteSource disassembles the
+	// DAP-fed mirror via its own inproc server (no per-tick wire round-trip).
+	Disassemble(anchor uint16, above, below int) (DisasmSnapshot, error)
 }
 
 // LocalSource is the in-process Source backing the default TUI mode.
@@ -208,6 +215,15 @@ func (s *LocalSource) ReadMemory(addr uint16, count int) ([]byte, error) {
 		return nil, fmt.Errorf("local source: no dap client")
 	}
 	return fetchMem(s.dapClient, addr, count)
+}
+
+// Disassemble renders instructions around anchor through the in-process DAP
+// server attached to the live core (issue #452).
+func (s *LocalSource) Disassemble(anchor uint16, above, below int) (DisasmSnapshot, error) {
+	if s.dapClient == nil {
+		return DisasmSnapshot{}, fmt.Errorf("local source: no dap client")
+	}
+	return fetchDisasm(s.dapClient, anchor, above, below)
 }
 
 // Step advances the CPU one instruction.

@@ -76,8 +76,7 @@ func (s *Server) handleDisassemble(req Request) {
 	for len(instructions) < count {
 		ins := s.disasmOne(addr)
 		instructions = append(instructions, ins)
-		_, n := cpu.DisasmCPU(s.cpu, addr)
-		next := uint32(addr) + uint32(n)
+		next := uint32(addr) + uint32(s.instrLen(addr))
 		if next > 0xFFFF {
 			break
 		}
@@ -90,10 +89,34 @@ func (s *Server) handleDisassemble(req Request) {
 	s.sendResponse(req, body{Instructions: instructions})
 }
 
+// isDataAddr reports whether addr falls in a source-map data range — rendered
+// as a `.byte` literal rather than decoded as an instruction (issue #452, to
+// match the TUI's data-segment display). nil-safe via SourceMap.IsData.
+func (s *Server) isDataAddr(addr uint16) bool {
+	return s.srcMap.IsData(addr)
+}
+
+// instrLen is the byte stride to the next disassembly line at addr: 1 for a
+// data byte, the decoded instruction length otherwise.
+func (s *Server) instrLen(addr uint16) int {
+	if s.isDataAddr(addr) {
+		return 1
+	}
+	_, n := cpu.DisasmCPU(s.cpu, addr)
+	return n
+}
+
 // disasmOne formats one DisassembledInstruction at addr with bytes,
-// symbol, and source location filled in when available.
+// symbol, and source location filled in when available. Data-range addresses
+// render as `.byte $XX` (one byte) instead of a decoded instruction.
 func (s *Server) disasmOne(addr uint16) DisassembledInstruction {
-	text, n := cpu.DisasmCPU(s.cpu, addr)
+	var text string
+	var n int
+	if s.isDataAddr(addr) {
+		text, n = fmt.Sprintf(".byte $%02X", s.peekByte(addr)), 1
+	} else {
+		text, n = cpu.DisasmCPU(s.cpu, addr)
+	}
 	bytesHex := make([]string, n)
 	for j := 0; j < n; j++ {
 		bytesHex[j] = fmt.Sprintf("%02X", s.peekByte(addr+uint16(j)))
