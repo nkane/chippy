@@ -113,6 +113,13 @@ type Source interface {
 	// Flags panel renders from (issue #450). Same transport split as
 	// Registers.
 	Flags() (FlagsSnapshot, error)
+
+	// ReadMemory returns count bytes starting at addr, the data path the
+	// memory panel renders from (issue #451). LocalSource issues an inproc
+	// `readMemory`; RemoteSource serves from its DAP-fed RAM mirror (kept
+	// current by RefreshMemory on stop + #440 dirtyRanges during a run), so
+	// a remote free-run needs no per-frame round-trip.
+	ReadMemory(addr uint16, count int) ([]byte, error)
 }
 
 // LocalSource is the in-process Source backing the default TUI mode.
@@ -191,6 +198,16 @@ func (s *LocalSource) Flags() (FlagsSnapshot, error) {
 		return FlagsSnapshot{}, fmt.Errorf("local source: no dap client")
 	}
 	return fetchFlags(s.dapClient)
+}
+
+// ReadMemory reads a window through the in-process DAP server (issue #451) —
+// the inproc server is attached to the same RAM, so this returns live bytes
+// over the protocol rather than a direct core read.
+func (s *LocalSource) ReadMemory(addr uint16, count int) ([]byte, error) {
+	if s.dapClient == nil {
+		return nil, fmt.Errorf("local source: no dap client")
+	}
+	return fetchMem(s.dapClient, addr, count)
 }
 
 // Step advances the CPU one instruction.

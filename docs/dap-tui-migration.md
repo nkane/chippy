@@ -74,8 +74,20 @@ generic client uses. Disassembly and memory panels already have
   decomposes it client-side via `flagsFromP` — keeping the Flags panel as live
   as Registers without a per-frame round-trip (the Flags scope stays the
   authoritative source on stop).
+- **Memory** (#451) — `readMemory` + #440 `dirtyRanges`. `Source.ReadMemory()`
+  / `fetchMem` / `m.syncMem()` / `m.MemView` (a window snapshot anchored at
+  `MemViewBase`, `memWindow` = 0x400 bytes). `memView` renders `memByte(a)`
+  from the snapshot, never `m.RAM.Read`. Local mode fetches the window via an
+  inproc `readMemory` (same RAM, but over the protocol); remote serves the
+  window from the DAP-fed RAM mirror (reconciled by `RefreshMemory` on stop,
+  updated by `dirtyRanges` during a run), so a remote free-run needs no
+  per-frame round-trip — the `chippy-state` handler calls `refreshMemWindow`
+  after applying the deltas. The memory *editor* write path (`memWrite` →
+  WBus/CPU bus) is unchanged; remote writes are #454. `m.RAM` stays the
+  render-backing mirror; the change is the panel reads its window through the
+  Source.
 
-**Next:** memory panel → `readMemory` + `dirtyRanges`, #451.
+**Next:** disassembly panel → `disassemble`, #452.
 
 ## Cost
 

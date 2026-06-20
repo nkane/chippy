@@ -236,6 +236,13 @@ type Model struct {
 	MemEditing bool
 	MemEditBuf string
 
+	// MemView is the DAP-sourced snapshot of the visible memory window the
+	// panel renders (issue #451); MemViewBase is the address of MemView[0].
+	// Refreshed from the Source (inproc readMemory locally, the DAP-fed
+	// mirror remotely) by m.syncMem — memView no longer reads the core bus.
+	MemView     []byte
+	MemViewBase uint16
+
 	// Reverse-step ring. Each explicit step (s/n/f and their loops) pushes
 	// a pre-step snapshot here so `<` can rewind. Free-run via tickMsg does
 	// NOT push — 64 KiB per snapshot at multi-MHz throughput would dominate
@@ -355,6 +362,7 @@ func New(c *cpu.CPU, r *cpu.RAM) Model {
 	m.syncRegs()  // seed the Registers panel before the first render
 	m.syncStack() // seed the Stack panel before the first render
 	m.syncFlags() // seed the Flags panel before the first render
+	m.syncMem()   // seed the Memory panel before the first render
 	return m
 }
 
@@ -367,6 +375,7 @@ func (m Model) WithSource(s Source) Model {
 	m.syncRegs()
 	m.syncStack()
 	m.syncFlags()
+	m.syncMem()
 	return m
 }
 
@@ -878,6 +887,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncRegs()  // refresh the DAP-sourced Registers panel after key actions
 		m.syncStack() // refresh the DAP-sourced Stack panel after key actions
 		m.syncFlags() // refresh the DAP-sourced Flags panel after key actions
+		m.syncMem()   // refresh the DAP-sourced Memory panel after key actions
 		return m, m.scheduleTick()
 
 	case dapEventMsg:
@@ -902,6 +912,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.RAM.Load(r.Start, r.Data)
 					}
 				}
+				m.refreshMemWindow() // keep the Memory panel live during a remote run (#451)
 			}
 		case "stopped":
 			wasRunning := m.Running
@@ -911,6 +922,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncRegs()  // pull post-stop regs into the snapshot the panel renders
 			m.syncStack() // and the post-stop stack frames (issue #449)
 			m.syncFlags() // and the post-stop P-flag bits (issue #450)
+			m.syncMem()   // and the post-stop memory window (issue #451)
 			// Only overwrite Status when we were running — single
 			// step paths have their own "stepped" / "hit bp"
 			// messages and don't want this generic one stomping
@@ -963,6 +975,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncRegs()  // refresh the DAP-sourced Registers panel once per tick
 		m.syncStack() // refresh the DAP-sourced Stack panel once per tick
 		m.syncFlags() // refresh the DAP-sourced Flags panel once per tick
+		m.syncMem()   // refresh the DAP-sourced Memory panel once per tick
 		return m, m.scheduleTick()
 	}
 	return m, nil
@@ -2405,7 +2418,7 @@ func (m Model) memView(w, h int) string {
 		var ascii strings.Builder
 		for col := 0; col < 16; col++ {
 			a := base + uint16(col)
-			v := m.RAM.Read(a)
+			v := m.memByte(a)
 			byteStr := fmt.Sprintf("%02X", v)
 			cell := " " + byteStr
 
