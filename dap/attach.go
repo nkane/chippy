@@ -86,6 +86,21 @@ func (s *Server) AttachExisting(cfg AttachConfig) error {
 	return nil
 }
 
+// SetSymbols updates the server's symbol table + source map after attach.
+// The TUI's in-process LocalSource (issue #449) builds its server in New —
+// before the symbols are loaded via the WithSymbols / WithSourceMap builders
+// — so it pushes them in afterwards, letting stackTrace frames carry callee
+// names and source lines in local mode. Safe only before Serve()/dispatch
+// races (the inproc client is synchronous and wired during construction).
+func (s *Server) SetSymbols(syms *symbols.Table, srcMap *symbols.SourceMap) {
+	if syms != nil {
+		s.syms = syms
+	}
+	if srcMap != nil {
+		s.srcMap = srcMap
+	}
+}
+
 // handleAttach acknowledges an editor's attach request. v1 supports
 // only the "attach to the debuggee already wired by AttachExisting"
 // flow. Cross-process attach (a separate chippy connecting to a

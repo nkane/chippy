@@ -58,6 +58,14 @@ func TestVars_StackTraceWalksJSRFrames(t *testing.T) {
 			t.Errorf("expected frame ref %s in body:\n%s", want, body)
 		}
 	}
+	// The two JSR-pair frames carry their stack-page slot (issue #449); frame
+	// 0 (the live PC) does not. After two JSRs the return pairs sit near the
+	// top of the page: $01FC (outer, ret $8003) and $01FA (inner, ret $9003).
+	for _, want := range []string{`"chippyStackAddr":"$01FC"`, `"chippyStackAddr":"$01FA"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected %s in body:\n%s", want, body)
+		}
+	}
 }
 
 func TestVars_Scopes(t *testing.T) {

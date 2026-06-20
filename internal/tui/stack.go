@@ -2,13 +2,93 @@ package tui
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-
-	"github.com/nkane/chippy/cpu"
 )
+
+// StackSnapshot is the stack-page frame data the Stack panel renders, sourced
+// via a DAP `stackTrace` round-trip (issue #449) — the panel no longer walks
+// cpu.RAM with DetectStackFrame itself. Frames carry the stack-page slot,
+// return address, callee symbol, and source line; the raw bytes between frames
+// still come from the (DAP-fed) RAM mirror. Local mode round-trips an
+// in-process DAP server (sub-microsecond, #393); remote reuses the attach
+// client.
+type StackSnapshot struct {
+	Frames []stackFrame
+}
+
+// stackFrame is one detected JSR return-address pair from the stackTrace
+// response, in ascending stack-page order.
+type stackFrame struct {
+	addrLo  uint16 // low addr in the $0100 page where the pushed pair begins
+	retAddr uint16 // cooked return address (stored + 1)
+	callee  string // symbol at the JSR target, "" if unknown
+	src     string // "file.s:NN" covering retAddr, "" if no source map
+}
+
+// fetchStack issues one `stackTrace` request and parses the chippy stack-page
+// frames out of the response (issue #449). Frame 0 (the live PC) is not a
+// stack-page entry, so it's filtered by the empty ChippyStackAddr.
+// Transport-agnostic: remarshal handles both the wire client's JSON body and
+// the inproc client's struct.
+func fetchStack(c dapRequester) (StackSnapshot, error) {
+	resp, err := c.Request("stackTrace", map[string]any{"threadId": 1})
+	if err != nil {
+		return StackSnapshot{}, err
+	}
+	if !resp.Success {
+		return StackSnapshot{}, fmt.Errorf("stackTrace: %s", resp.Message)
+	}
+	var sb struct {
+		StackFrames []struct {
+			InstructionPointerReference string `json:"instructionPointerReference"`
+			ChippyStackAddr             string `json:"chippyStackAddr"`
+			ChippyCallee                string `json:"chippyCallee"`
+			Line                        int    `json:"line"`
+			Source                      *struct {
+				Name string `json:"name"`
+			} `json:"source"`
+		} `json:"stackFrames"`
+	}
+	if err := remarshal(resp.Body, &sb); err != nil {
+		return StackSnapshot{}, fmt.Errorf("stackTrace body: %w", err)
+	}
+	var ss StackSnapshot
+	for _, f := range sb.StackFrames {
+		if f.ChippyStackAddr == "" {
+			continue // frame 0 = live PC, not a stack-page entry
+		}
+		addrLo, ok := parseDollarHex16(f.ChippyStackAddr)
+		if !ok {
+			continue
+		}
+		ret, _ := parseDollarHex16(f.InstructionPointerReference)
+		fr := stackFrame{addrLo: addrLo, retAddr: ret, callee: f.ChippyCallee}
+		if f.Source != nil && f.Line > 0 {
+			fr.src = fmt.Sprintf("%s:%d", f.Source.Name, f.Line)
+		}
+		ss.Frames = append(ss.Frames, fr)
+	}
+	return ss, nil
+}
+
+// syncStack refreshes m.Stack from the active Source via a DAP stackTrace
+// round-trip (issue #449). Mirrors syncRegs: skipped during a remote free-run
+// (the server owns the CPU and the stopped event reconciles), polled every
+// tick locally through the sub-microsecond inproc client. stackView renders
+// the cached snapshot, so View stays pure.
+func (m *Model) syncStack() {
+	if m.Source == nil {
+		return
+	}
+	if m.Running && m.Source.Attached() {
+		return
+	}
+	if ss, err := m.Source.Stack(); err == nil {
+		m.Stack = ss
+	}
+}
 
 // stackEntry is one row in the annotated stack panel. A frame represents the
 // two-byte JSR return-address pair pushed at addrLo / addrLo+1; a run is a
@@ -22,21 +102,24 @@ type stackEntry struct {
 	src     string // frame only — "file.s:NN" if a source map covers retAddr
 }
 
-// detectStackFrame is the TUI-side alias for cpu.DetectStackFrame; thin
-// wrapper kept so existing call sites (and tests) don't grow extra import
-// noise. The actual heuristic lives in the cpu package so the DAP server
-// can share it without depending on tui.
-func detectStackFrame(ram *cpu.RAM, spLo uint16) (retAddr, target uint16, ok bool) {
-	return cpu.DetectStackFrame(ram, spLo)
-}
-
-// stackEntries walks upward from SP+1 building rendered rows for the stack
-// panel. Frame rows consume two bytes; runs of non-frame bytes are
-// collapsed into a single row per contiguous run. Stops at the panel-row
-// budget or at the top of the stack page ($01FF).
+// stackEntries interleaves the DAP-sourced frames (m.Stack) with the runs of
+// non-frame bytes between them, walking upward from SP+1 to the top of the
+// stack page. Frame rows consume two bytes; consecutive non-frame bytes are
+// collapsed into a single run row. Stops at the panel-row budget or $01FF.
+//
+// The frames come from a `stackTrace` round-trip (issue #449) — the panel no
+// longer runs cpu.DetectStackFrame / symbol / source-map lookups itself; it
+// only positions the snapshot frames over the stack page and renders the
+// gaps as runs (raw bytes still read from the DAP-fed RAM mirror).
 func (m Model) stackEntries(maxRows int) []stackEntry {
 	out := make([]stackEntry, 0, maxRows)
-	a := uint16(m.CPU.SP) + 1
+	// Frames are only surfaced when annotation is on; otherwise the whole
+	// window collapses into runs.
+	var frames []stackFrame
+	if m.StackAnnotate {
+		frames = m.Stack.Frames
+	}
+	cursor := uint16(0x0100) | (uint16(m.Regs.SP) + 1)
 	runStart := uint16(0)
 	runLen := 0
 	flushRun := func() {
@@ -46,36 +129,37 @@ func (m Model) stackEntries(maxRows int) []stackEntry {
 		out = append(out, stackEntry{addrLo: runStart, bytes: runLen})
 		runLen = 0
 	}
-	for a <= 0xFF && len(out) < maxRows {
-		sp := uint16(0x0100) | a
-		if m.StackAnnotate {
-			if ret, target, ok := detectStackFrame(m.RAM, sp); ok && len(out) < maxRows {
-				flushRun()
-				if len(out) >= maxRows {
-					break
-				}
-				e := stackEntry{
-					isFrame: true,
-					addrLo:  sp,
-					bytes:   2,
-					retAddr: ret,
-				}
-				if m.Syms != nil {
-					e.callee = m.Syms.Lookup(target)
-				}
-				if loc, ok := m.PCToSrc[ret]; ok {
-					e.src = fmt.Sprintf("%s:%d", filepath.Base(loc.File), loc.Line)
-				}
-				out = append(out, e)
-				a += 2
-				continue
+	fi := 0
+	for cursor <= 0x01FF && len(out) < maxRows {
+		// Skip any frame that starts below the live stack top (shouldn't
+		// happen — the server walks from the same SP — but stay defensive
+		// so a stale snapshot can't wedge the cursor).
+		for fi < len(frames) && frames[fi].addrLo < cursor {
+			fi++
+		}
+		if fi < len(frames) && frames[fi].addrLo == cursor {
+			flushRun()
+			if len(out) >= maxRows {
+				break
 			}
+			f := frames[fi]
+			out = append(out, stackEntry{
+				isFrame: true,
+				addrLo:  f.addrLo,
+				bytes:   2,
+				retAddr: f.retAddr,
+				callee:  f.callee,
+				src:     f.src,
+			})
+			fi++
+			cursor += 2
+			continue
 		}
 		if runLen == 0 {
-			runStart = sp
+			runStart = cursor
 		}
 		runLen++
-		a++
+		cursor++
 	}
 	flushRun()
 	// flushRun may have pushed past maxRows by one — trim.
@@ -103,7 +187,7 @@ func (m Model) stackView(w, h int) string {
 
 	if !m.StackAnnotate {
 		for i := 0; i < rows; i++ {
-			spByte := uint16(m.CPU.SP) + 1 + uint16(i)
+			spByte := uint16(m.Regs.SP) + 1 + uint16(i)
 			if spByte > 0xFF {
 				break
 			}

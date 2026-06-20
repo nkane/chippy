@@ -204,6 +204,12 @@ func (s *RemoteSource) Registers() (RegSnapshot, error) {
 	return rs, nil
 }
 
+// Stack reads the stack-page frame snapshot over the attach client (issue
+// #449).
+func (s *RemoteSource) Stack() (StackSnapshot, error) {
+	return fetchStack(s.client)
+}
+
 // RefreshMemory pulls the full CPU-bus memory ($0000-$FFFF) via DAP
 // `readMemory` and writes it into the mirror's RAM so display panels
 // (disasm, memory) render correct values. Called once on attach and
