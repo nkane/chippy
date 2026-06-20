@@ -140,6 +140,7 @@ func (s *Server) installDirtyHook() {
 		clear(s.dirty)
 	}
 	s.dirtyLo, s.dirtyHi = 0x10000, -1
+	s.dataBPPending = false // don't carry a prior run's watchpoint hit into this one
 	s.prevAccessHook = s.cpu.AccessHook()
 	prev := s.prevAccessHook
 	s.cpu.SetAccessHook(func(addr uint16, kind cpu.AccessKind) {
@@ -154,6 +155,16 @@ func (s *Server) installDirtyHook() {
 			}
 			if a > s.dirtyHi {
 				s.dirtyHi = a
+			}
+		}
+		// Data breakpoints (issue #453): flag a watched read/write; runLoopIter
+		// evaluates the meta and stops after the instruction completes. Reads
+		// dataBPs unlocked — it's only mutated by setDataBreakpoints while the
+		// run loop is stopped (no live hook), and the read runs under cpuMu.
+		if len(s.dataBPs) != 0 {
+			if bp := s.dataBPs[addr]; bp != nil && bp.matches(kind) {
+				s.dataBPPending = true
+				s.dataBPHitAddr = addr
 			}
 		}
 	})
@@ -218,6 +229,19 @@ func (s *Server) runLoopIter() (string, string) {
 	// post-step under cpuMu so the host sees the just-advanced state.
 	if s.stopPredicate != nil && s.stopPredicate() {
 		return "stop", "step"
+	}
+	// Data breakpoint (issue #453): the access hook flagged a watched
+	// read/write during the step just taken. Evaluate condition/hit/log; fire
+	// a stop unless the meta says otherwise (false condition / logpoint).
+	if s.dataBPPending {
+		s.dataBPPending = false
+		fire, logLine := s.shouldFireBP(s.dataBPMeta(s.dataBPHitAddr))
+		if logLine != "" {
+			s.sendEvent("output", outputEventBody{Category: "console", Output: logLine + "\n"})
+		}
+		if fire {
+			return "stop", "data breakpoint"
+		}
 	}
 	if s.isBreakpoint(s.cpu.PC) {
 		meta := s.lookupBPMeta(s.cpu.PC)

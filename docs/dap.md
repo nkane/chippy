@@ -126,6 +126,8 @@ require("dap").adapters.chippy = {
 | `setBreakpoints`                 | #49, #81 | Source-line bps resolved through the `.dbg` source map. Honors `condition` / `hitCondition` (integer) / `logMessage` (with `{expr}` interpolation). |
 | `setInstructionBreakpoints`      | #49, #81 | Address bps (`$XX`, `0xXX`, decimal). Same modifier support as source bps. |
 | `setFunctionBreakpoints`         | #82, #81 | Symbol-name bps via `syms.LookupName`. Same modifier support. |
+| `dataBreakpointInfo`             | #453  | Resolves a hex/decimal address or symbol name to a data-breakpoint id (`$XXXX`); reports read/write/readWrite access types. |
+| `setDataBreakpoints`             | #453  | Memory watchpoints. The run loop's `AccessWrite`/`AccessRead` hook (chained with the #440 dirty hook) flags a watched access; the run stops with reason `data breakpoint` after the instruction completes. `accessType` defaults to write; `condition`/`hitCondition` reuse the instruction-bp meta. |
 | `loadedSources`                  | #84   | Lists every file the loaded `.dbg` references. |
 | `source`                         | #84   | Returns file contents for a previously-listed Source. Basename-matches if the client passes an absolute path. |
 | `disassemble`                    | #51, #80 | Variant-aware via `cpu.DisasmCPU`. Negative `instructionOffset` resolves via `cpu.WalkBack` for pre-context. |
