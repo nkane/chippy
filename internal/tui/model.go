@@ -2068,66 +2068,37 @@ func (m Model) disasmView(w, h int) string {
 	return fitPanel("Disassembly", strings.TrimRight(b.String(), "\n"), w, h)
 }
 
-// walkBack returns up to `n` instruction-start addresses immediately preceding
-// `pc`, in ascending order. Strategy: try every starting offset 1..MaxLook
-// behind pc; the alignment that decodes cleanly all the way to pc with the
-// most instructions wins.
-// walkBack is a thin wrapper around cpu.WalkBack — kept so existing call
-// sites (in this file and disasmAddrsAround) don't need a per-call
-// package prefix. The actual heuristic lives in internal/cpu so the DAP
-// server's disassemble handler can share it.
-func walkBack(c *cpu.CPU, pc uint16, n int) []uint16 {
-	return cpu.WalkBack(c, pc, n)
-}
-
-// isDataAddr reports whether addr is inside a known data segment from .dbg.
-func (m Model) isDataAddr(addr uint16) bool {
-	if _, ok := m.PCToSrc[addr]; ok {
-		return false
-	}
-	for _, r := range m.DataRanges {
-		if addr >= r.Start && addr < r.End {
-			return true
-		}
-	}
-	return false
-}
-
-// disasmScroll moves the disasm anchor by `delta` instructions (sign matters).
-// Switches the panel into pinned mode so it stops following PC.
+// disasmScroll moves the disassembly anchor by delta instruction lines using
+// the DAP-sourced snapshot (issue #461) — no direct cpu.WalkBack /
+// cpu.DisasmWithSyms. The snapshot is centered on the anchor and re-fetched by
+// syncDisasm after this key action, so consecutive scrolls keep fresh context;
+// scrolling past the fetched window clamps to its edge and the next refetch
+// re-centers there.
 func (m *Model) disasmScroll(delta int) {
 	if m.DisasmFollow {
 		// First scroll: pin to current PC, then move from there.
-		m.DisasmAnchor = m.CPU.PC
+		m.DisasmAnchor = m.Regs.PC
 		m.DisasmFollow = false
 	}
-	a := m.DisasmAnchor
-	if delta > 0 {
-		for i := 0; i < delta; i++ {
-			var step uint32
-			if m.isDataAddr(a) {
-				step = 1
-			} else {
-				_, sz := cpu.DisasmWithSyms(m.RAM, a, nil)
-				step = uint32(sz)
-			}
-			next := uint32(a) + step
-			if next > 0xFFFF {
-				break
-			}
-			a = uint16(next)
-		}
-	} else if delta < 0 {
-		// Walk back |delta| instructions using same heuristic as walkBack.
-		back := walkBack(m.CPU, a, -delta)
-		if len(back) > 0 {
-			a = back[0]
-		} else if a > 0 {
-			a-- // best-effort fall-through
+	lines := m.Disasm.Lines
+	ai := -1
+	for i, ln := range lines {
+		if ln.addr == m.DisasmAnchor {
+			ai = i
+			break
 		}
 	}
-	m.DisasmAnchor = a
-	m.Status = fmt.Sprintf("disasm @ $%04X (' to follow PC)", a)
+	if ai >= 0 {
+		ni := ai + delta
+		if ni < 0 {
+			ni = 0
+		}
+		if ni >= len(lines) {
+			ni = len(lines) - 1
+		}
+		m.DisasmAnchor = lines[ni].addr
+	}
+	m.Status = fmt.Sprintf("disasm @ $%04X (' to follow PC)", m.DisasmAnchor)
 }
 
 // sourceScroll moves the source anchor by `delta` lines (sign matters).
