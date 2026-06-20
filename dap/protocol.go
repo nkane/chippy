@@ -78,6 +78,7 @@ type Capabilities struct {
 	SupportsReadMemoryRequest          bool `json:"supportsReadMemoryRequest"`
 	SupportsWriteMemoryRequest         bool `json:"supportsWriteMemoryRequest"`
 	SupportsInstructionBreakpoints     bool `json:"supportsInstructionBreakpoints"`
+	SupportsDataBreakpoints            bool `json:"supportsDataBreakpoints"`
 	SupportsSteppingGranularity        bool `json:"supportsSteppingGranularity"`
 	SupportsLogPoints                  bool `json:"supportsLogPoints"`
 	SupportsDelayedStackTraceLoading   bool `json:"supportsDelayedStackTraceLoading"`
@@ -289,6 +290,41 @@ type FunctionBreakpoint struct {
 // SetFunctionBreakpointsArguments — replace ALL symbol-name breakpoints.
 type SetFunctionBreakpointsArguments struct {
 	Breakpoints []FunctionBreakpoint `json:"breakpoints"`
+}
+
+// DataBreakpointAccessType is the access that triggers a data breakpoint
+// (watchpoint): a read, a write, or either. Mirrors the TUI's MemBP kinds.
+type DataBreakpointAccessType string
+
+const (
+	DataAccessRead      DataBreakpointAccessType = "read"
+	DataAccessWrite     DataBreakpointAccessType = "write"
+	DataAccessReadWrite DataBreakpointAccessType = "readWrite"
+)
+
+// DataBreakpointInfoArguments resolves a memory reference / symbol to a
+// data-breakpoint id the client then passes to setDataBreakpoints. chippy
+// accepts a hex address ("$XXXX" / "0xXX"), a decimal address, or a loaded
+// symbol name in Name; VariablesReference is ignored (memory is global).
+type DataBreakpointInfoArguments struct {
+	VariablesReference int    `json:"variablesReference,omitempty"`
+	Name               string `json:"name"`
+	FrameID            int    `json:"frameId,omitempty"`
+}
+
+// DataBreakpoint is one watchpoint in a setDataBreakpoints request. DataID is
+// the id returned by dataBreakpointInfo ("$XXXX" for chippy). AccessType
+// defaults to write when empty.
+type DataBreakpoint struct {
+	DataID       string                   `json:"dataId"`
+	AccessType   DataBreakpointAccessType `json:"accessType,omitempty"`
+	Condition    string                   `json:"condition,omitempty"`
+	HitCondition string                   `json:"hitCondition,omitempty"`
+}
+
+// SetDataBreakpointsArguments — replace ALL data breakpoints (watchpoints).
+type SetDataBreakpointsArguments struct {
+	Breakpoints []DataBreakpoint `json:"breakpoints"`
 }
 
 // Breakpoint is what `setBreakpoints` / `setInstructionBreakpoints`

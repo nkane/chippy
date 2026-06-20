@@ -101,6 +101,16 @@ type Server struct {
 	bpMetaByName map[string]*bpMeta         // parallel to bpsByName
 	bpMetaByPC   map[uint16]*bpMeta         // flattened union for run-loop
 
+	// Data-breakpoint (watchpoint) state (issue #453). dataBPs maps a watched
+	// address to its access type + optional condition/hit/log meta. The
+	// run-loop access hook flags a matching read/write into dataBPPending;
+	// runLoopIter then evaluates the meta and stops with reason "data
+	// breakpoint". dataBPs is guarded by bpMu (set while stopped); the hook
+	// reads it under cpuMu during a step.
+	dataBPs       map[uint16]*dataBP
+	dataBPPending bool
+	dataBPHitAddr uint16
+
 	// Reverse-step ring. Populated on every explicit-step request
 	// (stepIn/next/stepOut) and on continue→bp stops. stepBack pops one
 	// snapshot and restores. Same 256-entry ring the TUI uses for `<`.
@@ -273,6 +283,10 @@ func (s *Server) dispatch(req Request) {
 		s.handleSetBreakpoints(req)
 	case "setInstructionBreakpoints":
 		s.handleSetInstructionBreakpoints(req)
+	case "dataBreakpointInfo":
+		s.handleDataBreakpointInfo(req)
+	case "setDataBreakpoints":
+		s.handleSetDataBreakpoints(req)
 	case "setFunctionBreakpoints":
 		s.handleSetFunctionBreakpoints(req)
 	case "breakpointLocations":
@@ -333,6 +347,7 @@ func (s *Server) handleInitialize(req Request) {
 		SupportsReadMemoryRequest:          true,
 		SupportsWriteMemoryRequest:         true,
 		SupportsInstructionBreakpoints:     true,
+		SupportsDataBreakpoints:            true,
 		SupportsLogPoints:                  true,
 		SupportsBreakpointLocationsRequest: true,
 		SupportsLoadedSourcesRequest:       true,
