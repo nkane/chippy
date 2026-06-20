@@ -216,6 +216,18 @@ func (s *RemoteSource) Flags() (FlagsSnapshot, error) {
 	return fetchFlags(s.client)
 }
 
+// ReadMemory serves the memory-panel window from the DAP-fed RAM mirror
+// (issue #451). The mirror is reconciled by RefreshMemory on every stop and
+// updated by #440 dirtyRanges during a run, so the panel needs no per-frame
+// wire round-trip — reading the mirror IS reading DAP-sourced bytes.
+func (s *RemoteSource) ReadMemory(addr uint16, count int) ([]byte, error) {
+	buf := make([]byte, count)
+	for i := 0; i < count; i++ {
+		buf[i] = s.ram.Read(addr + uint16(i))
+	}
+	return buf, nil
+}
+
 // RefreshMemory pulls the full CPU-bus memory ($0000-$FFFF) via DAP
 // `readMemory` and writes it into the mirror's RAM so display panels
 // (disasm, memory) render correct values. Called once on attach and
