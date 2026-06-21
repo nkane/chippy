@@ -10,12 +10,14 @@ import (
 // StackSnapshot is the stack-page frame data the Stack panel renders, sourced
 // via a DAP `stackTrace` round-trip (issue #449) — the panel no longer walks
 // cpu.RAM with DetectStackFrame itself. Frames carry the stack-page slot,
-// return address, callee symbol, and source line; the raw bytes between frames
-// still come from the (DAP-fed) RAM mirror. Local mode round-trips an
-// in-process DAP server (sub-microsecond, #393); remote reuses the attach
-// client.
+// return address, callee symbol, and source line; Page holds the 256 raw
+// stack-page bytes ($0100-$01FF) fetched via DAP `readMemory` so the panel's
+// byte/run rows are DAP-sourced too (issue #461 — no direct m.RAM.Read in the
+// render path). Local mode round-trips an in-process DAP server
+// (sub-microsecond, #393); remote reuses the attach client.
 type StackSnapshot struct {
 	Frames []stackFrame
+	Page   []byte // $0100-$01FF, indexed by (addr & 0xFF)
 }
 
 // stackFrame is one detected JSR return-address pair from the stackTrace
@@ -85,9 +87,26 @@ func (m *Model) syncStack() {
 	if m.Running && m.Source.Attached() {
 		return
 	}
-	if ss, err := m.Source.Stack(); err == nil {
-		m.Stack = ss
+	ss, err := m.Source.Stack()
+	if err != nil {
+		return
 	}
+	// Pull the raw stack page so byte/run rows render DAP-sourced bytes too
+	// (issue #461), not a direct m.RAM.Read.
+	if page, perr := m.Source.ReadMemory(0x0100, 0x100); perr == nil {
+		ss.Page = page
+	}
+	m.Stack = ss
+}
+
+// stackByte returns a stack-page byte ($0100-$01FF) from the DAP-sourced
+// snapshot, falling back to 0 before the first sync.
+func (m Model) stackByte(addr uint16) byte {
+	i := int(addr & 0xFF)
+	if i < len(m.Stack.Page) {
+		return m.Stack.Page[i]
+	}
+	return 0
 }
 
 // stackEntry is one row in the annotated stack panel. A frame represents the
@@ -199,7 +218,7 @@ func (m Model) stackView(w, h int) string {
 			fmt.Fprintf(&b, "%s %s  %02X\n",
 				marker,
 				dimAddr.Render(fmt.Sprintf("$%04X", sp)),
-				m.RAM.Read(sp))
+				m.stackByte(sp))
 		}
 		return fitPanel("Stack", strings.TrimRight(b.String(), "\n"), w, h)
 	}
@@ -228,7 +247,7 @@ func (m Model) stackView(w, h int) string {
 			fmt.Fprintf(&b, "%s %s  %02X\n",
 				marker,
 				dimAddr.Render(fmt.Sprintf("$%04X", e.addrLo)),
-				m.RAM.Read(e.addrLo))
+				m.stackByte(e.addrLo))
 		default:
 			rng := dimAddr.Render(fmt.Sprintf("$%04X-%02X",
 				e.addrLo,
