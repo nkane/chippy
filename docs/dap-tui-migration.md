@@ -96,14 +96,26 @@ generic client uses. Disassembly and memory panels already have
   mirror** — so disasm follows the streamed PC during a remote run with no
   per-tick wire round-trip (the mirror is current via chippy-state regs + #440
   dirtyRanges). Symbols/source-map are pushed into both via the `symbolSink`
-  interface. Residual for #461: `disasmScroll`'s anchor navigation still calls
-  `cpu.WalkBack`/`cpu.DisasmWithSyms` on the mirror — not the render path.
+  interface.
+- **Render/nav residuals** (#461) — the last direct `cpu`/`RAM` reads in the
+  render + navigation paths: the Stack panel's raw byte/run rows now read a
+  DAP-sourced stack-page snapshot (`StackSnapshot.Page` via `readMemory`), and
+  `disasmScroll` moves its anchor by stepping the DAP disasm snapshot instead
+  of `cpu.WalkBack`/`cpu.DisasmWithSyms`. `walkBack` + `Model.isDataAddr`
+  deleted.
 
-## Status: complete
+## Status: render path complete
 
-All five panels (registers, stack, flags, memory, disassembly) are DAP-sourced.
-The in-process direct render path is dead code; **#461** flips the default to
-DAP-only and deletes it (the v2.0 arc, now in v1.7).
+All five panels (registers, stack, flags, memory, disassembly) **and** the
+navigation paths are DAP-sourced — no direct `cpu.CPU`/`cpu.RAM` reads remain
+in any render or nav path (#461).
+
+The **control** path (run/step/breakpoints/mem-edit/watchpoints) still drives
+`m.CPU`/`m.RAM` directly — that's the debugger engine, not rendering. Routing
+it through the DAP server (the "DAP-only" control flip) is tracked separately
+in **#471**: a v2.0-scale re-architecture with its own run-mechanism / locking
+/ rewind tradeoffs. The rich TUI rewind ring is kept as the local engine
+exception.
 
 ## Cost
 
