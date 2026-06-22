@@ -278,6 +278,45 @@ func TestVars_GlobalsArrayChildren(t *testing.T) {
 	}
 }
 
+func TestVars_SetVariableGlobalScalar(t *testing.T) {
+	s, _, out := newStoppedServer(t, []byte{0xEA})
+	withSyms(t, s, "sym\tname=\"score\",val=0x0010,size=1\n")
+	s.handleSetVariable(Request{
+		ProtocolMessage: ProtocolMessage{Seq: 1, Type: "request"},
+		Command:         "setVariable",
+		Arguments:       json.RawMessage(`{"variablesReference":3,"name":"score","value":"$7F"}`),
+	})
+	if got := s.ram.Read(0x0010); got != 0x7F {
+		t.Fatalf("setVariable score=$7F should poke $0010; got $%02X", got)
+	}
+	if !strings.Contains(out.String(), `"value":"$7F"`) {
+		t.Fatalf("response should echo $7F:\n%s", out.String())
+	}
+}
+
+func TestVars_SetVariableArrayChild(t *testing.T) {
+	s, _, out := newStoppedServer(t, []byte{0xEA})
+	withSyms(t, s, "sym\tname=\"buf\",val=0x0400,size=4\n")
+	// Enumerate the scope so the array ref is allocated.
+	s.handleVariables(varsReq(1, `{"variablesReference":3}`))
+	var ref int
+	for r := range s.varRefs {
+		ref = r
+	}
+	out.Reset()
+	s.handleSetVariable(Request{
+		ProtocolMessage: ProtocolMessage{Seq: 2, Type: "request"},
+		Command:         "setVariable",
+		Arguments:       json.RawMessage(fmt.Sprintf(`{"variablesReference":%d,"name":"[2]","value":"$AB"}`, ref)),
+	})
+	if got := s.ram.Read(0x0402); got != 0xAB {
+		t.Fatalf("setVariable buf[2]=$AB should poke $0402; got $%02X", got)
+	}
+	if !strings.Contains(out.String(), `"value":"$AB"`) {
+		t.Fatalf("response should echo $AB:\n%s", out.String())
+	}
+}
+
 func TestVars_GlobalsArrayPaging(t *testing.T) {
 	s, _, out := newStoppedServer(t, []byte{0xEA})
 	withSyms(t, s, "sym\tname=\"buf\",val=0x0400,size=8\n")
