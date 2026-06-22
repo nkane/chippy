@@ -145,15 +145,25 @@ func (c *CPU) addrDummies(in Instr, addr uint16, pageCrossed bool) {
 		// Indexed read: extra fix-up read only when the page is crossed
 		// (PageAdd). Indexed write / RMW (PageAdd false): always.
 		if !in.PageAdd || pageCrossed {
-			base := addr - uint16(c.X)
-			c.idle((base & 0xFF00) | (addr & 0x00FF))
+			c.idle(c.indexedDummyAddr(addr, c.X))
 		}
 	case ABY, IZY:
 		if !in.PageAdd || pageCrossed {
-			base := addr - uint16(c.Y)
-			c.idle((base & 0xFF00) | (addr & 0x00FF))
+			c.idle(c.indexedDummyAddr(addr, c.Y))
 		}
 	}
+}
+
+// indexedDummyAddr is the address of the fix-up dummy read for an indexed
+// access. NMOS reads the un-fixed address (correct low byte, stale high byte);
+// the 65C02 instead re-reads the last instruction byte at c.PC-1 (issue #455 —
+// PC has already advanced past the operand when addrDummies runs).
+func (c *CPU) indexedDummyAddr(addr uint16, index byte) uint16 {
+	if c.Variant == VariantCMOS65C02 {
+		return c.PC - 1
+	}
+	base := addr - uint16(index)
+	return (base & 0xFF00) | (addr & 0x00FF)
 }
 
 // --- helpers for read/write w/ ACC mode ---
@@ -330,14 +340,20 @@ func opCMP(c *CPU, addr uint16, m AddrMode) { cmp(c, c.A, c.read(addr)) }
 func opCPX(c *CPU, addr uint16, m AddrMode) { cmp(c, c.X, c.read(addr)) }
 func opCPY(c *CPU, addr uint16, m AddrMode) { cmp(c, c.Y, c.read(addr)) }
 
-// rmwDummy is the read-modify-write internal cycle: the 6502 writes the
-// unmodified value back before the modified one (memory modes only). The
-// ticked dummy write keeps the per-cycle count exact (#342); a no-op
-// write under non-NES variants is harmless.
+// rmwDummy is the read-modify-write internal cycle (memory modes only). NMOS
+// writes the unmodified value back before the modified one; the 65C02 instead
+// does a dummy READ of the address (issue #455 — the classic NMOS-vs-CMOS RMW
+// bus difference). Either way it's the one extra cycle that keeps the
+// per-cycle count exact (#342).
 func (c *CPU) rmwDummy(addr uint16, m AddrMode, old byte) {
-	if m != ACC {
-		c.write(addr, old)
+	if m == ACC {
+		return
 	}
+	if c.Variant == VariantCMOS65C02 {
+		c.read(addr)
+		return
+	}
+	c.write(addr, old)
 }
 
 func opINC(c *CPU, addr uint16, m AddrMode) {

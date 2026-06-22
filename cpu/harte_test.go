@@ -336,27 +336,35 @@ func TestHarte6502BusTrace(t *testing.T) {
 			if err != nil {
 				t.Skipf("cases for %02x unavailable: %v", op, err)
 			}
-			runHarteBusTrace(t, name, cases, maxCases)
+			runHarteBusTrace(t, harte6502, nil, name, cases, maxCases)
 		})
 	}
 }
 
-func runHarteBusTrace(t *testing.T, op string, cases []harteCase, maxCases int) {
+func runHarteBusTrace(t *testing.T, suite harteSuite, skipCase func(byte, *harteCase) bool, op string, cases []harteCase, maxCases int) {
 	t.Helper()
+	opNum, _ := strconv.ParseUint(op, 16, 8)
+	opByte := byte(opNum)
 	n := len(cases)
 	if maxCases > 0 && maxCases < n {
 		n = maxCases
 	}
 	for i := 0; i < n; i++ {
 		tc := &cases[i]
+		// Drop per-case bus-trace divergences (e.g. CMOS decimal ADC/SBC, whose
+		// +1 internal cycle the per-cycle interleave doesn't model).
+		if skipCase != nil && skipCase(opByte, tc) {
+			continue
+		}
 		bus := &busRecorder{}
 		for _, kv := range tc.Initial.RAM {
 			bus.ram[kv[0]] = byte(kv[1])
 		}
-		c := New(NewRAM())
-		// Run the per-cycle interleave on a NMOS core so every access (incl.
-		// dummy cycles) flows through the recording bus while decimal mode and
-		// other NMOS semantics stay intact.
+		// Run the per-cycle interleave on the suite's variant so every access
+		// (incl. dummy cycles) flows through the recording bus. NMOS keeps
+		// decimal/quirk semantics; CMOS65C02 exercises the corrected RMW /
+		// branch / JMP timings (#426).
+		c := NewVariant(NewRAM(), suite.variant)
 		c.Bus = bus
 		c.busTicker = bus
 		c.nesCycle = true
@@ -371,6 +379,72 @@ func runHarteBusTrace(t *testing.T, op string, cases []harteCase, maxCases int) 
 			t.Fatalf("opcode %s case %q (#%d): bus trace %s", op, tc.Name, i, diff)
 		}
 	}
+}
+
+// harteBusSkip65C02 is the CMOS sibling of harteBusSkip: 65C02 opcodes whose
+// per-cycle bus TRACE diverges from the wdc65c02 set. Mirrors #428's 6502
+// work for #455.
+//
+// The only skipped opcodes are the bit-test-and-branch instructions (BBR/BBS,
+// 16 opcodes): their 6-cycle bus pattern is unusual (a dummy write-back of the
+// tested zero-page byte mid-branch, then a branch-target read) and the
+// per-cycle interleave doesn't reproduce it. Their final state AND cycle COUNT
+// are validated by TestHarte65C02 (#426); only the per-cycle bus TRACE is
+// unmodeled. The rest of the CMOS-only opcodes — RMB/SMB, push/pull, the WDC
+// NOPs, JMP indirect, indexed page-cross, and the RMW dummy-read difference —
+// are now bus-exact (#455). WAI/STP are skipped by harteSkip65C02 (they halt);
+// decimal ADC/SBC is skipped per-case (cmosDecimalADCSBC). Emitting BBR/BBS's
+// dummy cycles is the remaining bus-trace tail, tracked as a follow-up.
+var harteBusSkip65C02 = map[byte]string{}
+
+func init() {
+	for op := 0; op < 256; op++ {
+		switch OpcodesCMOS[op].Name {
+		case "BBR", "BBS":
+			harteBusSkip65C02[byte(op)] = OpcodesCMOS[op].Name + ": per-cycle interleave doesn't model the dummy write-back + branch-target reads (state+count validated by TestHarte65C02)"
+		}
+	}
+}
+
+// TestHarte65C02BusTrace validates 65C02 per-cycle bus exactness against the
+// wdc65c02 set (issue #455) — the CMOS sibling of TestHarte6502BusTrace.
+func TestHarte65C02BusTrace(t *testing.T) {
+	maxCases := 0
+	if v := os.Getenv("CHIPPY_HARTE_MAX_CASES"); v != "" {
+		maxCases, _ = strconv.Atoi(v)
+	}
+	for op := 0; op < 256; op++ {
+		op := byte(op)
+		name := fmt.Sprintf("%02x", op)
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if reason, skip := harteSkip65C02[op]; skip {
+				t.Skipf("skip %02x: %s", op, reason)
+			}
+			if reason, skip := harteBusSkip65C02[op]; skip {
+				t.Skipf("skip %02x bus trace: %s", op, reason)
+			}
+			cases, err := loadHarteCases(t, harte65C02, name)
+			if err != nil {
+				t.Skipf("cases for %02x unavailable: %v", op, err)
+			}
+			runHarteBusTrace(t, harte65C02, cmosDecimalADCSBC, name, cases, maxCases)
+		})
+	}
+}
+
+// cmosDecimalADCSBC reports whether a case is a decimal-mode ADC/SBC — skipped
+// for the 65C02 bus trace (issue #455). The 65C02 spends an extra internal
+// cycle correcting the BCD result; chippy's per-cycle interleave accounts for
+// that cycle in the count (TestHarte65C02 passes) but does not emit its bus
+// access, so the per-cycle TRACE for these can't be compared. Final state +
+// cycle count are still validated by TestHarte65C02; only the bus trace skips.
+func cmosDecimalADCSBC(op byte, tc *harteCase) bool {
+	if tc.Initial.P&0x08 == 0 { // decimal mode off
+		return false
+	}
+	name := OpcodesCMOS[op].Name
+	return name == "ADC" || name == "SBC"
 }
 
 // busTraceDiff compares chippy's recorded accesses against the expected
