@@ -127,6 +127,90 @@ type Source interface {
 	// the live core via its inproc server; RemoteSource disassembles the
 	// DAP-fed mirror via its own inproc server (no per-tick wire round-trip).
 	Disassemble(anchor uint16, above, below int) (DisasmSnapshot, error)
+
+	// SetDataBreakpoints (re)installs the memory watchpoint set on the source
+	// via DAP `setDataBreakpoints` (issue #471) so the server enforces them
+	// during a run — parity with SetBreakpoints for instruction bps. Called
+	// whenever m.MemBPs mutates.
+	SetDataBreakpoints(bps []SourceMemBP) error
+
+	// RunBudget advances the local CPU up to maxSteps instructions through the
+	// in-process DAP server, which enforces breakpoints / data breakpoints /
+	// halt + the optional stopAt predicate (issue #471). step is the TUI's own
+	// per-instruction step (kept so its rewind ring fills). Returns whether it
+	// stopped, the reason, and any logpoint line. RemoteSource is a no-op (the
+	// server drives a wire `continue` instead).
+	RunBudget(maxSteps int, step func(), stopAt func() bool) (stopped bool, reason, logLine string)
+}
+
+// SourceMemBP is the wire shape Source.SetDataBreakpoints uses. Access is
+// "r"/"w"/"rw"; HitLimit mirrors MemBP.HitLimit (0 unlimited, >0 Nth, -1
+// one-shot); Cond / Log are the raw expression / logpoint message ("" = none).
+type SourceMemBP struct {
+	Addr     uint16
+	Access   MemBPKind
+	Cond     string
+	HitLimit int
+	Log      string
+}
+
+// hitConditionString maps a SourceBP/SourceMemBP HitLimit to the DAP
+// hitCondition field: >0 fires on the Nth hit, -1 (one-shot) fires on the
+// first, 0 is unconditional.
+func hitConditionString(hitLimit int) string {
+	switch {
+	case hitLimit > 0:
+		return fmt.Sprintf("%d", hitLimit)
+	case hitLimit == -1:
+		return "1"
+	default:
+		return ""
+	}
+}
+
+// instBPArgs builds the setInstructionBreakpoints request body shared by
+// LocalSource (inproc) and RemoteSource (wire).
+func instBPArgs(bps []SourceBP) map[string]any {
+	type instBP struct {
+		InstructionReference string `json:"instructionReference"`
+		Condition            string `json:"condition,omitempty"`
+		HitCondition         string `json:"hitCondition,omitempty"`
+		LogMessage           string `json:"logMessage,omitempty"`
+	}
+	wire := make([]instBP, 0, len(bps))
+	for _, b := range bps {
+		wire = append(wire, instBP{
+			InstructionReference: fmt.Sprintf("$%04X", b.PC),
+			Condition:            b.Cond,
+			HitCondition:         hitConditionString(b.HitLimit),
+			LogMessage:           b.Log,
+		})
+	}
+	return map[string]any{"breakpoints": wire}
+}
+
+// dataBPArgs builds the setDataBreakpoints request body shared by LocalSource
+// (inproc) and RemoteSource (wire).
+func dataBPArgs(bps []SourceMemBP) map[string]any {
+	type dataBP struct {
+		DataID       string `json:"dataId"`
+		AccessType   string `json:"accessType,omitempty"`
+		Condition    string `json:"condition,omitempty"`
+		HitCondition string `json:"hitCondition,omitempty"`
+		LogMessage   string `json:"logMessage,omitempty"`
+	}
+	access := map[MemBPKind]string{MemBPRead: "read", MemBPWrite: "write", MemBPReadWrite: "readWrite"}
+	wire := make([]dataBP, 0, len(bps))
+	for _, b := range bps {
+		wire = append(wire, dataBP{
+			DataID:       fmt.Sprintf("$%04X", b.Addr),
+			AccessType:   access[b.Access],
+			Condition:    b.Cond,
+			HitCondition: hitConditionString(b.HitLimit),
+			LogMessage:   b.Log,
+		})
+	}
+	return map[string]any{"breakpoints": wire}
 }
 
 // LocalSource is the in-process Source backing the default TUI mode.
@@ -254,12 +338,35 @@ func (s *LocalSource) Continue() error { return nil }
 // Pause is a no-op for LocalSource. Mirror of Continue.
 func (s *LocalSource) Pause() error { return nil }
 
-// SetBreakpoints is a no-op for LocalSource — the Model's
-// `m.Breakpoints` map is the source of truth, checked inline by the
-// run loop via `shouldBreakAt`. The interface still requires the
-// method so RemoteSource can forward the same list to the remote
-// server.
-func (s *LocalSource) SetBreakpoints(bps []SourceBP) error { return nil }
+// SetBreakpoints forwards the instruction-breakpoint set to the in-process
+// DAP server (issue #471) so it enforces them during RunBudget — the Model no
+// longer checks breakpoints inline.
+func (s *LocalSource) SetBreakpoints(bps []SourceBP) error {
+	if s.dapClient == nil {
+		return nil
+	}
+	_, err := s.dapClient.Request("setInstructionBreakpoints", instBPArgs(bps))
+	return err
+}
+
+// SetDataBreakpoints forwards the watchpoint set to the in-process DAP server
+// (issue #471) so it enforces watchpoints during RunBudget.
+func (s *LocalSource) SetDataBreakpoints(bps []SourceMemBP) error {
+	if s.dapClient == nil {
+		return nil
+	}
+	_, err := s.dapClient.Request("setDataBreakpoints", dataBPArgs(bps))
+	return err
+}
+
+// RunBudget drives a budgeted local run through the in-process DAP server,
+// which enforces bp / data-bp / halt + stopAt (issue #471).
+func (s *LocalSource) RunBudget(maxSteps int, step func(), stopAt func() bool) (bool, string, string) {
+	if s.dapServer == nil {
+		return true, "exception", ""
+	}
+	return s.dapServer.RunBudget(maxSteps, step, stopAt)
+}
 
 // SourceBP is the wire shape Source.SetBreakpoints uses. PC is the
 // instruction address; Cond is the raw expression string ("" =

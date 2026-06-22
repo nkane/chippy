@@ -53,37 +53,6 @@ func (b *Breakpoint) marker() string {
 	}
 }
 
-// shouldBreakAt returns (pause, logMessage). pause=true means halt the run
-// loop; logMessage non-empty means emit it (used by log points). Increments
-// the hit counter and may auto-delete one-shot bps.
-func (m *Model) shouldBreakAt(pc uint16) (bool, string) {
-	bp, ok := m.Breakpoints[pc]
-	if !ok || bp == nil || !bp.Enabled || bp.Rejected {
-		return false, ""
-	}
-	// Evaluate condition first; a failing cond doesn't count as a hit so users
-	// can iterate on the expression without state drift.
-	if bp.condFn != nil {
-		if !bp.condFn(m.CPU, m.RAM) {
-			return false, ""
-		}
-	}
-	bp.Hits++
-	// Hit-count gating.
-	if bp.HitLimit > 0 && bp.Hits < bp.HitLimit {
-		return false, ""
-	}
-	// Log point: format message, do not pause.
-	if bp.Log != "" {
-		return false, formatLog(bp.Log, m.CPU, m.RAM)
-	}
-	// One-shot: delete after first qualifying hit.
-	if bp.HitLimit == -1 {
-		delete(m.Breakpoints, pc)
-	}
-	return true, ""
-}
-
 // formatLog expands {A} {X} {Y} {P} {SP} {PC} and {[$XXXX]} substitutions in
 // a log-point template against current CPU/bus state.
 func formatLog(tmpl string, c *cpu.CPU, bus cpu.Bus) string {

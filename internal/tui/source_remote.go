@@ -194,31 +194,21 @@ func (s *RemoteSource) Pause() error {
 // fields so a conditional / log / one-shot bp set in the local TUI
 // also short-circuits on the remote server.
 func (s *RemoteSource) SetBreakpoints(bps []SourceBP) error {
-	type instBP struct {
-		InstructionReference string `json:"instructionReference"`
-		Condition            string `json:"condition,omitempty"`
-		HitCondition         string `json:"hitCondition,omitempty"`
-		LogMessage           string `json:"logMessage,omitempty"`
-	}
-	wire := make([]instBP, 0, len(bps))
-	for _, b := range bps {
-		var hit string
-		switch {
-		case b.HitLimit > 0:
-			hit = fmt.Sprintf("%d", b.HitLimit)
-		case b.HitLimit == -1:
-			hit = "1" // one-shot: break on first hit
-		}
-		wire = append(wire, instBP{
-			InstructionReference: fmt.Sprintf("$%04X", b.PC),
-			Condition:            b.Cond,
-			HitCondition:         hit,
-			LogMessage:           b.Log,
-		})
-	}
-	args := map[string]any{"breakpoints": wire}
-	_, err := s.client.Request("setInstructionBreakpoints", args)
+	_, err := s.client.Request("setInstructionBreakpoints", instBPArgs(bps))
 	return err
+}
+
+// SetDataBreakpoints (re)installs the watchpoint set on the remote server via
+// DAP `setDataBreakpoints` (issue #471).
+func (s *RemoteSource) SetDataBreakpoints(bps []SourceMemBP) error {
+	_, err := s.client.Request("setDataBreakpoints", dataBPArgs(bps))
+	return err
+}
+
+// RunBudget is a no-op for RemoteSource — a remote run is driven by the
+// server's async `continue` + stopped events, not a TUI-side budget loop.
+func (s *RemoteSource) RunBudget(maxSteps int, step func(), stopAt func() bool) (bool, string, string) {
+	return false, "", ""
 }
 
 // RefreshRegs forces a regs sync. Called by the TUI after a `stopped`

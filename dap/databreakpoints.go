@@ -105,7 +105,7 @@ func (s *Server) handleSetDataBreakpoints(req Request) {
 		if access == "" {
 			access = DataAccessWrite
 		}
-		meta, err := s.buildBPMeta(bp.Condition, bp.HitCondition, "")
+		meta, err := s.buildBPMeta(bp.Condition, bp.HitCondition, bp.LogMessage)
 		if err != nil {
 			results = append(results, Breakpoint{Verified: false, Message: err.Error()})
 			continue
