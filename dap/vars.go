@@ -316,9 +316,56 @@ func (s *Server) handleSetVariable(req Request) {
 			return
 		}
 		s.sendResponse(req, body{Value: newVal, Type: "bit"})
+	case refGlobals:
+		// Scalar global: resolve the symbol name to its address and poke the
+		// byte (issue #454). Writes through s.ram (bypasses MMIO, like
+		// writeMemory) — a debugger poke, not a program access.
+		addr, ok := s.globalAddr(args.Name)
+		if !ok {
+			s.sendErrorResponse(req, fmt.Sprintf("unknown global: %q", args.Name))
+			return
+		}
+		s.ram.Write(addr, byte(n))
+		s.sendResponse(req, body{Value: fmt.Sprintf("$%02X", s.ram.Read(addr)), Type: "byte"})
 	default:
-		s.sendErrorResponse(req, fmt.Sprintf("unknown variablesReference: %d", args.VariablesReference))
+		// Array-child write (issue #454): the dynamic ref maps to an array; the
+		// name is "[i]". Poke the byte at Addr+i.
+		ar, ok := s.varRefs[args.VariablesReference]
+		if !ok {
+			s.sendErrorResponse(req, fmt.Sprintf("unknown variablesReference: %d", args.VariablesReference))
+			return
+		}
+		idx, ok := parseArrayIndex(args.Name)
+		if !ok || idx < 0 || idx >= ar.Count {
+			s.sendErrorResponse(req, fmt.Sprintf("bad array index %q", args.Name))
+			return
+		}
+		addr := ar.Addr + uint16(idx)
+		s.ram.Write(addr, byte(n))
+		s.sendResponse(req, body{Value: fmt.Sprintf("$%02X", s.ram.Read(addr)), Type: "byte"})
 	}
+}
+
+// globalAddr resolves a Globals-scope variable name (a loaded symbol) to its
+// address.
+func (s *Server) globalAddr(name string) (uint16, bool) {
+	if s.syms == nil {
+		return 0, false
+	}
+	return s.syms.LookupName(name)
+}
+
+// parseArrayIndex parses an array-child variable name "[i]" into i.
+func parseArrayIndex(name string) (int, bool) {
+	t := strings.TrimSuffix(strings.TrimPrefix(name, "["), "]")
+	if t == name {
+		return 0, false // no brackets
+	}
+	i, err := strconv.Atoi(t)
+	if err != nil {
+		return 0, false
+	}
+	return i, true
 }
 
 func (s *Server) setRegister(name string, v uint64) (string, string, error) {

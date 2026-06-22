@@ -122,7 +122,7 @@ require("dap").adapters.chippy = {
 | `stackTrace`                     | #48, #449 | Walks JSR frames via `cpu.DetectStackFrame`. Each frame adds two chippy-extension fields (additive; standard clients ignore them): `chippyStackAddr` (`$01XX` stack-page slot of the pushed return pair) and `chippyCallee` (symbol at the JSR target). The chippy TUI's stack panel renders from these (#449). |
 | `scopes`                         | #48, #410 | Registers, Flags, and (when a `.dbg` is loaded) Globals. |
 | `variables`                      | #48, #410 | ref=1 → A/X/Y/SP/PC/P/Cycles; ref=2 → 8 P-flag bits; ref=3 → data symbols (sized `.dbg` globals + data-range symbols, code labels filtered). A symbol with `size>1` expands into indexed byte children via a dynamically-allocated `variablesReference` (paged with `start`/`count`; `supportsVariablePaging`). |
-| `setVariable`                    | #48   | Writes hex / decimal to a register or flag bit. |
+| `setVariable`                    | #48, #454 | Writes hex / decimal to a register, flag bit, Globals scalar (poke the byte at the symbol's address), or array child (`[i]` → byte at `addr+i`). Memory writes go through `s.ram` (bypass MMIO). Refused while running. |
 | `setBreakpoints`                 | #49, #81 | Source-line bps resolved through the `.dbg` source map. Honors `condition` / `hitCondition` (integer) / `logMessage` (with `{expr}` interpolation). |
 | `setInstructionBreakpoints`      | #49, #81 | Address bps (`$XX`, `0xXX`, decimal). Same modifier support as source bps. |
 | `setFunctionBreakpoints`         | #82, #81 | Symbol-name bps via `syms.LookupName`. Same modifier support. |
