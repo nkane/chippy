@@ -114,6 +114,77 @@ func (s *Server) runLoop() {
 	})
 }
 
+// RunBudget advances the CPU up to maxSteps instructions by invoking step()
+// (supplied by the in-process TUI so its own rewind ring keeps filling),
+// enforcing breakpoints / data breakpoints / halt / BRK plus an optional
+// caller stop predicate after each step. Returns whether it stopped early, the
+// reason ("breakpoint" / "data breakpoint" / "exception" / "step"), and the
+// last logpoint message produced (for a non-firing logpoint bp).
+//
+// This is the synchronous, in-process counterpart to the async continue
+// runLoop: the TUI drives it from its own goroutine (its render tick), so
+// there is no run goroutine and no cross-goroutine CPU race — and the TUI's
+// rewind / keyframe machinery in step() is preserved (issue #471). The
+// data-breakpoint access hook is armed for the batch so watchpoints fire.
+func (s *Server) RunBudget(maxSteps int, step func(), stopAt func() bool) (stopped bool, reason, logLine string) {
+	if s.cpu == nil {
+		return true, "exception", ""
+	}
+	// Arm a minimal data-breakpoint access hook only when watchpoints are set —
+	// otherwise the run carries zero per-access overhead (local-run latency
+	// unchanged). Unlike the async runLoop this skips dirty-range tracking;
+	// the in-process TUI reads memory by polling, not via chippy-state.
+	if len(s.dataBPs) != 0 {
+		s.dataBPPending = false
+		prev := s.cpu.AccessHook()
+		s.cpu.SetAccessHook(func(addr uint16, kind cpu.AccessKind) {
+			if prev != nil {
+				prev(addr, kind)
+			}
+			if bp := s.dataBPs[addr]; bp != nil && bp.matches(kind) {
+				s.dataBPPending = true
+				s.dataBPHitAddr = addr
+			}
+		})
+		defer s.cpu.SetAccessHook(prev)
+	}
+	for i := 0; i < maxSteps; i++ {
+		// Exception filter: stop before executing a BRK (mirrors runLoopIter).
+		if s.brkOnException.Load() && s.ram.Read(s.cpu.PC) == 0x00 {
+			s.lastExceptionPC.Store(uint32(s.cpu.PC))
+			return true, "exception", ""
+		}
+		step()
+		if s.cpu.Halted {
+			return true, "exception", ""
+		}
+		// Data breakpoint: the armed access hook flagged a watched read/write
+		// during the step. Non-firing (false condition) falls through to the
+		// next iteration; a logpoint records its line and continues.
+		if s.dataBPPending {
+			s.dataBPPending = false
+			if fire, log := s.shouldFireBP(s.dataBPMeta(s.dataBPHitAddr)); fire {
+				return true, "data breakpoint", log
+			} else if log != "" {
+				logLine = log
+			}
+		}
+		// Instruction breakpoint at the post-step PC.
+		if s.isBreakpoint(s.cpu.PC) {
+			if fire, log := s.shouldFireBP(s.lookupBPMeta(s.cpu.PC)); fire {
+				return true, "breakpoint", log
+			} else if log != "" {
+				logLine = log
+			}
+		}
+		// Caller stop condition (step-over return PC, run-to-line, …).
+		if stopAt != nil && stopAt() {
+			return true, "step", logLine
+		}
+	}
+	return false, "", logLine
+}
+
 // sendChippyState pushes a `chippy-state` event with the current register
 // file plus the memory written since the previous event (issue #440). Reads
 // regs and flushes the dirty spans under cpuMu so the snapshot can't tear

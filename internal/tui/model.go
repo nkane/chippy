@@ -733,21 +733,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Status = "halted (press R to reset)"
 				break
 			}
-			for i := 0; i < 16 && !m.CPU.Halted; i++ {
-				m.step()
-				if mpause, mmsg := m.processMemHits(); mpause {
-					m.Status = mmsg
-					break
-				} else if mmsg != "" {
-					m.Status = mmsg
-				}
-				if pause, msg := m.shouldBreakAt(m.CPU.PC); pause {
-					break
-				} else if msg != "" {
-					m.Status = msg
-				}
+			m.syncSourceBPsAll()
+			stopped, reason, logLine := m.Source.RunBudget(16, func() { m.step() }, nil)
+			switch {
+			case stopped:
+				m.Status = runStopStatus(reason, m.CPU.PC)
+			case logLine != "":
+				m.Status = logLine
+			default:
+				m.statusAfterStep("stepped x16")
 			}
-			m.statusAfterStep("stepped x16")
 		case "n":
 			m.stepOver()
 		case "f":
@@ -770,6 +765,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.Status = fmt.Sprintf("pause: %v", err)
 					}
 				}
+			} else if m.Running {
+				// Local run is server-driven via RunBudget (issue #471):
+				// forward the current breakpoint + watchpoint sets so the
+				// server enforces them.
+				m.syncSourceBPsAll()
 			}
 			if m.Running {
 				m.Status = fmt.Sprintf("running @ %s", speedLabel(m.TargetHz))
@@ -963,28 +963,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Source != nil && m.Source.Attached() {
 				return m, m.scheduleTick()
 			}
-			budget := m.runBudget()
-			for i := 0; i < budget; i++ {
-				m.step()
-				if m.CPU.Halted {
-					m.Running = false
-					m.Status = fmt.Sprintf("halted at $%04X", m.CPU.PC)
-					break
-				}
-				if mpause, mmsg := m.processMemHits(); mpause {
-					m.Running = false
-					m.Status = mmsg
-					break
-				} else if mmsg != "" {
-					m.Status = mmsg
-				}
-				if pause, msg := m.shouldBreakAt(m.CPU.PC); pause {
-					m.Running = false
-					m.Status = fmt.Sprintf("hit bp $%04X", m.CPU.PC)
-					break
-				} else if msg != "" {
-					m.Status = msg
-				}
+			// Server-driven local run (issue #471): the DAP server steps via
+			// m.step (so the rewind ring keeps filling) and enforces
+			// breakpoints / watchpoints / halt. No TUI-side shouldBreakAt /
+			// processMemHits.
+			stopped, reason, logLine := m.Source.RunBudget(m.runBudget(), func() { m.step() }, nil)
+			if stopped {
+				m.Running = false
+				m.Status = runStopStatus(reason, m.CPU.PC)
+			} else if logLine != "" {
+				m.Status = logLine
 			}
 		}
 		m.syncRegs()   // refresh the DAP-sourced Registers panel once per tick
@@ -1162,21 +1150,62 @@ func (m *Model) syncSourceBreakpoints() {
 	_ = m.Source.SetBreakpoints(bps)
 }
 
+// syncSourceDataBreakpoints pushes the current memory watchpoint set to the
+// Source via `setDataBreakpoints` (issue #471) so the server enforces them
+// during RunBudget. Mirror of syncSourceBreakpoints for MemBPs.
+func (m *Model) syncSourceDataBreakpoints() {
+	if m.Source == nil {
+		return
+	}
+	bps := make([]SourceMemBP, 0, len(m.MemBPs))
+	for addr, bp := range m.MemBPs {
+		if bp == nil || !bp.Enabled {
+			continue
+		}
+		bps = append(bps, SourceMemBP{
+			Addr:     addr,
+			Access:   bp.Kind,
+			Cond:     bp.Cond,
+			HitLimit: bp.HitLimit,
+			Log:      bp.Log,
+		})
+	}
+	_ = m.Source.SetDataBreakpoints(bps)
+}
+
+// syncSourceBPsAll forwards both breakpoint sets to the Source. Called at the
+// start of every run path (free-run / step-over / run-to-line) so the server
+// enforces the current sets during RunBudget (issue #471).
+func (m *Model) syncSourceBPsAll() {
+	m.syncSourceBreakpoints()
+	m.syncSourceDataBreakpoints()
+}
+
+// runStopStatus maps a RunBudget stop reason to a status line (issue #471).
+func runStopStatus(reason string, pc uint16) string {
+	switch reason {
+	case "breakpoint":
+		return fmt.Sprintf("hit bp $%04X", pc)
+	case "data breakpoint":
+		return fmt.Sprintf("watchpoint hit @ $%04X", pc)
+	case "exception":
+		return fmt.Sprintf("halted at $%04X", pc)
+	default:
+		return fmt.Sprintf("stopped at $%04X", pc)
+	}
+}
+
 // statusAfterStep updates Status reflecting halt or normal stepping outcome.
+// A single step does not run the server's enforcement loop, so this only
+// reports halt + a cosmetic "on a breakpoint" note (membership, no condition
+// eval); run-loop breakpoint / watchpoint enforcement lives in RunBudget.
 func (m *Model) statusAfterStep(normal string) {
 	if m.CPU.Halted {
 		m.Status = fmt.Sprintf("halted at $%04X", m.CPU.PC)
 		return
 	}
-	if mpause, mmsg := m.processMemHits(); mpause {
-		m.Status = mmsg
-		return
-	} else if mmsg != "" {
-		m.Status = mmsg
-		return
-	}
-	if pause, _ := m.shouldBreakAt(m.CPU.PC); pause {
-		m.Status = fmt.Sprintf("hit bp $%04X", m.CPU.PC)
+	if bp, ok := m.Breakpoints[m.CPU.PC]; ok && bp != nil && bp.Enabled {
+		m.Status = fmt.Sprintf("on bp $%04X", m.CPU.PC)
 		return
 	}
 	m.Status = normal
@@ -1194,32 +1223,20 @@ func (m *Model) stepOver() {
 		m.statusAfterStep("stepped")
 		return
 	}
+	// Run to the return address through the server (issue #471): it enforces
+	// breakpoints / watchpoints / halt; stopAt fires when we reach retPC.
 	retPC := m.CPU.PC + 3
 	const guard = 2_000_000
-	for i := 0; i < guard; i++ {
-		m.step()
-		if m.CPU.Halted {
-			m.Status = fmt.Sprintf("halted at $%04X", m.CPU.PC)
-			return
-		}
-		if m.CPU.PC == retPC {
-			m.Status = fmt.Sprintf("step-over -> $%04X", retPC)
-			return
-		}
-		if mpause, mmsg := m.processMemHits(); mpause {
-			m.Status = mmsg
-			return
-		} else if mmsg != "" {
-			m.Status = mmsg
-		}
-		if pause, msg := m.shouldBreakAt(m.CPU.PC); pause {
-			m.Status = fmt.Sprintf("hit bp $%04X (in subroutine)", m.CPU.PC)
-			return
-		} else if msg != "" {
-			m.Status = msg
-		}
+	m.syncSourceBPsAll()
+	stopped, reason, _ := m.Source.RunBudget(guard, func() { m.step() }, func() bool { return m.CPU.PC == retPC })
+	switch {
+	case !stopped:
+		m.Status = "step-over guard hit (2M cycles)"
+	case reason == "step":
+		m.Status = fmt.Sprintf("step-over -> $%04X", retPC)
+	default:
+		m.Status = runStopStatus(reason, m.CPU.PC)
 	}
-	m.Status = "step-over guard hit (2M cycles)"
 }
 
 // runToNextLine: step until the source line changes (or fall back to next instr).
@@ -1234,32 +1251,23 @@ func (m *Model) runToNextLine() {
 		m.statusAfterStep("stepped (no src map)")
 		return
 	}
+	// Run until the source line changes through the server (issue #471): it
+	// enforces breakpoints / watchpoints / halt; stopAt fires on a line change.
 	const guard = 1_000_000
-	for i := 0; i < guard; i++ {
-		m.step()
-		if m.CPU.Halted {
-			m.Status = fmt.Sprintf("halted at $%04X", m.CPU.PC)
-			return
-		}
-		if mpause, mmsg := m.processMemHits(); mpause {
-			m.Status = mmsg
-			return
-		} else if mmsg != "" {
-			m.Status = mmsg
-		}
-		if pause, msg := m.shouldBreakAt(m.CPU.PC); pause {
-			m.Status = fmt.Sprintf("hit bp $%04X", m.CPU.PC)
-			return
-		} else if msg != "" {
-			m.Status = msg
-		}
+	m.syncSourceBPsAll()
+	stopped, reason, _ := m.Source.RunBudget(guard, func() { m.step() }, func() bool {
 		loc, ok := m.PCToSrc[m.CPU.PC]
-		if ok && (loc.File != startLoc.File || loc.Line != startLoc.Line) {
-			m.Status = fmt.Sprintf("line -> %s:%d", loc.File, loc.Line)
-			return
-		}
+		return ok && (loc.File != startLoc.File || loc.Line != startLoc.Line)
+	})
+	switch {
+	case !stopped:
+		m.Status = "run-to-line guard hit"
+	case reason == "step":
+		loc := m.PCToSrc[m.CPU.PC]
+		m.Status = fmt.Sprintf("line -> %s:%d", loc.File, loc.Line)
+	default:
+		m.Status = runStopStatus(reason, m.CPU.PC)
 	}
-	m.Status = "run-to-line guard hit"
 }
 
 // runBudget returns how many CPU steps to execute this tick.

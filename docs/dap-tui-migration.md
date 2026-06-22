@@ -104,18 +104,35 @@ generic client uses. Disassembly and memory panels already have
   of `cpu.WalkBack`/`cpu.DisasmWithSyms`. `walkBack` + `Model.isDataAddr`
   deleted.
 
-## Status: render path complete
+## Control path: server-driven run (#471)
 
-All five panels (registers, stack, flags, memory, disassembly) **and** the
-navigation paths are DAP-sourced — no direct `cpu.CPU`/`cpu.RAM` reads remain
-in any render or nav path (#461).
+Run + step enforcement is owned by the DAP server. `Server.RunBudget(maxSteps,
+step, stopAt)` advances the CPU on the TUI goroutine (so the rewind ring keeps
+filling — `step` is the TUI's own `m.step`) while enforcing breakpoints / data
+breakpoints / halt / BRK plus an optional caller predicate. All run paths route
+through it: free-run (`r`), step-×16 (`S`), step-over (`n`, predicate =
+return-PC), run-to-line (`f`, predicate = line change). The TUI's own
+`shouldBreakAt` is gone; `processMemHits`/`WBus` are vestigial (the access hook
+enforces watchpoints now). Breakpoint + watchpoint sets are forwarded to the
+server via `setInstructionBreakpoints` / `setDataBreakpoints` (#453) at run
+start.
 
-The **control** path (run/step/breakpoints/mem-edit/watchpoints) still drives
-`m.CPU`/`m.RAM` directly — that's the debugger engine, not rendering. Routing
-it through the DAP server (the "DAP-only" control flip) is tracked separately
-in **#471**: a v2.0-scale re-architecture with its own run-mechanism / locking
-/ rewind tradeoffs. The rich TUI rewind ring is kept as the local engine
-exception.
+Chosen over the async `continue`+events path used over the wire: the inproc
+`dispatch` self-locks `cpuMu`, so an async run goroutine would deadlock with
+`m.step`'s lock + the `:dap` co-running server (non-reentrant mutex). The
+synchronous `RunBudget` runs on the TUI goroutine — no run goroutine, no
+cross-goroutine CPU race, `TargetHz` throttle preserved. Zero per-access
+overhead when no watchpoints are set (the data-bp hook is armed only then).
+
+## Status: complete
+
+All five panels + nav are DAP-sourced (#461), and run/step/breakpoint/
+watchpoint enforcement is server-owned (#471). The **rich TUI rewind ring** is
+kept as the one local engine exception — `<` restores from `m.Rewind`
+(budget/keyframes/deep-rewind), strictly more capable than DAP `stepBack`.
+Remaining for full local DAP purity (lower value, deferred): single-step /
+mem-edit could route through `stepIn` / `writeMemory`, and `WBus` could be
+unwired entirely.
 
 ## Cost
 

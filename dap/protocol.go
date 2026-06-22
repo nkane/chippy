@@ -320,6 +320,10 @@ type DataBreakpoint struct {
 	AccessType   DataBreakpointAccessType `json:"accessType,omitempty"`
 	Condition    string                   `json:"condition,omitempty"`
 	HitCondition string                   `json:"hitCondition,omitempty"`
+	// LogMessage (chippy extension; standard clients omit it) makes the
+	// watchpoint a logpoint — log + continue instead of pause. Mirrors the
+	// TUI MemBP log field; reuses the instruction-bp logpoint machinery.
+	LogMessage string `json:"logMessage,omitempty"`
 }
 
 // SetDataBreakpointsArguments — replace ALL data breakpoints (watchpoints).
