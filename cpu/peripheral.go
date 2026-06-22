@@ -25,6 +25,12 @@ type Peripheral interface {
 type MMIO struct {
 	Inner       Bus
 	peripherals []Peripheral
+	// frozen is the debugger "freeze" set (issue #463): CPU writes to these
+	// addresses are suppressed so the value holds across frames — extends the
+	// RAM-only freeze (#422) to peripheral- and cart-mapped addresses, since a
+	// CPU write to a peripheral never reaches RAM. nil/empty by default — the
+	// Write fast path is a single len check when nothing is frozen.
+	frozen map[uint16]struct{}
 }
 
 func NewMMIO(inner Bus) *MMIO { return &MMIO{Inner: inner} }
@@ -63,6 +69,18 @@ func (m *MMIO) Read(addr uint16) byte {
 }
 
 func (m *MMIO) Write(addr uint16, v byte) {
+	if len(m.frozen) != 0 {
+		if _, ok := m.frozen[addr]; ok {
+			return // frozen: suppress the write (debugger freeze, issue #463)
+		}
+	}
+	m.dispatchWrite(addr, v)
+}
+
+// dispatchWrite routes a write to the owning peripheral or to Inner, without
+// the freeze guard — shared by Write (post-guard) and Freeze (the value must
+// land even though the address is about to be frozen).
+func (m *MMIO) dispatchWrite(addr uint16, v byte) {
 	for _, p := range m.peripherals {
 		lo, hi := p.Range()
 		if addr >= lo && addr <= hi {
@@ -71,6 +89,38 @@ func (m *MMIO) Write(addr uint16, v byte) {
 		}
 	}
 	m.Inner.Write(addr, v)
+}
+
+// Freeze locks a bus address to value: it writes the value through (to the
+// owning peripheral or Inner) and then suppresses all subsequent CPU writes,
+// so the value holds across frames (debugger freeze / cheats, issue #463 —
+// extends RAM.Freeze #422 to MMIO/cart addresses). Re-freezing updates the
+// held value. Opt-in: with nothing frozen the Write hot path is a single len
+// check.
+func (m *MMIO) Freeze(addr uint16, value byte) {
+	m.dispatchWrite(addr, value)
+	if m.frozen == nil {
+		m.frozen = make(map[uint16]struct{})
+	}
+	m.frozen[addr] = struct{}{}
+}
+
+// Unfreeze removes an address from the freeze set; writes resume.
+func (m *MMIO) Unfreeze(addr uint16) { delete(m.frozen, addr) }
+
+// Frozen reports whether addr is currently frozen.
+func (m *MMIO) Frozen(addr uint16) bool {
+	_, ok := m.frozen[addr]
+	return ok
+}
+
+// FrozenAddrs returns the currently frozen addresses (unordered).
+func (m *MMIO) FrozenAddrs() []uint16 {
+	out := make([]uint16, 0, len(m.frozen))
+	for a := range m.frozen {
+		out = append(out, a)
+	}
+	return out
 }
 
 // Tick fans out per-instruction cycle deltas to every registered

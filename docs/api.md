@@ -55,10 +55,15 @@ builds against:
   snapshot/restore (`SaveFullState`/`LoadFullState`).
 - `MMIO` — a `Bus` that routes ranges to registered `Peripheral`s over
   an inner fallback `Bus`; fans `Tick` out to peripherals.
+  `Freeze(addr, value)` / `Unfreeze` / `Frozen` / `FrozenAddrs` —
+  debugger write-suppress at the bus level (#463), covering peripheral-
+  and cart-mapped addresses (a CPU write to a peripheral never reaches
+  RAM); opt-in, zero-cost when nothing frozen.
 - `RAM` — flat 64 KiB store with an optional copy-on-write page shadow
   (powers reverse-step). `SaveFullState`/`LoadFullState`.
   `Freeze(addr, value)` / `Unfreeze` / `Frozen` / `FrozenAddrs` —
-  debugger write-suppress (#422); opt-in, zero-cost when nothing frozen.
+  debugger write-suppress for direct-RAM contexts (#422); opt-in,
+  zero-cost when nothing frozen.
 - `Instr`, `AddrMode`, `Opcodes`/`OpcodesCMOS` tables.
 - `Snapshot` + `SnapshotRing` — per-step rewind ring (page deltas).
 - Disassembly: `Disasm`, `DisasmCPU`, `DisasmWithSyms`, `WalkBack`.

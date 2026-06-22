@@ -38,6 +38,51 @@ func TestMMIOFallthroughToRAM(t *testing.T) {
 	}
 }
 
+func TestMMIOFreezePeripheralAndRAM(t *testing.T) {
+	ram := NewRAM()
+	m := NewMMIO(ram)
+	p := &fakePeripheral{lo: 0xF001, hi: 0xF001}
+	if err := m.Register(p); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// Freeze a peripheral address: the freeze-set write lands once, then CPU
+	// writes are suppressed.
+	m.Freeze(0xF001, 0x55)
+	if len(p.writes) != 1 || p.writes[0].v != 0x55 {
+		t.Fatalf("freeze should write 0x55 through once, got %+v", p.writes)
+	}
+	m.Write(0xF001, 0x99) // suppressed
+	m.Write(0xF001, 0xAA) // suppressed
+	if len(p.writes) != 1 {
+		t.Fatalf("frozen peripheral write should be suppressed, got %d writes", len(p.writes))
+	}
+	if !m.Frozen(0xF001) {
+		t.Fatalf("0xF001 should report frozen")
+	}
+
+	// Freeze a RAM-mapped address: the value holds in RAM, CPU writes ignored.
+	m.Freeze(0x0300, 0x42)
+	m.Write(0x0300, 0x00) // suppressed
+	if ram.Data[0x0300] != 0x42 {
+		t.Fatalf("frozen RAM addr should hold 0x42, got 0x%02X", ram.Data[0x0300])
+	}
+
+	if len(m.FrozenAddrs()) != 2 {
+		t.Fatalf("want 2 frozen addrs, got %d", len(m.FrozenAddrs()))
+	}
+
+	// Unfreeze resumes writes.
+	m.Unfreeze(0x0300)
+	m.Write(0x0300, 0x77)
+	if ram.Data[0x0300] != 0x77 {
+		t.Fatalf("after unfreeze RAM write should land, got 0x%02X", ram.Data[0x0300])
+	}
+	if m.Frozen(0x0300) {
+		t.Fatalf("0x0300 should no longer be frozen")
+	}
+}
+
 func TestMMIODispatchesReadsAndWrites(t *testing.T) {
 	ram := NewRAM()
 	m := NewMMIO(ram)
