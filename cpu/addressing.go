@@ -82,8 +82,12 @@ func (c *CPU) resolve(m AddrMode) (addr uint16, pageCrossed bool) {
 		ptr := lo | hi<<8
 		var loAddr, hiAddr uint16
 		if c.Variant == VariantCMOS65C02 {
-			// CMOS fixed the page-wrap bug.
+			// CMOS JMP (abs): 6 cycles. It reads lo at ptr, a dummy hi at the
+			// NMOS page-wrap address, then the correct hi at ptr+1 — the extra
+			// cycle fixes the page-boundary bug (issue #455). For a non-wrapping
+			// pointer the two hi reads land on the same address (read twice).
 			loAddr = uint16(c.read(ptr))
+			c.idle((ptr & 0xFF00) | uint16(byte(ptr)+1))
 			hiAddr = uint16(c.read(ptr + 1))
 		} else {
 			// NMOS 6502 page-wrap bug.
@@ -115,10 +119,12 @@ func (c *CPU) resolve(m AddrMode) (addr uint16, pageCrossed bool) {
 		hi := uint16(c.read(uint16(zp + 1)))
 		addr = lo | hi<<8
 	case IAX:
-		// 65C02: (abs,X) — used by JMP. No page-wrap bug.
+		// 65C02: (abs,X) — used by JMP. No page-wrap bug; 6 cycles, with a
+		// dummy read of the last instruction byte (issue #455).
 		lo := uint16(c.read(c.PC))
 		hi := uint16(c.read(c.PC + 1))
 		c.PC += 2
+		c.idle(c.PC - 2) // dummy read of the low operand byte before the indirect fetch
 		ptr := (lo | hi<<8) + uint16(c.X)
 		loAddr := uint16(c.read(ptr))
 		hiAddr := uint16(c.read(ptr + 1))

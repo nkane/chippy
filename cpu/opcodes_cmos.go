@@ -89,11 +89,15 @@ func init() {
 	// Rockwell bit ops: RMB0..7, SMB0..7, BBR0..7, BBS0..7
 	for bit := 0; bit < 8; bit++ {
 		b := bit
-		set(byte(0x07+bit*0x10), "RMB", ZP, 2, 5, false, func(c *CPU, addr uint16, _ AddrMode) {
-			c.write(addr, c.read(addr)&^(1<<b))
+		set(byte(0x07+bit*0x10), "RMB", ZP, 2, 5, false, func(c *CPU, addr uint16, m AddrMode) {
+			v := c.read(addr)
+			c.rmwDummy(addr, m, v) // 65C02 RMW dummy read (issue #455)
+			c.write(addr, v&^(1<<b))
 		})
-		set(byte(0x87+bit*0x10), "SMB", ZP, 2, 5, false, func(c *CPU, addr uint16, _ AddrMode) {
-			c.write(addr, c.read(addr)|(1<<b))
+		set(byte(0x87+bit*0x10), "SMB", ZP, 2, 5, false, func(c *CPU, addr uint16, m AddrMode) {
+			v := c.read(addr)
+			c.rmwDummy(addr, m, v) // 65C02 RMW dummy read (issue #455)
+			c.write(addr, v|(1<<b))
 		})
 		// BBR/BBS take a flat 6 cycles on real 65C02 silicon (Tom Harte
 		// wdc65c02) — no taken / page-cross penalty, unlike a normal branch.
@@ -172,9 +176,9 @@ func cmosNOPs(set func(op byte, name string, mode AddrMode, bytes, cycles int, p
 				// WDC $5C: 3-byte, 4-cycle NOP (Tom Harte wdc65c02). The
 				// often-cited "8 cycles" is the W65C816 figure; the real
 				// W65C02S takes 4.
-				set(byte(op), "NOP", ABS, 3, 4, false, opNOP3)
+				set(byte(op), "NOP", ABS, 3, 4, false, opNOPAbs65C02)
 			} else {
-				set(byte(op), "NOP", ABS, 3, 4, true, opNOP3)
+				set(byte(op), "NOP", ABS, 3, 4, false, opNOPAbs65C02)
 			}
 		default:
 			// $54, $D4, $F4 reach here (low nibble 4 above only
@@ -193,20 +197,39 @@ func cmosNOPs(set func(op byte, name string, mode AddrMode, bytes, cycles int, p
 
 func opBRA(c *CPU, addr uint16, _ AddrMode) { branch(c, addr, true) }
 
-func opPHX(c *CPU, _ uint16, _ AddrMode) { c.push(c.X) }
-func opPHY(c *CPU, _ uint16, _ AddrMode) { c.push(c.Y) }
-func opPLX(c *CPU, _ uint16, _ AddrMode) { c.X = c.pop(); c.setZN(c.X) }
-func opPLY(c *CPU, _ uint16, _ AddrMode) { c.Y = c.pop(); c.setZN(c.Y) }
+// opNOPAbs65C02 handles the WDC 3-byte NOPs ($5C/$DC/$FC): they do NOT
+// dereference the operand (unlike the NMOS illegal TOP NOPs); the 4th cycle is
+// a dummy re-read of the high operand byte at c.PC-1 (issue #455).
+func opNOPAbs65C02(c *CPU, _ uint16, _ AddrMode) { c.idle(c.PC - 1) }
+
+// Push/pull carry the same internal dummy cycles as PHA/PLA — idle() ticks
+// them for the per-cycle path (issue #455); a no-op elsewhere.
+func opPHX(c *CPU, _ uint16, _ AddrMode) { c.idle(c.PC); c.push(c.X) }
+func opPHY(c *CPU, _ uint16, _ AddrMode) { c.idle(c.PC); c.push(c.Y) }
+func opPLX(c *CPU, _ uint16, _ AddrMode) {
+	c.idle(c.PC)
+	c.idle(0x100 | uint16(c.SP))
+	c.X = c.pop()
+	c.setZN(c.X)
+}
+func opPLY(c *CPU, _ uint16, _ AddrMode) {
+	c.idle(c.PC)
+	c.idle(0x100 | uint16(c.SP))
+	c.Y = c.pop()
+	c.setZN(c.Y)
+}
 
 func opSTZ(c *CPU, addr uint16, _ AddrMode) { c.write(addr, 0) }
 
-func opTRB(c *CPU, addr uint16, _ AddrMode) {
+func opTRB(c *CPU, addr uint16, m AddrMode) {
 	v := c.read(addr)
+	c.rmwDummy(addr, m, v) // 65C02 RMW dummy read (issue #455)
 	c.setFlag(FlagZ, v&c.A == 0)
 	c.write(addr, v&^c.A)
 }
-func opTSB(c *CPU, addr uint16, _ AddrMode) {
+func opTSB(c *CPU, addr uint16, m AddrMode) {
 	v := c.read(addr)
+	c.rmwDummy(addr, m, v) // 65C02 RMW dummy read (issue #455)
 	c.setFlag(FlagZ, v&c.A == 0)
 	c.write(addr, v|c.A)
 }
