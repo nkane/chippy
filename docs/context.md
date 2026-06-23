@@ -15,7 +15,18 @@
   - Theme D (headline): #456 65816 variant (16-bit, emu/native), #462 65816 native-mode completeness + full Tom Harte 65816 (depends on #456), #457 hosted WASM playground (Pages).
   - Theme E (freeze): #463 MMIO/cart-bus freeze beyond RAM (extends #422, RAM-scoped in v1.6).
 - **Suggested opener:** #449 (smallest, unblocks rest of Theme A). Theme A now ends *inside* v1.7 with the #461 default-flip + dead-path delete (no separate v2.0 milestone for it).
-- **0 open issues outside the v1.7 set.** `main` clean at the v1.6.0 prep merge.
+- **DMC-DMA accuracy (nessy #20 spillover):** #480 ported Mesen's missing
+  `needDummyRead` cycle into `ProcessPendingDma` (halt → **dummy read** →
+  DMC read; the read & `bytesRemaining` decrement were landing one cycle
+  early). Non-regressing (cpu_interrupts_v2 5/5 + apu_test 8/8 verified via
+  nessy `go.mod replace`). #481 (epic) tracks the rest of the
+  `dmc_dma_during_read4` fix: the DMA-during-internal-register-read glitch
+  (`ProcessDmaRead`) needs a CPU-side open-bus model + internal/external
+  bus split + `$4016/$4017` bit-deletion that chippy doesn't have yet — an
+  architectural addition, not a port, and convergence needs a MesenCE
+  cycle-by-cycle reference run.
+- **2 open issues outside the v1.7 set** (#480 done-pending-merge, #481 epic).
+  `main` clean at the v1.6.0 prep merge.
 - **ADRs current** through v1.6.0 (0001–0009); v1.7 will be `0010-v1.7.0.md`. Pre-1.0 0.x tags fold into ADR 0001.
 
 ---

@@ -177,6 +177,12 @@ type CPU struct {
 	spriteDmaOffset   byte
 	dmcDmaRunning     bool
 	abortDmcDma       bool
+	// needDummyRead — the extra dummy-read cycle a DMC DMA performs
+	//   between the halt cycle and the actual sample read (Mesen
+	//   NesCpu::StartDmcTransfer sets it alongside needHalt). Without it
+	//   the DMC read (and bytesRemaining decrement) lands one cycle too
+	//   early, mis-timing dmc_dma_during_read* (#20-nessy).
+	needDummyRead bool
 
 	// dmcFetcher is the APU-side hook ProcessPendingDma calls to
 	// look up the DMC's current read address + push the fetched
@@ -221,6 +227,7 @@ func (c *CPU) SetNeedSpriteDma(page byte) {
 // APU.SetDmcReadBuffer.
 func (c *CPU) SetNeedDmcDma() {
 	c.dmcDmaRunning = true
+	c.needDummyRead = true
 	c.needHalt = true
 }
 

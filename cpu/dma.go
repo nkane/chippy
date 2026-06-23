@@ -55,8 +55,9 @@ func (c *CPU) ProcessPendingDma(readAddress uint16) {
 		getCycle := c.Cycles&1 == 0
 		if getCycle {
 			switch {
-			case c.dmcDmaRunning && !c.needHalt:
-				// DMC sample read.
+			case c.dmcDmaRunning && !c.needHalt && !c.needDummyRead:
+				// DMC sample read — only after BOTH the halt cycle and the
+				// extra dummy-read cycle have run (Mesen ordering).
 				c.dmaProcessCycle()
 				addr := uint16(0)
 				if c.dmcFetcher != nil {
@@ -122,9 +123,12 @@ func (c *CPU) dmaProcessCycle() {
 	case c.abortDmcDma:
 		c.dmcDmaRunning = false
 		c.abortDmcDma = false
+		c.needDummyRead = false
 		c.needHalt = false
 	case c.needHalt:
 		c.needHalt = false
+	case c.needDummyRead:
+		c.needDummyRead = false
 	}
 	c.dmaStartCycle()
 }
