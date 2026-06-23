@@ -31,6 +31,14 @@ const (
 	// ADC/SBC under D=1 behave as if D were clear). All other behavior
 	// matches NMOS, including the JMP-indirect page-wrap bug.
 	VariantNES
+	// VariantW65816 models the WDC 65C816. On reset it powers up in
+	// emulation mode (E=1) where it is 65C02-compatible with 8-bit
+	// registers; XCE flips to native mode (E=0) with 16-bit accumulator /
+	// index registers (widths gated by the M/X status bits), bank registers
+	// (DBR/PBR), a direct-page register (D), and 24-bit addressing. Phase 1
+	// (#456) implements the emulation-mode foundation + mode switching; the
+	// native 16-bit path is #462.
+	VariantW65816
 )
 
 func (v Variant) String() string {
@@ -39,6 +47,8 @@ func (v Variant) String() string {
 		return "65c02"
 	case VariantNES:
 		return "nes"
+	case VariantW65816:
+		return "65816"
 	default:
 		return "nmos"
 	}
@@ -89,6 +99,18 @@ type CPU struct {
 	// (clearable by IRQ/NMI), so Step() refuses to service interrupts while
 	// this flag is set.
 	stoppedBySTP bool
+
+	// 65816 wide state (VariantW65816 only; zero/unused for 6502/CMOS/NES).
+	// The 8-bit A/X/Y/SP/P above are the 6502-compatible low-byte view; these
+	// carry the high halves + banks. E selects emulation (E=true, 6502-style,
+	// 8-bit registers, stack in page $01) vs native (E=false). In native mode
+	// P bits 5/4 are M (accumulator width) / X (index width); in emulation
+	// they read as the 6502's U/B. Accumulator C = B<<8 | A; index hi = XH/YH;
+	// 16-bit SP = SPHi<<8 | SP. (#456)
+	B, XH, YH, SPHi byte
+	D               uint16 // direct-page register
+	DBR, PBR        byte   // data + program bank registers
+	E               bool   // emulation mode (true on reset)
 
 	// extraCycles is set by handlers (e.g. taken branches) to add to the
 	// instruction's base cycle count for the current Step. Reset each Step.
@@ -258,6 +280,8 @@ func (c *CPU) bindTable() {
 	switch c.Variant {
 	case VariantCMOS65C02:
 		c.opcodes = &OpcodesCMOS
+	case VariantW65816:
+		c.opcodes = &Opcodes65816
 	default:
 		c.opcodes = &Opcodes
 	}
@@ -270,6 +294,15 @@ func (c *CPU) Reset() {
 	c.A, c.X, c.Y = 0, 0, 0
 	c.SP = 0xFD
 	c.P = FlagU | FlagI
+	if c.Variant == VariantW65816 {
+		// 65816 powers up in emulation mode (E=1): 8-bit registers, stack in
+		// page $01, M/X forced 1. Native-only state clears (#456).
+		c.E = true
+		c.B, c.XH, c.YH = 0, 0, 0
+		c.SPHi = 0x01
+		c.D = 0
+		c.DBR, c.PBR = 0, 0
+	}
 	lo := uint16(c.Bus.Read(VecReset))
 	hi := uint16(c.Bus.Read(VecReset + 1))
 	c.PC = lo | hi<<8

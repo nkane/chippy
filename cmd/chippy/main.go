@@ -23,7 +23,7 @@ func main() {
 		resetVec    = flag.Uint("reset", 0, "reset vector override (0 = use file's existing vector or load address)")
 		cfg         = flag.String("cfg", "", "ld65 linker config (.cfg) — required when loading .o files")
 		dbgPath     = flag.String("dbg", "", "cc65 .dbg symbol file (auto-detected as <rom>.dbg if omitted)")
-		cpuFlag     = flag.String("cpu", "nmos", "CPU variant: nmos | 65c02 | nes")
+		cpuFlag     = flag.String("cpu", "nmos", "CPU variant: nmos | 65c02 | nes | 65816 (65816 = emulation-mode scaffold, #456)")
 		tracePath   = flag.String("trace", "", "write per-instruction execution trace to this file")
 		runOnStart  = flag.Bool("run-on-start", false, "start the CPU running instead of paused (pair with -trace for non-interactive capture)")
 		dapMode     = flag.String("dap", "", "run as a Debug Adapter Protocol server instead of the TUI: 'stdio' or 'tcp:PORT'")
@@ -79,8 +79,10 @@ func main() {
 		variant = cpu.VariantCMOS65C02
 	case "nes", "2a03", "ricoh":
 		variant = cpu.VariantNES
+	case "65816", "65c816", "w65816":
+		variant = cpu.VariantW65816
 	default:
-		fmt.Fprintf(os.Stderr, "unknown -cpu value %q (want nmos | 65c02 | nes)\n", *cpuFlag)
+		fmt.Fprintf(os.Stderr, "unknown -cpu value %q (want nmos | 65c02 | nes | 65816)\n", *cpuFlag)
 		os.Exit(2)
 	}
 
