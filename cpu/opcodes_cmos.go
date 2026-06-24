@@ -102,20 +102,10 @@ func init() {
 		// BBR/BBS take a flat 6 cycles on real 65C02 silicon (Tom Harte
 		// wdc65c02) — no taken / page-cross penalty, unlike a normal branch.
 		set(byte(0x0F+bit*0x10), "BBR", ZPR, 3, 6, false, func(c *CPU, _ uint16, _ AddrMode) {
-			zp := c.read(c.PC)
-			off := int8(c.read(c.PC + 1))
-			c.PC += 2
-			if c.read(uint16(zp))&(1<<b) == 0 {
-				c.PC = uint16(int32(c.PC) + int32(off))
-			}
+			branchBitTest(c, byte(b), false) // BBR: branch when the bit is reset
 		})
 		set(byte(0x8F+bit*0x10), "BBS", ZPR, 3, 6, false, func(c *CPU, _ uint16, _ AddrMode) {
-			zp := c.read(c.PC)
-			off := int8(c.read(c.PC + 1))
-			c.PC += 2
-			if c.read(uint16(zp))&(1<<b) != 0 {
-				c.PC = uint16(int32(c.PC) + int32(off))
-			}
+			branchBitTest(c, byte(b), true) // BBS: branch when the bit is set
 		})
 	}
 
@@ -196,6 +186,30 @@ func cmosNOPs(set func(op byte, name string, mode AddrMode, bytes, cycles int, p
 // --- New op handlers ---
 
 func opBRA(c *CPU, addr uint16, _ AddrMode) { branch(c, addr, true) }
+
+// branchBitTest implements the 65C02 BBR/BBS per-cycle bus sequence (issue
+// #475), a flat 6 cycles after the opcode fetch: read the zero-page address
+// operand, read the zero-page byte (bit test), a dummy write-back of that byte
+// (the 65C02 RMW-style cycle), read the relative operand, then a dummy read of
+// the computed branch target — which happens ALWAYS, even when the branch is
+// not taken. The branch is taken when the tested bit equals branchIfSet (BBS
+// branches on set, BBR on reset). PC sits at the zp operand on entry (ZPR
+// resolve leaves it there).
+func branchBitTest(c *CPU, bit byte, branchIfSet bool) {
+	zp := c.read(c.PC)
+	c.PC++
+	v := c.read(uint16(zp))
+	c.write(uint16(zp), v) // dummy write-back (same value)
+	off := int8(c.read(c.PC))
+	c.PC++
+	target := uint16(int32(c.PC) + int32(off))
+	// The dummy target read uses the un-fixed address (old high byte); the
+	// page-cross carry only reaches PC when the branch is actually taken.
+	c.read((c.PC & 0xFF00) | (target & 0x00FF))
+	if (v&(1<<bit) != 0) == branchIfSet {
+		c.PC = target
+	}
+}
 
 // opNOPAbs65C02 handles the WDC 3-byte NOPs ($5C/$DC/$FC): they do NOT
 // dereference the operand (unlike the NMOS illegal TOP NOPs); the 4th cycle is

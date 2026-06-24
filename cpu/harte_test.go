@@ -385,26 +385,13 @@ func runHarteBusTrace(t *testing.T, suite harteSuite, skipCase func(byte, *harte
 // per-cycle bus TRACE diverges from the wdc65c02 set. Mirrors #428's 6502
 // work for #455.
 //
-// The only skipped opcodes are the bit-test-and-branch instructions (BBR/BBS,
-// 16 opcodes): their 6-cycle bus pattern is unusual (a dummy write-back of the
-// tested zero-page byte mid-branch, then a branch-target read) and the
-// per-cycle interleave doesn't reproduce it. Their final state AND cycle COUNT
-// are validated by TestHarte65C02 (#426); only the per-cycle bus TRACE is
-// unmodeled. The rest of the CMOS-only opcodes — RMB/SMB, push/pull, the WDC
-// NOPs, JMP indirect, indexed page-cross, and the RMW dummy-read difference —
-// are now bus-exact (#455). WAI/STP are skipped by harteSkip65C02 (they halt);
-// decimal ADC/SBC is skipped per-case (cmosDecimalADCSBC). Emitting BBR/BBS's
-// dummy cycles is the remaining bus-trace tail, tracked as a follow-up.
+// Empty: every 65C02 opcode is now per-cycle bus-exact. The CMOS-only dummy
+// cycles are all modeled — RMW dummy-read, indexed page-cross, JMP indirect,
+// push/pull, the WDC NOPs (#455), and BBR/BBS's dummy write-back + always-on
+// branch-target read (#475). WAI/STP are skipped by harteSkip65C02 (they halt)
+// and decimal ADC/SBC per-case by cmosDecimalADCSBC (the per-cycle path
+// doesn't emit the BCD-correction cycle's bus access).
 var harteBusSkip65C02 = map[byte]string{}
-
-func init() {
-	for op := 0; op < 256; op++ {
-		switch OpcodesCMOS[op].Name {
-		case "BBR", "BBS":
-			harteBusSkip65C02[byte(op)] = OpcodesCMOS[op].Name + ": per-cycle interleave doesn't model the dummy write-back + branch-target reads (state+count validated by TestHarte65C02)"
-		}
-	}
-}
 
 // TestHarte65C02BusTrace validates 65C02 per-cycle bus exactness against the
 // wdc65c02 set (issue #455) — the CMOS sibling of TestHarte6502BusTrace.
