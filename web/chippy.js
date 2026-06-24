@@ -189,6 +189,23 @@ function bindUI() {
     const f = ev.target.files[0];
     if (f) loadUserFile(f);
   });
+
+  // Drag-and-drop a ROM anywhere on the page (issue #457). dragover must
+  // preventDefault to mark the page a drop target; the drop reads the first
+  // file and loads it through the same path as the file picker.
+  document.addEventListener('dragover', (ev) => {
+    ev.preventDefault();
+    document.body.classList.add('dragging');
+  });
+  document.addEventListener('dragleave', (ev) => {
+    if (ev.relatedTarget === null) document.body.classList.remove('dragging');
+  });
+  document.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    document.body.classList.remove('dragging');
+    const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+    if (f) loadUserFile(f);
+  });
   document.getElementById('reset').addEventListener('click', resetCPU);
   document.getElementById('step').addEventListener('click', step);
   document.getElementById('run100').addEventListener('click', () => runN(100));
