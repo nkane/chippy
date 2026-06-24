@@ -13,6 +13,8 @@ body {
   background: var(--bg);
   color: var(--fg);
 }
+/* Drag-and-drop affordance: outline the page while a file is dragged over it. */
+body.dragging { outline: 3px dashed var(--accent); outline-offset: -3px; }
 header {
   padding: 1rem 1.5rem 0.5rem;
   border-bottom: 1px solid var(--border);
