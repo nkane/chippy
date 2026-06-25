@@ -58,6 +58,19 @@ type Bus24 interface {
 // 24 bits on every access.
 func (c *CPU) SetBus24(b Bus24) { c.bus24 = b }
 
+// bus24From16 mirrors a 16-bit Bus into the 24-bit address space — every bank
+// aliases bank 0. It lets the 65816 variant run bank-0 programs through the
+// ordinary MMIO/RAM/watchpoint path so the TUI panels (which read the 16-bit
+// bus) stay accurate. Cross-bank accesses alias to bank 0, a documented
+// limitation until a bank-aware bus lands.
+type bus24From16 struct{ b Bus }
+
+func (m bus24From16) Read24(a uint32) byte     { return m.b.Read(uint16(a)) }
+func (m bus24From16) Write24(a uint32, v byte) { m.b.Write(uint16(a), v) }
+
+// Bus24From16 adapts a 16-bit Bus for the 65816 core (bank-0 mirror).
+func Bus24From16(b Bus) Bus24 { return bus24From16{b} }
+
 // read24 / write24 are the 65816 core's memory primitives (24-bit, wrapping at
 // 16 MB).
 func (c *CPU) read24(addr uint32) byte     { return c.bus24.Read24(addr & 0xFFFFFF) }

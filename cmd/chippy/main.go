@@ -23,7 +23,7 @@ func main() {
 		resetVec    = flag.Uint("reset", 0, "reset vector override (0 = use file's existing vector or load address)")
 		cfg         = flag.String("cfg", "", "ld65 linker config (.cfg) — required when loading .o files")
 		dbgPath     = flag.String("dbg", "", "cc65 .dbg symbol file (auto-detected as <rom>.dbg if omitted)")
-		cpuFlag     = flag.String("cpu", "nmos", "CPU variant: nmos | 65c02 | nes | 65816 (65816 = emulation-mode scaffold, #456)")
+		cpuFlag     = flag.String("cpu", "nmos", "CPU variant: nmos | 65c02 | nes | 65816 (full WDC 65C816, emulation + native)")
 		tracePath   = flag.String("trace", "", "write per-instruction execution trace to this file")
 		runOnStart  = flag.Bool("run-on-start", false, "start the CPU running instead of paused (pair with -trace for non-interactive capture)")
 		dapMode     = flag.String("dap", "", "run as a Debug Adapter Protocol server instead of the TUI: 'stdio' or 'tcp:PORT'")
@@ -194,6 +194,13 @@ func main() {
 	// hands the watch map to the wrapper.
 	wbus := tui.NewWBus(mmio)
 	c.SetBus(wbus)
+
+	// The 65816 core reads/writes through a 24-bit bus. Mirror the 16-bit
+	// MMIO/watchpoint bus into bank 0 so -cpu 65816 runs bank-0 programs
+	// through the same RAM the TUI panels render (#456).
+	if variant == cpu.VariantW65816 {
+		c.SetBus24(cpu.Bus24From16(wbus))
+	}
 
 	var replay, diffReplay *trace.Replay
 	if *traceReplay != "" {
