@@ -2,15 +2,23 @@ package cpu
 
 import "testing"
 
-// new816 builds a 65816 CPU with a one-instruction program at $8000 and the
-// reset vector pointing there.
-func new816(prog ...byte) (*CPU, *RAM) {
-	ram := NewRAM()
-	ram.Load(0x8000, prog)
-	ram.Write(VecReset, 0x00)
-	ram.Write(VecReset+1, 0x80)
-	c := NewVariant(ram, VariantW65816)
-	return c, ram
+// sparseBus is a 24-bit test memory for the 65816 core.
+type sparseBus map[uint32]byte
+
+func (m sparseBus) Read24(a uint32) byte     { return m[a&0xFFFFFF] }
+func (m sparseBus) Write24(a uint32, v byte) { m[a&0xFFFFFF] = v }
+
+// new816 builds a 65816 CPU executing prog at bank 0 / $8000 through a sparse
+// 24-bit bus (the 65816 core's own address space).
+func new816(prog ...byte) (*CPU, sparseBus) {
+	mem := sparseBus{}
+	for i, b := range prog {
+		mem[uint32(0x8000+i)] = b
+	}
+	c := NewVariant(NewRAM(), VariantW65816)
+	c.SetBus24(mem)
+	c.PC = 0x8000
+	return c, mem
 }
 
 func TestW65816_ResetIsEmulationMode(t *testing.T) {
@@ -24,8 +32,24 @@ func TestW65816_ResetIsEmulationMode(t *testing.T) {
 	if c.Variant.String() != "65816" {
 		t.Fatalf("variant string: want 65816, got %q", c.Variant.String())
 	}
-	if c.opcodes != &Opcodes65816 {
-		t.Fatalf("65816 should bind the Opcodes65816 table")
+}
+
+func TestW65816_RegisterAccessors(t *testing.T) {
+	c, _ := new816(0xEA)
+	c.E = false // native: stack high byte not forced
+	c.setA16(0x1234)
+	c.setX16(0x5678)
+	c.setY16(0x9ABC)
+	c.setSP16(0xDEF0)
+	if c.A16() != 0x1234 || c.X16() != 0x5678 || c.Y16() != 0x9ABC || c.SP16() != 0xDEF0 {
+		t.Fatalf("16-bit accessors: A=%04X X=%04X Y=%04X SP=%04X",
+			c.A16(), c.X16(), c.Y16(), c.SP16())
+	}
+	// Emulation locks the stack high byte to $01.
+	c.E = true
+	c.setSP16(0xDEF0)
+	if c.SP16() != 0x01F0 {
+		t.Fatalf("emulation SP high must lock to $01, got %04X", c.SP16())
 	}
 }
 
@@ -33,8 +57,7 @@ func TestW65816_EmulationBaseOpLeavesAccumulatorHighByte(t *testing.T) {
 	// LDA #$42 in emulation mode touches only the low byte; the 16-bit
 	// accumulator high byte (CPU.B) is preserved.
 	c, _ := new816(0xA9, 0x42)
-	c.B = 0x99 // pretend a prior 16-bit op left a high byte
-	c.PC = 0x8000
+	c.B = 0x99
 	c.Step()
 	if c.A != 0x42 {
 		t.Fatalf("LDA #$42: A should be $42, got $%02X", c.A)
@@ -44,21 +67,31 @@ func TestW65816_EmulationBaseOpLeavesAccumulatorHighByte(t *testing.T) {
 	}
 }
 
+func TestW65816_LDAImmediate16BitNative(t *testing.T) {
+	// Native mode, 16-bit accumulator (M=0): LDA # reads two bytes.
+	c, _ := new816(0xA9, 0x34, 0x12)
+	c.E = false
+	c.P &^= FlagM // 16-bit accumulator
+	c.Step()
+	if c.A16() != 0x1234 {
+		t.Fatalf("native 16-bit LDA #$1234: A=%04X", c.A16())
+	}
+	if c.PC != 0x8003 {
+		t.Fatalf("16-bit immediate should consume 2 operand bytes, PC=%04X", c.PC)
+	}
+}
+
 func TestW65816_XCETogglesEmulationAndCarry(t *testing.T) {
-	// Reset: E=1, C=0. XCE -> C=oldE=1, E=oldC=0 (enter native).
-	c, ram := new816(0xFB, 0xFB)
-	c.PC = 0x8000
+	c, _ := new816(0xFB, 0xFB)
 	c.P &^= FlagC // C=0
-	c.Step()      // XCE
+	c.Step()      // XCE: C=oldE=1, E=oldC=0 -> native
 	if c.E {
 		t.Fatalf("XCE with C=0 should enter native mode (E=0)")
 	}
 	if c.P&FlagC == 0 {
 		t.Fatalf("XCE should put old E (1) into carry")
 	}
-	_ = ram
-	// XCE again: C=1 -> E=1 (back to emulation), C=oldE=0.
-	c.Step()
+	c.Step() // XCE: C=1 -> E=1 (emulation), C=oldE=0
 	if !c.E {
 		t.Fatalf("second XCE (C=1) should return to emulation mode (E=1)")
 	}
@@ -66,33 +99,28 @@ func TestW65816_XCETogglesEmulationAndCarry(t *testing.T) {
 		t.Fatalf("second XCE should clear carry (old E was 0)")
 	}
 	if c.SPHi != 0x01 {
-		t.Fatalf("re-entering emulation should reset stack high byte to $01")
+		t.Fatalf("re-entering emulation should force stack high byte to $01")
 	}
 }
 
 func TestW65816_SEPREPSetClearFlags(t *testing.T) {
-	// Native mode so the M/X width bits aren't locked.
 	c, _ := new816(0xE2, 0x20, 0xC2, 0x20) // SEP #$20 ; REP #$20
-	c.PC = 0x8000
-	c.E = false // native
-
-	c.Step() // SEP #$20 -> set bit 5 (M)
-	if c.P&FlagU == 0 {
-		t.Fatalf("SEP #$20 should set P bit 5")
+	c.E = false                            // native so M/X aren't locked
+	c.Step()                               // SEP #$20 -> set bit 5 (M)
+	if c.P&FlagM == 0 {
+		t.Fatalf("SEP #$20 should set the M bit")
 	}
 	c.Step() // REP #$20 -> clear bit 5
-	if c.P&FlagU != 0 {
-		t.Fatalf("REP #$20 should clear P bit 5")
+	if c.P&FlagM != 0 {
+		t.Fatalf("REP #$20 should clear the M bit")
 	}
 }
 
 func TestW65816_EmulationLocksMXBits(t *testing.T) {
-	// In emulation mode REP must not clear the M/X (bit 5/4) flags.
 	c, _ := new816(0xC2, 0x30) // REP #$30 (try to clear bits 4+5)
-	c.PC = 0x8000
-	c.P |= FlagU | FlagB
+	c.P |= FlagM | FlagX
 	c.Step()
-	if c.P&FlagU == 0 || c.P&FlagB == 0 {
-		t.Fatalf("emulation mode must lock M/X (bits 5/4); REP #$30 cleared them: P=$%02X", c.P)
+	if c.P&FlagM == 0 || c.P&FlagX == 0 {
+		t.Fatalf("emulation mode must lock M/X; REP #$30 cleared them: P=$%02X", c.P)
 	}
 }
