@@ -53,6 +53,10 @@ func (c *CPU) writeEA(e ea816, wide bool, v uint16) {
 	}
 }
 
+// bankInc increments a 24-bit address, wrapping within its bank (the high byte
+// of a same-bank pointer fetch stays in the program/data bank).
+func bankInc(a uint32) uint32 { return a&0xFF0000 | uint32(uint16(a)+1) }
+
 func (c *CPU) dlPenalty() int {
 	if c.D&0xFF != 0 {
 		return 1
@@ -87,6 +91,14 @@ func (c *CPU) readDPLong(dp byte) uint32 {
 	b1 := uint32(c.read24(uint32(uint16(base) + 1)))
 	b2 := uint32(c.read24(uint32(uint16(base) + 2)))
 	return b0 | b1<<8 | b2<<16
+}
+
+// readDPWordWrap reads a 16-bit value from direct page at D+dp with each byte
+// honoring the emulation DL=0 page-wrap (used by PEI).
+func (c *CPU) readDPWordWrap(dp byte) uint16 {
+	lo := uint16(c.read24(c.dpOff(dp, 0)))
+	hi := uint16(c.read24(c.dpOff(dp, 1)))
+	return lo | hi<<8
 }
 
 // readDPLongWrap reads a 24-bit pointer for the [dp],Y form. Unlike [dp], each

@@ -636,6 +636,295 @@ func (c *CPU) step816() int {
 		e, oc := c.amAbsIdx(c.Xidx())
 		cyc = c.accRead(e, oc, c.bitV)
 
+	// === chunk 3: RMW / stack / control flow ===
+
+	// --- shifts/rotates (accumulator + memory) ---
+	case 0x0A:
+		c.accRMW(c.rmwASL)
+	case 0x06:
+		e, oc := c.amDP()
+		cyc = c.rmwMem(e, oc, c.rmwASL)
+	case 0x0E:
+		e, oc := c.amAbs()
+		cyc = c.rmwMem(e, oc, c.rmwASL)
+	case 0x16:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.rmwMem(e, oc, c.rmwASL)
+	case 0x1E:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.rmwMem(e, oc, c.rmwASL)
+	case 0x4A:
+		c.accRMW(c.rmwLSR)
+	case 0x46:
+		e, oc := c.amDP()
+		cyc = c.rmwMem(e, oc, c.rmwLSR)
+	case 0x4E:
+		e, oc := c.amAbs()
+		cyc = c.rmwMem(e, oc, c.rmwLSR)
+	case 0x56:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.rmwMem(e, oc, c.rmwLSR)
+	case 0x5E:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.rmwMem(e, oc, c.rmwLSR)
+	case 0x2A:
+		c.accRMW(c.rmwROL)
+	case 0x26:
+		e, oc := c.amDP()
+		cyc = c.rmwMem(e, oc, c.rmwROL)
+	case 0x2E:
+		e, oc := c.amAbs()
+		cyc = c.rmwMem(e, oc, c.rmwROL)
+	case 0x36:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.rmwMem(e, oc, c.rmwROL)
+	case 0x3E:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.rmwMem(e, oc, c.rmwROL)
+	case 0x6A:
+		c.accRMW(c.rmwROR)
+	case 0x66:
+		e, oc := c.amDP()
+		cyc = c.rmwMem(e, oc, c.rmwROR)
+	case 0x6E:
+		e, oc := c.amAbs()
+		cyc = c.rmwMem(e, oc, c.rmwROR)
+	case 0x76:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.rmwMem(e, oc, c.rmwROR)
+	case 0x7E:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.rmwMem(e, oc, c.rmwROR)
+
+	// --- INC/DEC memory ---
+	case 0xE6:
+		e, oc := c.amDP()
+		cyc = c.rmwMem(e, oc, c.rmwINC)
+	case 0xEE:
+		e, oc := c.amAbs()
+		cyc = c.rmwMem(e, oc, c.rmwINC)
+	case 0xF6:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.rmwMem(e, oc, c.rmwINC)
+	case 0xFE:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.rmwMem(e, oc, c.rmwINC)
+	case 0xC6:
+		e, oc := c.amDP()
+		cyc = c.rmwMem(e, oc, c.rmwDEC)
+	case 0xCE:
+		e, oc := c.amAbs()
+		cyc = c.rmwMem(e, oc, c.rmwDEC)
+	case 0xD6:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.rmwMem(e, oc, c.rmwDEC)
+	case 0xDE:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.rmwMem(e, oc, c.rmwDEC)
+
+	// --- TSB/TRB ---
+	case 0x04:
+		e, oc := c.amDP()
+		cyc = c.rmwMem(e, oc, c.tsb)
+	case 0x0C:
+		e, oc := c.amAbs()
+		cyc = c.rmwMem(e, oc, c.tsb)
+	case 0x14:
+		e, oc := c.amDP()
+		cyc = c.rmwMem(e, oc, c.trb)
+	case 0x1C:
+		e, oc := c.amAbs()
+		cyc = c.rmwMem(e, oc, c.trb)
+
+	// --- stack push/pull ---
+	case 0x48: // PHA
+		if c.mWide() {
+			c.spPush16(c.A16())
+		} else {
+			c.spPush8(c.A)
+		}
+		cyc = 3 + b2i(c.mWide())
+	case 0x68: // PLA
+		if c.mWide() {
+			v := c.spPull16()
+			c.setA16(v)
+			c.setZN16(v)
+		} else {
+			c.A = c.spPull8()
+			c.setZN(c.A)
+		}
+		cyc = 4 + b2i(c.mWide())
+	case 0xDA: // PHX
+		if c.xWide() {
+			c.spPush16(c.X16())
+		} else {
+			c.spPush8(c.X)
+		}
+		cyc = 3 + b2i(c.xWide())
+	case 0xFA: // PLX
+		if c.xWide() {
+			v := c.spPull16()
+			c.setX16(v)
+			c.setZN16(v)
+		} else {
+			c.X = c.spPull8()
+			c.setZN(c.X)
+		}
+		cyc = 4 + b2i(c.xWide())
+	case 0x5A: // PHY
+		if c.xWide() {
+			c.spPush16(c.Y16())
+		} else {
+			c.spPush8(c.Y)
+		}
+		cyc = 3 + b2i(c.xWide())
+	case 0x7A: // PLY
+		if c.xWide() {
+			v := c.spPull16()
+			c.setY16(v)
+			c.setZN16(v)
+		} else {
+			c.Y = c.spPull8()
+			c.setZN(c.Y)
+		}
+		cyc = 4 + b2i(c.xWide())
+	case 0x08: // PHP
+		c.spPush8(c.P)
+		cyc = 3
+	case 0x28: // PLP
+		c.plp816()
+		cyc = 4
+	case 0x8B: // PHB
+		c.spPush8(c.DBR)
+		cyc = 3
+	case 0xAB: // PLB
+		c.DBR = c.spPull8()
+		c.setZN(c.DBR)
+		cyc = 4
+	case 0x4B: // PHK
+		c.spPush8(c.PBR)
+		cyc = 3
+	case 0x0B: // PHD
+		c.spPush16New(c.D)
+		c.spReforce()
+		cyc = 4
+	case 0x2B: // PLD
+		c.D = c.spPull16New()
+		c.spReforce()
+		c.setZN16(c.D)
+		cyc = 5
+	case 0xF4: // PEA
+		c.spPush16New(c.fetch16())
+		c.spReforce()
+		cyc = 5
+	case 0xD4: // PEI
+		dp := c.fetch816()
+		c.spPush16New(c.readDPWordWrap(dp))
+		c.spReforce()
+		cyc = 6 + c.dlPenalty()
+	case 0x62: // PER
+		disp := int16(c.fetch16())
+		c.spPush16New(uint16(int(c.PC) + int(disp)))
+		c.spReforce()
+		cyc = 6
+
+	// --- jumps / calls / returns ---
+	case 0x4C: // JMP abs
+		c.PC = c.fetch16()
+		cyc = 3
+	case 0x5C: // JML long
+		t := c.fetch24()
+		c.PBR = byte(t >> 16)
+		c.PC = uint16(t)
+		cyc = 4
+	case 0x6C: // JMP (abs)
+		ptr := c.fetch16()
+		c.PC = uint16(c.read24(uint32(ptr))) | uint16(c.read24(uint32((ptr+1)&0xFFFF)))<<8
+		cyc = 5
+	case 0x7C: // JMP (abs,X)
+		a := uint32(c.PBR)<<16 | uint32(c.fetch16()+c.Xidx())
+		c.PC = uint16(c.read24(a)) | uint16(c.read24(bankInc(a)))<<8
+		cyc = 6
+	case 0xDC: // JML [abs]
+		ptr := c.fetch16()
+		lo := uint16(c.read24(uint32(ptr)))
+		hi := uint16(c.read24(uint32((ptr + 1) & 0xFFFF)))
+		c.PBR = c.read24(uint32((ptr + 2) & 0xFFFF))
+		c.PC = lo | hi<<8
+		cyc = 6
+	case 0x20: // JSR abs
+		t := c.fetch16()
+		c.spPush16(c.PC - 1)
+		c.PC = t
+		cyc = 6
+	case 0x22: // JSL long
+		t := c.fetch24()
+		c.spPushNew(c.PBR)
+		c.spPush16New(c.PC - 1)
+		c.spReforce()
+		c.PBR = byte(t >> 16)
+		c.PC = uint16(t)
+		cyc = 8
+	case 0xFC: // JSR (abs,X)
+		a := uint32(c.PBR)<<16 | uint32(c.fetch16()+c.Xidx())
+		c.spPush16(c.PC - 1)
+		c.PC = uint16(c.read24(a)) | uint16(c.read24(bankInc(a)))<<8
+		cyc = 8
+	case 0x60: // RTS
+		c.PC = c.spPull16() + 1
+		cyc = 6
+	case 0x6B: // RTL
+		lo := c.spPull16New()
+		c.PBR = c.spPullNew()
+		c.spReforce()
+		c.PC = lo + 1
+		cyc = 6
+	case 0x40: // RTI
+		c.plp816()
+		c.PC = c.spPull16()
+		cyc = 6
+		if !c.E {
+			c.PBR = c.spPull8()
+			cyc = 7
+		}
+
+	// --- branches ---
+	case 0x10:
+		cyc = c.branch816(!c.hasFlag(FlagN))
+	case 0x30:
+		cyc = c.branch816(c.hasFlag(FlagN))
+	case 0x50:
+		cyc = c.branch816(!c.hasFlag(FlagV))
+	case 0x70:
+		cyc = c.branch816(c.hasFlag(FlagV))
+	case 0x90:
+		cyc = c.branch816(!c.hasFlag(FlagC))
+	case 0xB0:
+		cyc = c.branch816(c.hasFlag(FlagC))
+	case 0xD0:
+		cyc = c.branch816(!c.hasFlag(FlagZ))
+	case 0xF0:
+		cyc = c.branch816(c.hasFlag(FlagZ))
+	case 0x80: // BRA
+		cyc = c.branch816(true)
+	case 0x82: // BRL
+		cyc = c.brl()
+
+	// --- interrupts / misc ---
+	case 0x00: // BRK
+		cyc = c.brk()
+	case 0x02: // COP
+		cyc = c.cop()
+	case 0x42: // WDM (2-byte no-op)
+		c.fetch816()
+	case 0xCB: // WAI
+		c.Halted = true
+		cyc = 4
+	case 0xDB: // STP
+		c.Halted = true
+		c.stoppedBySTP = true
+		cyc = 4
+
 	default:
 		panic("65816: unimplemented opcode $" + hexByte(op) + " (chunk 1: register/flag/transfer/immediate only)")
 	}
