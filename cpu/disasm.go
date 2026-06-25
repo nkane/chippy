@@ -27,11 +27,17 @@ func DisasmWithSyms(bus Bus, addr uint16, sym SymLookup) (string, int) {
 // (STZ, PHX, BRA, BBR0-7, …) instead of whatever the NMOS slot happens
 // to be (often an illegal NOP).
 func DisasmCPU(c *CPU, addr uint16) (string, int) {
+	if c.Variant == VariantW65816 {
+		return Disasm816(c, c.Bus, addr)
+	}
 	return disasmWithTable(c.Bus, addr, c.opcodes, nil)
 }
 
 // DisasmCPUWithSyms is the symbol-aware variant of DisasmCPU.
 func DisasmCPUWithSyms(c *CPU, addr uint16, sym SymLookup) (string, int) {
+	if c.Variant == VariantW65816 {
+		return Disasm816(c, c.Bus, addr)
+	}
 	return disasmWithTable(c.Bus, addr, c.opcodes, sym)
 }
 

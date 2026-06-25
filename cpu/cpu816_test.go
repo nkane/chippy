@@ -151,6 +151,60 @@ func TestW65816_BlockMoveMVN(t *testing.T) {
 	}
 }
 
+func TestW65816_DisasmWidthAndModes(t *testing.T) {
+	ram := NewRAM()
+	c := NewVariant(ram, VariantW65816)
+	c.E = false
+
+	// LDA # is 16-bit (3 bytes) when M=0, 8-bit (2 bytes) when M=1.
+	ram.Write(0x1000, 0xA9)
+	ram.Write(0x1001, 0x34)
+	ram.Write(0x1002, 0x12)
+	c.P &^= FlagM
+	if txt, n := DisasmCPU(c, 0x1000); txt != "LDA  #$1234" || n != 3 {
+		t.Fatalf("16-bit immediate: %q n=%d", txt, n)
+	}
+	c.P |= FlagM
+	if txt, n := DisasmCPU(c, 0x1000); txt != "LDA  #$34" || n != 2 {
+		t.Fatalf("8-bit immediate: %q n=%d", txt, n)
+	}
+
+	// LDA long (24-bit).
+	ram.Write(0x2000, 0xAF)
+	ram.Write(0x2001, 0x56)
+	ram.Write(0x2002, 0x34)
+	ram.Write(0x2003, 0x12)
+	if txt, n := DisasmCPU(c, 0x2000); txt != "LDA  $123456" || n != 4 {
+		t.Fatalf("long: %q n=%d", txt, n)
+	}
+
+	// [dp] and MVN render the 65816-specific syntaxes.
+	ram.Write(0x3000, 0xA7)
+	ram.Write(0x3001, 0x10)
+	if txt, _ := DisasmCPU(c, 0x3000); txt != "LDA  [$10]" {
+		t.Fatalf("[dp]: %q", txt)
+	}
+	ram.Write(0x3100, 0x54) // MVN dst=$02, src=$01 -> "MVN $01,$02"
+	ram.Write(0x3101, 0x02)
+	ram.Write(0x3102, 0x01)
+	if txt, n := DisasmCPU(c, 0x3100); txt != "MVN  $01,$02" || n != 3 {
+		t.Fatalf("MVN: %q n=%d", txt, n)
+	}
+}
+
+func TestW65816_Bus24From16Bridge(t *testing.T) {
+	ram := NewRAM()
+	c := NewVariant(ram, VariantW65816)
+	c.SetBus24(Bus24From16(ram))
+	ram.Write(0x8000, 0xA9) // LDA #$42
+	ram.Write(0x8001, 0x42)
+	c.PC = 0x8000
+	c.Step()
+	if c.A != 0x42 {
+		t.Fatalf("bank-0 bridge LDA: A=$%02X want $42", c.A)
+	}
+}
+
 func TestW65816_BlockMoveMVP(t *testing.T) {
 	// MVP moves descending. Move 3 bytes ending at src $2002 -> dst $3002.
 	c, mem := new816(0x44, 0x00, 0x00)

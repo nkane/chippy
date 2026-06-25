@@ -175,7 +175,7 @@ Flags:
 | `-cfg`   | —       | ld65 linker config (required for `.o`)                 |
 | `-dbg`   | auto    | cc65 `.dbg` symbol file; `<rom>.dbg` is tried by default |
 | `-reset` | `0`     | Override reset vector. `0` keeps the existing `$FFFC/D` bytes (or falls back to the load address if those are zero) |
-| `--cpu`  | `nmos`  | CPU variant: `nmos` (MOS 6502), `65c02` (WDC/Rockwell CMOS), `nes` (Ricoh 2A03 — NMOS minus decimal-mode arithmetic), or `65816` (WDC 65C816 — emulation-mode scaffold; full 16-bit core is #456) |
+| `--cpu`  | `nmos`  | CPU variant: `nmos` (MOS 6502), `65c02` (WDC/Rockwell CMOS), `nes` (Ricoh 2A03 — NMOS minus decimal-mode arithmetic), or `65816` (WDC 65C816 — full 16-bit core, emulation + native, Tom Harte-validated; runs bank-0 programs through the TUI) |
 | `-trace` | —       | Write per-instruction execution trace to this file. Also toggleable at runtime via `:trace PATH \| :trace on \| :trace off`. |
 | `-run-on-start` | `false` | Start the CPU running instead of paused. Pair with `-trace` for non-interactive capture (`chippy -rom prog.bin -trace t.log -run-on-start`). |
 | `-dap`  | —       | Run as a [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) server instead of the TUI. Accepts `stdio` (editor pipes stdin/stdout), `tcp:PORT` (server listens, editor connects out), `unix:PATH` (unix-domain socket, lowest-overhead local), or `inproc` (in-process loopback self-check). See [`docs/dap.md`](docs/dap.md) for the request list, transport benchmarks, and VS Code / nvim-dap onboarding. |
