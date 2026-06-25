@@ -186,6 +186,456 @@ func (c *CPU) step816() int {
 		}
 		cyc = 3
 
+	// === chunk 2: data-movement / ALU memory ops ===
+
+	// --- ORA ---
+	case 0x01:
+		e, oc := c.amIndDPX()
+		cyc = c.accRead(e, oc, c.oraV)
+	case 0x03:
+		e, oc := c.amStackRel()
+		cyc = c.accRead(e, oc, c.oraV)
+	case 0x05:
+		e, oc := c.amDP()
+		cyc = c.accRead(e, oc, c.oraV)
+	case 0x07:
+		e, oc := c.amIndLongDP()
+		cyc = c.accRead(e, oc, c.oraV)
+	case 0x0D:
+		e, oc := c.amAbs()
+		cyc = c.accRead(e, oc, c.oraV)
+	case 0x0F:
+		e, oc := c.amLong()
+		cyc = c.accRead(e, oc, c.oraV)
+	case 0x11:
+		e, oc := c.amIndDPY()
+		cyc = c.accRead(e, oc, c.oraV)
+	case 0x12:
+		e, oc := c.amIndDP()
+		cyc = c.accRead(e, oc, c.oraV)
+	case 0x13:
+		e, oc := c.amStackRelIndY()
+		cyc = c.accRead(e, oc, c.oraV)
+	case 0x15:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.oraV)
+	case 0x17:
+		e, oc := c.amIndLongDPY()
+		cyc = c.accRead(e, oc, c.oraV)
+	case 0x19:
+		e, oc := c.amAbsIdx(c.Yidx())
+		cyc = c.accRead(e, oc, c.oraV)
+	case 0x1D:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.oraV)
+	case 0x1F:
+		e, oc := c.amLongX()
+		cyc = c.accRead(e, oc, c.oraV)
+
+	// --- AND ---
+	case 0x21:
+		e, oc := c.amIndDPX()
+		cyc = c.accRead(e, oc, c.andV)
+	case 0x23:
+		e, oc := c.amStackRel()
+		cyc = c.accRead(e, oc, c.andV)
+	case 0x25:
+		e, oc := c.amDP()
+		cyc = c.accRead(e, oc, c.andV)
+	case 0x27:
+		e, oc := c.amIndLongDP()
+		cyc = c.accRead(e, oc, c.andV)
+	case 0x2D:
+		e, oc := c.amAbs()
+		cyc = c.accRead(e, oc, c.andV)
+	case 0x2F:
+		e, oc := c.amLong()
+		cyc = c.accRead(e, oc, c.andV)
+	case 0x31:
+		e, oc := c.amIndDPY()
+		cyc = c.accRead(e, oc, c.andV)
+	case 0x32:
+		e, oc := c.amIndDP()
+		cyc = c.accRead(e, oc, c.andV)
+	case 0x33:
+		e, oc := c.amStackRelIndY()
+		cyc = c.accRead(e, oc, c.andV)
+	case 0x35:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.andV)
+	case 0x37:
+		e, oc := c.amIndLongDPY()
+		cyc = c.accRead(e, oc, c.andV)
+	case 0x39:
+		e, oc := c.amAbsIdx(c.Yidx())
+		cyc = c.accRead(e, oc, c.andV)
+	case 0x3D:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.andV)
+	case 0x3F:
+		e, oc := c.amLongX()
+		cyc = c.accRead(e, oc, c.andV)
+
+	// --- EOR ---
+	case 0x41:
+		e, oc := c.amIndDPX()
+		cyc = c.accRead(e, oc, c.eorV)
+	case 0x43:
+		e, oc := c.amStackRel()
+		cyc = c.accRead(e, oc, c.eorV)
+	case 0x45:
+		e, oc := c.amDP()
+		cyc = c.accRead(e, oc, c.eorV)
+	case 0x47:
+		e, oc := c.amIndLongDP()
+		cyc = c.accRead(e, oc, c.eorV)
+	case 0x4D:
+		e, oc := c.amAbs()
+		cyc = c.accRead(e, oc, c.eorV)
+	case 0x4F:
+		e, oc := c.amLong()
+		cyc = c.accRead(e, oc, c.eorV)
+	case 0x51:
+		e, oc := c.amIndDPY()
+		cyc = c.accRead(e, oc, c.eorV)
+	case 0x52:
+		e, oc := c.amIndDP()
+		cyc = c.accRead(e, oc, c.eorV)
+	case 0x53:
+		e, oc := c.amStackRelIndY()
+		cyc = c.accRead(e, oc, c.eorV)
+	case 0x55:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.eorV)
+	case 0x57:
+		e, oc := c.amIndLongDPY()
+		cyc = c.accRead(e, oc, c.eorV)
+	case 0x59:
+		e, oc := c.amAbsIdx(c.Yidx())
+		cyc = c.accRead(e, oc, c.eorV)
+	case 0x5D:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.eorV)
+	case 0x5F:
+		e, oc := c.amLongX()
+		cyc = c.accRead(e, oc, c.eorV)
+
+	// --- ADC ---
+	case 0x61:
+		e, oc := c.amIndDPX()
+		cyc = c.accRead(e, oc, c.adc816)
+	case 0x63:
+		e, oc := c.amStackRel()
+		cyc = c.accRead(e, oc, c.adc816)
+	case 0x65:
+		e, oc := c.amDP()
+		cyc = c.accRead(e, oc, c.adc816)
+	case 0x67:
+		e, oc := c.amIndLongDP()
+		cyc = c.accRead(e, oc, c.adc816)
+	case 0x69: // ADC #
+		v, e := c.readImm(c.mWide())
+		c.adc816(v)
+		cyc += e
+	case 0x6D:
+		e, oc := c.amAbs()
+		cyc = c.accRead(e, oc, c.adc816)
+	case 0x6F:
+		e, oc := c.amLong()
+		cyc = c.accRead(e, oc, c.adc816)
+	case 0x71:
+		e, oc := c.amIndDPY()
+		cyc = c.accRead(e, oc, c.adc816)
+	case 0x72:
+		e, oc := c.amIndDP()
+		cyc = c.accRead(e, oc, c.adc816)
+	case 0x73:
+		e, oc := c.amStackRelIndY()
+		cyc = c.accRead(e, oc, c.adc816)
+	case 0x75:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.adc816)
+	case 0x77:
+		e, oc := c.amIndLongDPY()
+		cyc = c.accRead(e, oc, c.adc816)
+	case 0x79:
+		e, oc := c.amAbsIdx(c.Yidx())
+		cyc = c.accRead(e, oc, c.adc816)
+	case 0x7D:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.adc816)
+	case 0x7F:
+		e, oc := c.amLongX()
+		cyc = c.accRead(e, oc, c.adc816)
+
+	// --- STA ---
+	case 0x81:
+		e, oc := c.amIndDPX()
+		cyc = c.accWrite(e, oc, c.A16())
+	case 0x83:
+		e, oc := c.amStackRel()
+		cyc = c.accWrite(e, oc, c.A16())
+	case 0x85:
+		e, oc := c.amDP()
+		cyc = c.accWrite(e, oc, c.A16())
+	case 0x87:
+		e, oc := c.amIndLongDP()
+		cyc = c.accWrite(e, oc, c.A16())
+	case 0x8D:
+		e, oc := c.amAbs()
+		cyc = c.accWrite(e, oc, c.A16())
+	case 0x8F:
+		e, oc := c.amLong()
+		cyc = c.accWrite(e, oc, c.A16())
+	case 0x91:
+		e, oc := c.amIndDPY()
+		cyc = c.accWrite(e, oc, c.A16())
+	case 0x92:
+		e, oc := c.amIndDP()
+		cyc = c.accWrite(e, oc, c.A16())
+	case 0x93:
+		e, oc := c.amStackRelIndY()
+		cyc = c.accWrite(e, oc, c.A16())
+	case 0x95:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.accWrite(e, oc, c.A16())
+	case 0x97:
+		e, oc := c.amIndLongDPY()
+		cyc = c.accWrite(e, oc, c.A16())
+	case 0x99:
+		e, oc := c.amAbsIdx(c.Yidx())
+		cyc = c.accWrite(e, oc, c.A16())
+	case 0x9D:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.accWrite(e, oc, c.A16())
+	case 0x9F:
+		e, oc := c.amLongX()
+		cyc = c.accWrite(e, oc, c.A16())
+
+	// --- LDA ---
+	case 0xA1:
+		e, oc := c.amIndDPX()
+		cyc = c.accRead(e, oc, c.loadAcc)
+	case 0xA3:
+		e, oc := c.amStackRel()
+		cyc = c.accRead(e, oc, c.loadAcc)
+	case 0xA5:
+		e, oc := c.amDP()
+		cyc = c.accRead(e, oc, c.loadAcc)
+	case 0xA7:
+		e, oc := c.amIndLongDP()
+		cyc = c.accRead(e, oc, c.loadAcc)
+	case 0xAD:
+		e, oc := c.amAbs()
+		cyc = c.accRead(e, oc, c.loadAcc)
+	case 0xAF:
+		e, oc := c.amLong()
+		cyc = c.accRead(e, oc, c.loadAcc)
+	case 0xB1:
+		e, oc := c.amIndDPY()
+		cyc = c.accRead(e, oc, c.loadAcc)
+	case 0xB2:
+		e, oc := c.amIndDP()
+		cyc = c.accRead(e, oc, c.loadAcc)
+	case 0xB3:
+		e, oc := c.amStackRelIndY()
+		cyc = c.accRead(e, oc, c.loadAcc)
+	case 0xB5:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.loadAcc)
+	case 0xB7:
+		e, oc := c.amIndLongDPY()
+		cyc = c.accRead(e, oc, c.loadAcc)
+	case 0xB9:
+		e, oc := c.amAbsIdx(c.Yidx())
+		cyc = c.accRead(e, oc, c.loadAcc)
+	case 0xBD:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.loadAcc)
+	case 0xBF:
+		e, oc := c.amLongX()
+		cyc = c.accRead(e, oc, c.loadAcc)
+
+	// --- CMP ---
+	case 0xC1:
+		e, oc := c.amIndDPX()
+		cyc = c.accRead(e, oc, c.cmpAccV)
+	case 0xC3:
+		e, oc := c.amStackRel()
+		cyc = c.accRead(e, oc, c.cmpAccV)
+	case 0xC5:
+		e, oc := c.amDP()
+		cyc = c.accRead(e, oc, c.cmpAccV)
+	case 0xC7:
+		e, oc := c.amIndLongDP()
+		cyc = c.accRead(e, oc, c.cmpAccV)
+	case 0xCD:
+		e, oc := c.amAbs()
+		cyc = c.accRead(e, oc, c.cmpAccV)
+	case 0xCF:
+		e, oc := c.amLong()
+		cyc = c.accRead(e, oc, c.cmpAccV)
+	case 0xD1:
+		e, oc := c.amIndDPY()
+		cyc = c.accRead(e, oc, c.cmpAccV)
+	case 0xD2:
+		e, oc := c.amIndDP()
+		cyc = c.accRead(e, oc, c.cmpAccV)
+	case 0xD3:
+		e, oc := c.amStackRelIndY()
+		cyc = c.accRead(e, oc, c.cmpAccV)
+	case 0xD5:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.cmpAccV)
+	case 0xD7:
+		e, oc := c.amIndLongDPY()
+		cyc = c.accRead(e, oc, c.cmpAccV)
+	case 0xD9:
+		e, oc := c.amAbsIdx(c.Yidx())
+		cyc = c.accRead(e, oc, c.cmpAccV)
+	case 0xDD:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.cmpAccV)
+	case 0xDF:
+		e, oc := c.amLongX()
+		cyc = c.accRead(e, oc, c.cmpAccV)
+
+	// --- SBC ---
+	case 0xE1:
+		e, oc := c.amIndDPX()
+		cyc = c.accRead(e, oc, c.sbc816)
+	case 0xE3:
+		e, oc := c.amStackRel()
+		cyc = c.accRead(e, oc, c.sbc816)
+	case 0xE5:
+		e, oc := c.amDP()
+		cyc = c.accRead(e, oc, c.sbc816)
+	case 0xE7:
+		e, oc := c.amIndLongDP()
+		cyc = c.accRead(e, oc, c.sbc816)
+	case 0xE9: // SBC #
+		v, e := c.readImm(c.mWide())
+		c.sbc816(v)
+		cyc += e
+	case 0xED:
+		e, oc := c.amAbs()
+		cyc = c.accRead(e, oc, c.sbc816)
+	case 0xEF:
+		e, oc := c.amLong()
+		cyc = c.accRead(e, oc, c.sbc816)
+	case 0xF1:
+		e, oc := c.amIndDPY()
+		cyc = c.accRead(e, oc, c.sbc816)
+	case 0xF2:
+		e, oc := c.amIndDP()
+		cyc = c.accRead(e, oc, c.sbc816)
+	case 0xF3:
+		e, oc := c.amStackRelIndY()
+		cyc = c.accRead(e, oc, c.sbc816)
+	case 0xF5:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.sbc816)
+	case 0xF7:
+		e, oc := c.amIndLongDPY()
+		cyc = c.accRead(e, oc, c.sbc816)
+	case 0xF9:
+		e, oc := c.amAbsIdx(c.Yidx())
+		cyc = c.accRead(e, oc, c.sbc816)
+	case 0xFD:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.sbc816)
+	case 0xFF:
+		e, oc := c.amLongX()
+		cyc = c.accRead(e, oc, c.sbc816)
+
+	// --- LDX / LDY ---
+	case 0xA6:
+		e, oc := c.amDP()
+		cyc = c.idxRead(e, oc, func(v uint16) { c.loadIndex(&c.X, &c.XH, v) })
+	case 0xAE:
+		e, oc := c.amAbs()
+		cyc = c.idxRead(e, oc, func(v uint16) { c.loadIndex(&c.X, &c.XH, v) })
+	case 0xB6:
+		e, oc := c.amDPIdx(c.Yidx())
+		cyc = c.idxRead(e, oc, func(v uint16) { c.loadIndex(&c.X, &c.XH, v) })
+	case 0xBE:
+		e, oc := c.amAbsIdx(c.Yidx())
+		cyc = c.idxRead(e, oc, func(v uint16) { c.loadIndex(&c.X, &c.XH, v) })
+	case 0xA4:
+		e, oc := c.amDP()
+		cyc = c.idxRead(e, oc, func(v uint16) { c.loadIndex(&c.Y, &c.YH, v) })
+	case 0xAC:
+		e, oc := c.amAbs()
+		cyc = c.idxRead(e, oc, func(v uint16) { c.loadIndex(&c.Y, &c.YH, v) })
+	case 0xB4:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.idxRead(e, oc, func(v uint16) { c.loadIndex(&c.Y, &c.YH, v) })
+	case 0xBC:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.idxRead(e, oc, func(v uint16) { c.loadIndex(&c.Y, &c.YH, v) })
+
+	// --- STX / STY ---
+	case 0x86:
+		e, oc := c.amDP()
+		cyc = c.idxWrite(e, oc, c.X16())
+	case 0x8E:
+		e, oc := c.amAbs()
+		cyc = c.idxWrite(e, oc, c.X16())
+	case 0x96:
+		e, oc := c.amDPIdx(c.Yidx())
+		cyc = c.idxWrite(e, oc, c.X16())
+	case 0x84:
+		e, oc := c.amDP()
+		cyc = c.idxWrite(e, oc, c.Y16())
+	case 0x8C:
+		e, oc := c.amAbs()
+		cyc = c.idxWrite(e, oc, c.Y16())
+	case 0x94:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.idxWrite(e, oc, c.Y16())
+
+	// --- STZ ---
+	case 0x64:
+		e, oc := c.amDP()
+		cyc = c.accWrite(e, oc, 0)
+	case 0x74:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.accWrite(e, oc, 0)
+	case 0x9C:
+		e, oc := c.amAbs()
+		cyc = c.accWrite(e, oc, 0)
+	case 0x9E:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.accWrite(e, oc, 0)
+
+	// --- CPX / CPY ---
+	case 0xE4:
+		e, oc := c.amDP()
+		cyc = c.idxRead(e, oc, func(v uint16) { c.compare(c.X16(), v, c.xWide()) })
+	case 0xEC:
+		e, oc := c.amAbs()
+		cyc = c.idxRead(e, oc, func(v uint16) { c.compare(c.X16(), v, c.xWide()) })
+	case 0xC4:
+		e, oc := c.amDP()
+		cyc = c.idxRead(e, oc, func(v uint16) { c.compare(c.Y16(), v, c.xWide()) })
+	case 0xCC:
+		e, oc := c.amAbs()
+		cyc = c.idxRead(e, oc, func(v uint16) { c.compare(c.Y16(), v, c.xWide()) })
+
+	// --- BIT (memory forms; immediate $89 is handled above, Z-only) ---
+	case 0x24:
+		e, oc := c.amDP()
+		cyc = c.accRead(e, oc, c.bitV)
+	case 0x2C:
+		e, oc := c.amAbs()
+		cyc = c.accRead(e, oc, c.bitV)
+	case 0x34:
+		e, oc := c.amDPIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.bitV)
+	case 0x3C:
+		e, oc := c.amAbsIdx(c.Xidx())
+		cyc = c.accRead(e, oc, c.bitV)
+
 	default:
 		panic("65816: unimplemented opcode $" + hexByte(op) + " (chunk 1: register/flag/transfer/immediate only)")
 	}
