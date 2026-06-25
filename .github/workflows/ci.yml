@@ -154,22 +154,29 @@ jobs:
         run: go test -tags=harte -timeout 5m -run TestHarte65C02 -v ./cpu/...
 
       # WDC 65C816 set (#456). Newer pin than 6502/65C02, split per mode
-      # (<op>.e.json / <op>.n.json). Chunk 1 covers only the register / flag /
-      # transfer / immediate opcodes, so download just those rather than the
-      # full 512-file corpus. Validates final state + cycle count.
+      # (<op>.e.json / <op>.n.json). The core is built incrementally, so
+      # download only the implemented opcodes rather than the full 512-file
+      # corpus. Validates final state + cycle count.
       - name: Cache Tom Harte 65816 data
         id: harte-cache-65816
         uses: actions/cache@v5
         with:
           path: harte-data-65816
-          key: harte-wdc65816-dff67125-chunk1
+          key: harte-wdc65816-dff67125-chunk2
 
-      - name: Download Tom Harte 65816 chunk-1 data
+      - name: Download Tom Harte 65816 implemented-opcode data
         if: steps.harte-cache-65816.outputs.cache-hit != 'true'
         run: |
           mkdir -p harte-data-65816
           base="https://raw.githubusercontent.com/TomHarte/ProcessorTests/dff67125c4aa0a15f928769b7cbc85b2ead6c6ad/65816/v1"
+          # chunk 1: register/flag/transfer/immediate
           ops="ea 18 38 58 78 d8 f8 b8 e8 ca c8 88 1a 3a aa a8 ba 8a 98 9a 9b bb 5b 7b 1b 3b eb a9 a2 a0 29 09 49 c9 e0 c0 89 fb e2 c2"
+          # chunk 2: data-movement / ALU memory ops (all addressing modes)
+          ops="$ops 01 03 05 07 0d 0f 11 12 13 15 17 19 1d 1f 21 23 25 27 2d 2f 31 32 33 35 37 39 3d 3f"
+          ops="$ops 41 43 45 47 4d 4f 51 52 53 55 57 59 5d 5f 61 63 65 67 69 6d 6f 71 72 73 75 77 79 7d 7f"
+          ops="$ops 81 83 85 87 8d 8f 91 92 93 95 97 99 9d 9f a1 a3 a5 a7 ad af b1 b2 b3 b5 b7 b9 bd bf"
+          ops="$ops c1 c3 c5 c7 cd cf d1 d2 d3 d5 d7 d9 dd df e1 e3 e5 e7 e9 ed ef f1 f2 f3 f5 f7 f9 fd ff"
+          ops="$ops a6 ae b6 be a4 ac b4 bc 86 8e 96 84 8c 94 64 74 9c 9e e4 ec c4 cc 24 2c 34 3c"
           for op in $ops; do
             for mode in e n; do
               curl -sfL "$base/$op.$mode.json" -o "harte-data-65816/$op.$mode.json"

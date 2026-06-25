@@ -58,6 +58,22 @@ type Bus24 interface {
 // 24 bits on every access.
 func (c *CPU) SetBus24(b Bus24) { c.bus24 = b }
 
-// read24 is the 65816 core's memory read primitive (24-bit, wrapping at 16 MB).
-// The write counterpart arrives with chunk-2 store opcodes.
-func (c *CPU) read24(addr uint32) byte { return c.bus24.Read24(addr & 0xFFFFFF) }
+// read24 / write24 are the 65816 core's memory primitives (24-bit, wrapping at
+// 16 MB).
+func (c *CPU) read24(addr uint32) byte     { return c.bus24.Read24(addr & 0xFFFFFF) }
+func (c *CPU) write24(addr uint32, v byte) { c.bus24.Write24(addr&0xFFFFFF, v) }
+
+// Xidx / Yidx return the index registers at the current index width (full
+// 16-bit in native X=0, else the low byte).
+func (c *CPU) Xidx() uint16 {
+	if c.xWide() {
+		return c.X16()
+	}
+	return uint16(c.X)
+}
+func (c *CPU) Yidx() uint16 {
+	if c.xWide() {
+		return c.Y16()
+	}
+	return uint16(c.Y)
+}
