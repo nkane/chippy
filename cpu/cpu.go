@@ -111,6 +111,7 @@ type CPU struct {
 	D               uint16 // direct-page register
 	DBR, PBR        byte   // data + program bank registers
 	E               bool   // emulation mode (true on reset)
+	bus24           Bus24  // 24-bit memory for the 65816 core (SetBus24)
 
 	// extraCycles is set by handlers (e.g. taken branches) to add to the
 	// instruction's base cycle count for the current Step. Reset each Step.

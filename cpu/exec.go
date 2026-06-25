@@ -73,6 +73,11 @@ func (c *CPU) Step() int {
 	if c.Halted {
 		return 0
 	}
+	// The 65816 is a distinct 24-bit core (own memory, registers, addressing);
+	// it executes through step816, not the 6502 opcode table (#456).
+	if c.Variant == VariantW65816 {
+		return c.step816()
+	}
 	if c.Tracer != nil {
 		c.Tracer.LogStep(c, c.Bus)
 	}
