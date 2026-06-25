@@ -8,7 +8,7 @@
 ## 0. Where we are right now (session handoff)
 
 - **v1.6.0 shipped** 2026-06-16 (tag `v1.6.0`, GitHub release + Homebrew **cask** live, ADR `0009-v1.6.0.md`). Closed epic #438: ARR decimal (#424), 238/238 6502 bus-exact (#428), 65C02 Tom Harte + 5 CMOS fixes (#426), struct overlay watch (#409), DAP array children (#410), chippy-state dirtyRanges (#440), goreleaser cask (#413).
-- **v1.7.0 planned** — epic **#458** + 12 sub-issues filed (all labelled `v1.7`). The former "deferred to v2.0" set was pulled in (2026-06-16): #461 TUI flip, #462 65816 native, #463 freeze beyond RAM. Stays **v1.7.0** (minor) — the TUI flip is `internal/`-only, so the public Go API is additive.
+- **v1.7.0 shipped** 2026-06-25 (tag `v1.7.0`, ADR `0010-v1.7.0.md`). Closed epic #458 + all sub-issues: full Tom Harte-validated WDC 65C816 core (#456, 256 opcodes emulation + native; #462 native folded in), TUI-via-DAP render+control flip (#449–452, #461, #471), freeze beyond RAM (#463), DAP data breakpoints + setVariable (#453, #454), 65C02 per-cycle bus trace (#455, #475), hosted WASM playground drag-drop (#457). Minor bump — TUI flip is `internal/`-only so the public Go API stayed additive.
   - Theme A (TUI-via-DAP migration + default flip, the v2.0 arc): #449 stack→`stackTrace`, #450 flags→`variables`, #451 memory→`readMemory`+dirtyRanges, #452 disasm→`disassemble`, then #461 flip default to DAP-only + delete the dead direct-render path (depends on #449–#452).
   - Theme B (DAP parity): #453 data breakpoints (`setDataBreakpoints`/`dataBreakpointInfo`, expose TUI mem-watch), #454 `setVariable` on memory + Globals array children.
   - Theme C (accuracy): #455 `TestHarte65C02BusTrace` (CMOS per-cycle bus-exactness, mirror #428).
