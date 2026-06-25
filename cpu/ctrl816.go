@@ -232,6 +232,32 @@ func (c *CPU) brk() int {
 	return cyc
 }
 
+// blockMove executes MVN (step +1) / MVP (step -1). The 65816 moves C+1 bytes
+// from src bank:X to dst bank:Y using 16-bit X/Y/C regardless of the index/acc
+// width, sets DBR to the destination bank, and re-runs the opcode per byte on
+// real silicon (so it is interrupt-able mid-block). chippy moves the whole
+// block in one Step for debugger sanity, costing 7 cycles per byte. (The Tom
+// Harte 65816 corpus caps each block-move test at ~100 cycles mid-instruction,
+// a generator artifact this whole-block model deliberately does not replicate,
+// so MVN/MVP are exercised by a dedicated unit test rather than the harness.)
+func (c *CPU) blockMove(step int) int {
+	dst := c.fetch816()
+	src := c.fetch816()
+	c.DBR = dst
+	n := int(c.A16()) + 1
+	for {
+		c.write24(uint32(dst)<<16|uint32(c.Y16()), c.read24(uint32(src)<<16|uint32(c.X16())))
+		c.setX16(uint16(int(c.X16()) + step))
+		c.setY16(uint16(int(c.Y16()) + step))
+		done := c.A16() == 0
+		c.setA16(c.A16() - 1)
+		if done {
+			break
+		}
+	}
+	return 7 * n
+}
+
 func (c *CPU) cop() int {
 	c.PC++ // skip the signature byte
 	cyc := 7

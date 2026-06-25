@@ -920,10 +920,10 @@ func (c *CPU) step816() int {
 	case 0xCB: // WAI
 		c.Halted = true
 		cyc = 4
-	case 0xDB: // STP
-		c.Halted = true
-		c.stoppedBySTP = true
-		cyc = 4
+	case 0x54: // MVN — block move, ascending
+		cyc = c.blockMove(+1)
+	case 0x44: // MVP — block move, descending
+		cyc = c.blockMove(-1)
 
 	default:
 		panic("65816: unimplemented opcode $" + hexByte(op) + " (chunk 1: register/flag/transfer/immediate only)")

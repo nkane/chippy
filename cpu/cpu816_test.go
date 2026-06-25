@@ -124,3 +124,51 @@ func TestW65816_EmulationLocksMXBits(t *testing.T) {
 		t.Fatalf("emulation mode must lock M/X; REP #$30 cleared them: P=$%02X", c.P)
 	}
 }
+
+func TestW65816_BlockMoveMVN(t *testing.T) {
+	// MVN $00,$00 moves C+1 bytes from src:X (ascending) to dst:Y. Source
+	// $2000.. holds 1,2,3,4; move 4 bytes to $3000.
+	c, mem := new816(0x54, 0x00, 0x00)
+	c.E = false
+	c.PC = 0x8000
+	for i, b := range []byte{1, 2, 3, 4} {
+		mem[uint32(0x2000+i)] = b
+	}
+	c.setX16(0x2000)
+	c.setY16(0x3000)
+	c.setA16(3) // C = count-1 → 4 bytes
+	c.Step()
+	for i, want := range []byte{1, 2, 3, 4} {
+		if got := mem[uint32(0x3000+i)]; got != want {
+			t.Fatalf("MVN dst[%d]=$%02X want $%02X", i, got, want)
+		}
+	}
+	if c.X16() != 0x2004 || c.Y16() != 0x3004 {
+		t.Fatalf("MVN should advance X/Y by 4: X=%04X Y=%04X", c.X16(), c.Y16())
+	}
+	if c.A16() != 0xFFFF {
+		t.Fatalf("MVN should leave C=$FFFF, got %04X", c.A16())
+	}
+}
+
+func TestW65816_BlockMoveMVP(t *testing.T) {
+	// MVP moves descending. Move 3 bytes ending at src $2002 -> dst $3002.
+	c, mem := new816(0x44, 0x00, 0x00)
+	c.E = false
+	c.PC = 0x8000
+	for i, b := range []byte{0xAA, 0xBB, 0xCC} {
+		mem[uint32(0x2000+i)] = b
+	}
+	c.setX16(0x2002)
+	c.setY16(0x3002)
+	c.setA16(2) // 3 bytes
+	c.Step()
+	for i, want := range []byte{0xAA, 0xBB, 0xCC} {
+		if got := mem[uint32(0x3000+i)]; got != want {
+			t.Fatalf("MVP dst[%d]=$%02X want $%02X", i, got, want)
+		}
+	}
+	if c.X16() != 0x1FFF || c.Y16() != 0x2FFF {
+		t.Fatalf("MVP should retreat X/Y past the start: X=%04X Y=%04X", c.X16(), c.Y16())
+	}
+}
