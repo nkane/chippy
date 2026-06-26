@@ -94,7 +94,14 @@ func (c *CPU) ProcessPendingDma(readAddress uint16) {
 	)
 
 	for c.dmcDmaRunning || c.spriteDmaTransfer {
-		getCycle := c.Cycles&1 == 0
+		// True even/odd CPU cycle, not c.Cycles alone: c.Cycles only
+		// advances at the instruction boundary (exec.go), so mid-
+		// instruction it is stale by instrCycles. Mesen's _cycleCount
+		// ticks every cycle; getCycle must match its true parity or a
+		// steal landing on an operand read (instrCycles>0) picks the
+		// wrong alignment-cycle count, mis-sizing the 3-vs-4-cycle steal
+		// and breaking dma_2007_read's phase drift (#493).
+		getCycle := (c.Cycles+uint64(c.instrCycles))&1 == 0
 		if getCycle {
 			switch {
 			case c.dmcDmaRunning && !c.needHalt && !c.needDummyRead:
