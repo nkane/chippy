@@ -135,6 +135,40 @@ func TestProcessPendingDma_HaltDummyTagged(t *testing.T) {
 	}
 }
 
+// dmcStealCycles runs a one-byte DMC DMA from a known cycle state and
+// returns how many CPU cycles the steal consumed.
+func dmcStealCycles(cyclesAtEntry uint64, instrCycles int) uint64 {
+	bus := &recDmaBus{}
+	bus.ram[0x9000] = 0x42
+	c := NewVariant(bus, VariantNES)
+	c.SetDMCFetcher(&fakeDmc{addr: 0x9000})
+	c.Cycles = cyclesAtEntry
+	c.instrCycles = instrCycles
+	c.SetNeedDmcDma()
+	before := c.Cycles
+	c.ProcessPendingDma(0x8000)
+	return c.Cycles - before
+}
+
+// The DMC-steal alignment is governed by the *true* CPU cycle parity
+// (c.Cycles + instrCycles), not c.Cycles alone. c.Cycles is stale by
+// instrCycles mid-instruction, so a steal on an operand read must still
+// pick the right alignment — flipping instrCycles parity at a fixed
+// c.Cycles toggles the steal between 3 and 4 cycles (#493).
+func TestProcessPendingDma_StealParityUsesInstrCycles(t *testing.T) {
+	even := dmcStealCycles(100, 0) // (100+0) even → no extra alignment
+	odd := dmcStealCycles(100, 1)  // (100+1) odd  → one alignment cycle
+	if even != 3 {
+		t.Errorf("steal at even true-parity = %d, want 3", even)
+	}
+	if odd != 4 {
+		t.Errorf("steal at odd true-parity = %d, want 4", odd)
+	}
+	if odd-even != 1 {
+		t.Errorf("instrCycles parity does not affect steal length (even=%d odd=%d) — getCycle ignoring instrCycles?", even, odd)
+	}
+}
+
 // A bus that does NOT implement DmaReadBus takes the plain Bus.Read
 // fallback: same routed sample, same cycle count — byte-for-byte the
 // pre-#481 behavior.
