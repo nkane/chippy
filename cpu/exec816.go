@@ -19,6 +19,14 @@ func (c *CPU) fetch816() byte {
 	return b
 }
 
+// io816 performs one internal (dummy) cycle: the 65816 drives the bus with a
+// read of the current PBR:PC during an internal operation but discards the
+// byte and does not advance PC. Modeling it keeps the per-cycle bus trace
+// exact (Harte 65816 cycle list); functionally it is a no-op.
+func (c *CPU) io816() {
+	c.read24(uint32(c.PBR)<<16 | uint32(c.PC))
+}
+
 func (c *CPU) setZN16(v uint16) {
 	c.setFlag(FlagZ, v == 0)
 	c.setFlag(FlagN, v&0x8000 != 0)
@@ -42,49 +50,71 @@ func (c *CPU) step816() int {
 	cyc := 2 // most chunk-1 ops are 2 cycles; adjusted per-op below
 
 	switch op {
+	// Register / flag / transfer ops are 2 cycles: the opcode fetch plus one
+	// internal cycle (io816) that the per-cycle bus trace records as a dummy
+	// read of PBR:PC.
 	case 0xEA: // NOP
+		c.io816()
 	case 0x18:
 		c.setFlag(FlagC, false)
+		c.io816()
 	case 0x38:
 		c.setFlag(FlagC, true)
+		c.io816()
 	case 0x58:
 		c.setFlag(FlagI, false)
+		c.io816()
 	case 0x78:
 		c.setFlag(FlagI, true)
+		c.io816()
 	case 0xD8:
 		c.setFlag(FlagD, false)
+		c.io816()
 	case 0xF8:
 		c.setFlag(FlagD, true)
+		c.io816()
 	case 0xB8:
 		c.setFlag(FlagV, false)
+		c.io816()
 
 	// --- index inc/dec (X width) ---
 	case 0xE8: // INX
 		c.incDecIndex(&c.X, &c.XH, +1)
+		c.io816()
 	case 0xCA: // DEX
 		c.incDecIndex(&c.X, &c.XH, -1)
+		c.io816()
 	case 0xC8: // INY
 		c.incDecIndex(&c.Y, &c.YH, +1)
+		c.io816()
 	case 0x88: // DEY
 		c.incDecIndex(&c.Y, &c.YH, -1)
+		c.io816()
 
 	// --- accumulator inc/dec (M width) ---
 	case 0x1A: // INC A
 		c.incDecAcc(+1)
+		c.io816()
 	case 0x3A: // DEC A
 		c.incDecAcc(-1)
+		c.io816()
 
 	// --- transfers ---
 	case 0xAA: // TAX
 		c.transferToIndex(&c.X, &c.XH, c.A, c.B)
+		c.io816()
 	case 0xA8: // TAY
 		c.transferToIndex(&c.Y, &c.YH, c.A, c.B)
+		c.io816()
 	case 0xBA: // TSX
 		c.transferToIndex(&c.X, &c.XH, c.SP, c.SPHi)
+		c.io816()
 	case 0x8A: // TXA
 		c.transferToAcc(c.X, c.XH)
+		c.io816()
 	case 0x98: // TYA
 		c.transferToAcc(c.Y, c.YH)
+		c.io816()
 	case 0x9A: // TXS — SP follows index width; emulation keeps SPHi=$01
 		c.SP = c.X
 		if c.E {
@@ -92,16 +122,21 @@ func (c *CPU) step816() int {
 		} else {
 			c.SPHi = c.XH
 		}
+		c.io816()
 	case 0x9B: // TXY
 		c.transferToIndex(&c.Y, &c.YH, c.X, c.XH)
+		c.io816()
 	case 0xBB: // TYX
 		c.transferToIndex(&c.X, &c.XH, c.Y, c.YH)
+		c.io816()
 	case 0x5B: // TCD — C -> D (always 16-bit), sets N/Z on 16-bit
 		c.D = c.A16()
 		c.setZN16(c.D)
+		c.io816()
 	case 0x7B: // TDC — D -> C (always 16-bit)
 		c.setA16(c.D)
 		c.setZN16(c.D)
+		c.io816()
 	case 0x1B: // TCS — C -> SP (16-bit; emulation forces high byte $01)
 		c.SP = c.A
 		if c.E {
@@ -109,12 +144,18 @@ func (c *CPU) step816() int {
 		} else {
 			c.SPHi = c.B
 		}
+		c.io816()
 	case 0x3B: // TSC — SP -> C (always 16-bit)
 		c.setA16(c.SP16())
 		c.setZN16(c.SP16())
-	case 0xEB: // XBA — swap accumulator bytes; N/Z on the new low byte
+		c.io816()
+	case 0xEB: // XBA — swap accumulator bytes; N/Z on the new low byte.
+		// 3 cycles: fetch + two internal cycles (the byte swap takes an
+		// extra internal cycle vs the other transfers).
 		c.A, c.B = c.B, c.A
 		c.setZN(c.A)
+		c.io816()
+		c.io816()
 		cyc = 3
 
 	// --- immediate loads (LD A: M width; LD X/Y: X width) ---
@@ -173,17 +214,21 @@ func (c *CPU) step816() int {
 			c.XH, c.YH = 0, 0
 			c.P |= FlagM | FlagX
 		}
-	case 0xE2: // SEP #imm
+		c.io816()
+	case 0xE2: // SEP #imm — fetch + operand + 1 internal cycle (3 cycles).
+		// The internal cycle re-reads the operand address (PC-1), not PC.
 		mask := c.fetch816()
 		c.P |= mask
 		c.applyWidthTruncation()
+		c.read24(uint32(c.PBR)<<16 | uint32(c.PC-1))
 		cyc = 3
-	case 0xC2: // REP #imm
+	case 0xC2: // REP #imm — fetch + operand + 1 internal cycle (3 cycles).
 		mask := c.fetch816()
 		c.P &^= mask
 		if c.E {
 			c.P |= FlagM | FlagX // M/X locked set in emulation
 		}
+		c.read24(uint32(c.PBR)<<16 | uint32(c.PC-1))
 		cyc = 3
 
 	// === chunk 2: data-movement / ALU memory ops ===
