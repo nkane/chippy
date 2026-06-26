@@ -65,6 +65,12 @@ type CPU struct {
 	// the no-ticker fast path stays single-digit-ns.
 	busTicker Ticker
 
+	// dmaBus is a cached DmaReadBus assertion on Bus. Set via SetBus().
+	// nil when the host bus doesn't model DMA-read open-bus; the DMA
+	// loop's 256-read sprite window then pays no per-read type-assert.
+	// See dma.go.
+	dmaBus DmaReadBus
+
 	// accessHook, when non-nil, is invoked on every bus access with the
 	// address + AccessKind (issue #421). nil by default — a host opts in via
 	// SetAccessHook. See access.go.
@@ -280,6 +286,11 @@ func (c *CPU) SetBus(b Bus) {
 		c.busTicker = t
 	} else {
 		c.busTicker = nil
+	}
+	if d, ok := b.(DmaReadBus); ok {
+		c.dmaBus = d
+	} else {
+		c.dmaBus = nil
 	}
 	c.nesCycle = c.Variant == VariantNES && c.busTicker != nil
 }
