@@ -21,6 +21,50 @@ type DMCFetcher interface {
 	SetDmcReadBuffer(v byte)
 }
 
+// DmaKind tags which sub-cycle of a DMA window a read belongs to. A
+// host that implements DmaReadBus uses it to reproduce the 2A03's
+// DMA-read open-bus / internal-register-read conflicts — chiefly the
+// DmaDmcRead case landing on $4000-$401F (dmc_dma_during_read*, #481).
+type DmaKind uint8
+
+const (
+	// DmaDummyRead is a halt-cycle or alignment dummy read (no data
+	// consumed by the DMA, but still a real bus cycle the host may
+	// want to latch into open bus).
+	DmaDummyRead DmaKind = iota
+	// DmaSpriteRead is an OAMDMA source-byte read (page $XX00).
+	DmaSpriteRead
+	// DmaDmcRead is the DMC sample fetch — the read whose landing on an
+	// internal register produces the open-bus bus conflict.
+	DmaDmcRead
+)
+
+// DmaReadBus is an optional Bus extension. When the CPU's Bus
+// implements it, ProcessPendingDma routes its reads through ReadDma
+// with a DmaKind tag, letting the host model the 2A03's DMA-read
+// open-bus behavior (#481). Hosts that don't implement it get the
+// plain Bus.Read path — byte-for-byte identical to pre-#481 behavior,
+// and zero cost on non-NES variants. The CPU supplies only the tag;
+// the open-bus latch and the internal-register conflict formula stay
+// host-owned (validated in nessy against MesenCE).
+type DmaReadBus interface {
+	ReadDma(addr uint16, kind DmaKind) byte
+}
+
+// dmaRead issues one DMA-window bus read, routing through the host's
+// DmaReadBus (tagged) when present, else the plain Bus.Read. dmaBus is
+// a cached assertion (SetBus), so the 256-read sprite loop pays no
+// per-read type-assert.
+func (c *CPU) dmaRead(addr uint16, kind DmaKind) byte {
+	if c.dmaBus != nil {
+		return c.dmaBus.ReadDma(addr, kind)
+	}
+	if c.Bus != nil {
+		return c.Bus.Read(addr)
+	}
+	return 0
+}
+
 // SetDMCFetcher wires the APU side of the DMC fetch — what address the
 // DMA loop reads from and where to push the byte back. nil is fine for
 // non-NES variants or pre-APU wiring; ProcessPendingDma silently
@@ -40,9 +84,7 @@ func (c *CPU) ProcessPendingDma(readAddress uint16) {
 
 	// Halt cycle: dummy read at readAddress.
 	c.dmaStartCycle()
-	if c.Bus != nil {
-		c.Bus.Read(readAddress)
-	}
+	c.dmaRead(readAddress, DmaDummyRead)
 	c.dmaEndCycle(true)
 
 	var (
@@ -63,9 +105,7 @@ func (c *CPU) ProcessPendingDma(readAddress uint16) {
 				if c.dmcFetcher != nil {
 					addr = c.dmcFetcher.GetDmcReadAddress()
 				}
-				if c.Bus != nil {
-					readValue = c.Bus.Read(addr)
-				}
+				readValue = c.dmaRead(addr, DmaDmcRead)
 				c.dmaEndCycle(true)
 				c.dmcDmaRunning = false
 				c.abortDmcDma = false
@@ -76,18 +116,14 @@ func (c *CPU) ProcessPendingDma(readAddress uint16) {
 				// OAMDMA sprite-byte read.
 				c.dmaProcessCycle()
 				addr := uint16(c.spriteDmaOffset)<<8 | uint16(spriteReadAddr)
-				if c.Bus != nil {
-					readValue = c.Bus.Read(addr)
-				}
+				readValue = c.dmaRead(addr, DmaSpriteRead)
 				c.dmaEndCycle(true)
 				spriteReadAddr++
 				spriteDmaCounter++
 			default:
 				// Alignment / halt dummy read.
 				c.dmaProcessCycle()
-				if c.Bus != nil {
-					c.Bus.Read(readAddress)
-				}
+				c.dmaRead(readAddress, DmaDummyRead)
 				c.dmaEndCycle(true)
 			}
 		} else {
@@ -106,9 +142,7 @@ func (c *CPU) ProcessPendingDma(readAddress uint16) {
 			} else {
 				// Alignment dummy read.
 				c.dmaProcessCycle()
-				if c.Bus != nil {
-					c.Bus.Read(readAddress)
-				}
+				c.dmaRead(readAddress, DmaDummyRead)
 				c.dmaEndCycle(true)
 			}
 		}
