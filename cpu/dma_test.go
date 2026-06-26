@@ -169,6 +169,49 @@ func TestProcessPendingDma_StealParityUsesInstrCycles(t *testing.T) {
 	}
 }
 
+// tickerDmaBus is a recDmaBus that also implements Ticker, so NewVariant
+// sets busTicker → nesCycle is true and the per-cycle interleave path
+// (idle / busRead) runs — needed to exercise idle()'s DMA-halt poll.
+type tickerDmaBus struct {
+	recDmaBus
+	ticks int
+}
+
+func (b *tickerDmaBus) Tick(n int) { b.ticks += n }
+
+// idle() must drain a pending DMA halt on its own cycle, exactly like
+// busRead — the 2A03 (and Mesen) poll ProcessPendingDma on every CPU
+// cycle, including dummy/idle reads such as a taken branch's dummy read
+// (branch() → c.idle(c.PC)). Regression for #493: without the poll, a
+// halt armed going into an idle cycle was missed and only drained at the
+// next real read, landing the DMC steal one cycle late (3-cycle steal vs
+// the hardware 4) and freezing dma_2007_read's phase drift so its
+// calibration loop never converged.
+func TestIdle_DrainsPendingDmaHalt(t *testing.T) {
+	bus := &tickerDmaBus{}
+	bus.ram[0x9000] = 0x42
+
+	c := NewVariant(bus, VariantNES)
+	if !c.nesCycle {
+		t.Fatal("nesCycle not set — test bus must implement Ticker")
+	}
+	c.SetDMCFetcher(&fakeDmc{addr: 0x9000})
+	c.SetNeedDmcDma()
+
+	// Drive a single idle (dummy-read) cycle with the halt armed.
+	c.idle(0x8000)
+
+	if c.needHalt {
+		t.Error("idle() left needHalt set — DMA was not drained on the idle cycle")
+	}
+	if c.dmcDmaRunning {
+		t.Error("idle() left dmcDmaRunning set — DMA was not drained")
+	}
+	if bus.count(DmaDmcRead) == 0 {
+		t.Errorf("idle() did not issue the DMC sample read; reads=%+v", bus.reads)
+	}
+}
+
 // A bus that does NOT implement DmaReadBus takes the plain Bus.Read
 // fallback: same routed sample, same cycle count — byte-for-byte the
 // pre-#481 behavior.

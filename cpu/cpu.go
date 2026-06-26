@@ -497,6 +497,16 @@ func (c *CPU) write(addr uint16, v byte) {
 // as a real read.
 func (c *CPU) idle(addr uint16) {
 	if c.nesCycle {
+		// A pending DMA halt drains before this cycle's bus access, same
+		// as busRead — Mesen polls ProcessPendingDma on every CPU cycle,
+		// including dummy/idle reads. Without this, a halt armed going
+		// into an idle cycle (e.g. a taken branch's dummy read) is missed
+		// here and only drained at the next real read — landing the DMC
+		// steal one cycle late (wrong get/put parity → 3-cycle steal where
+		// hardware/Mesen take 4). Broke dma_2007_read's phase drift (#493).
+		if c.needHalt {
+			c.ProcessPendingDma(addr)
+		}
 		c.instrCycles++
 		c.masterClock += cpuStartReadShift
 		if c.ppuRunner != nil {
