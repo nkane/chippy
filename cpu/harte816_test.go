@@ -173,6 +173,134 @@ func harte816Diff(c *CPU, mem mem24, tc *harte816Case, cyc int) string {
 	return ""
 }
 
+// busRecorder816 is the 24-bit sibling of busRecorder: a sparse 24-bit memory
+// that records every Read24/Write24 as a [addr, value, rw] triple so the
+// per-cycle bus trace can be compared against the 65816 corpus cycle list.
+type busRecorder816 struct {
+	ram   mem24
+	trace [][3]int // [24-bit addr, value, rw] — rw 0=read, 1=write
+}
+
+func (b *busRecorder816) Read24(a uint32) byte {
+	a &= 0xFFFFFF
+	v := b.ram[a]
+	b.trace = append(b.trace, [3]int{int(a), int(v), 0})
+	return v
+}
+
+func (b *busRecorder816) Write24(a uint32, v byte) {
+	a &= 0xFFFFFF
+	b.ram[a] = v
+	b.trace = append(b.trace, [3]int{int(a), int(v), 1})
+}
+
+// harteBusSkip816 lists 65816 opcodes whose per-cycle bus TRACE is not yet
+// modeled by step816 (which emits functional accesses only; internal/dummy
+// cycles are counted but not yet emitted). Cleared chunk by chunk as step816
+// gains per-cycle bus accuracy. The state+count TestHarte65816 stays the
+// authority for correctness; this test adds per-cycle bus exactness.
+var harteBusSkip816 = map[byte]string{}
+
+// TestHarte65816BusTrace validates 65816 per-cycle bus exactness against the
+// Harte 65816 set — the 16-bit/24-bit sibling of TestHarte65C02BusTrace. Chunk
+// 1 covers the register/flag/transfer/immediate opcodes; later chunks expand
+// to the addressing-mode, RMW, stack, and control-flow ops.
+func TestHarte65816BusTrace(t *testing.T) {
+	maxCases := 0
+	if v := os.Getenv("CHIPPY_HARTE_MAX_CASES"); v != "" {
+		maxCases, _ = strconv.Atoi(v)
+	}
+	for _, op := range chunk1Opcodes816 {
+		op := op
+		for _, mode := range []string{"e", "n"} {
+			mode := mode
+			name := fmt.Sprintf("%02x.%s", op, mode)
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				if reason, skip := harteBusSkip816[op]; skip {
+					t.Skipf("skip %02x bus trace: %s", op, reason)
+				}
+				cases, err := loadHarte816(t, name)
+				if err != nil {
+					t.Skipf("cases for %s unavailable: %v", name, err)
+				}
+				runHarte816BusTrace(t, name, cases, maxCases)
+			})
+		}
+	}
+}
+
+func runHarte816BusTrace(t *testing.T, op string, cases []harte816Case, maxCases int) {
+	t.Helper()
+	n := len(cases)
+	if maxCases > 0 && maxCases < n {
+		n = maxCases
+	}
+	for i := 0; i < n; i++ {
+		tc := &cases[i]
+		bus := &busRecorder816{ram: mem24{}}
+		for _, kv := range tc.Initial.RAM {
+			bus.ram[uint32(kv[0])] = byte(kv[1])
+		}
+		c := NewVariant(NewRAM(), VariantW65816)
+		c.SetBus24(bus)
+		ini := &tc.Initial
+		c.E = ini.E == 1
+		c.PC = uint16(ini.PC)
+		c.setSP16(uint16(ini.S))
+		c.P = byte(ini.P)
+		c.setA16(uint16(ini.A))
+		c.setX16(uint16(ini.X))
+		c.setY16(uint16(ini.Y))
+		c.D = uint16(ini.D)
+		c.DBR, c.PBR = byte(ini.DBR), byte(ini.PBR)
+
+		c.Step()
+
+		if diff := harte816BusDiff(bus.trace, tc.Cycles); diff != "" {
+			t.Fatalf("opcode %s case %q (#%d): bus trace %s", op, tc.Name, i, diff)
+		}
+	}
+}
+
+// harte816BusDiff compares chippy's recorded 24-bit accesses against the
+// corpus per-cycle trace. Each corpus cycle is [addr, value, pin-string]; the
+// pin string's index-3 char is 'w' for a write (else read), and a null value
+// marks an internal cycle whose data byte is don't-care (wildcard match).
+func harte816BusDiff(got [][3]int, want [][]interface{}) string {
+	if len(got) != len(want) {
+		return fmt.Sprintf("length got %d want %d", len(got), len(want))
+	}
+	for i := range got {
+		wa := int(want[i][0].(float64))
+		wvWild := want[i][1] == nil
+		wv := 0
+		if !wvWild {
+			wv = int(want[i][1].(float64))
+		}
+		pin, _ := want[i][2].(string)
+		wrw := 0
+		if len(pin) > 3 && pin[3] == 'w' {
+			wrw = 1
+		}
+		if got[i][0] != wa || got[i][2] != wrw || (!wvWild && got[i][1] != wv) {
+			rw := func(x int) string {
+				if x == 1 {
+					return "write"
+				}
+				return "read"
+			}
+			wvStr := "??"
+			if !wvWild {
+				wvStr = fmt.Sprintf("%02X", wv)
+			}
+			return fmt.Sprintf("cycle %d got [%06X %02X %s] want [%06X %s %s]",
+				i, got[i][0], got[i][1], rw(got[i][2]), wa, wvStr, rw(wrw))
+		}
+	}
+	return ""
+}
+
 func loadHarte816(t *testing.T, name string) ([]harte816Case, error) {
 	t.Helper()
 	var data []byte
