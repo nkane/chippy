@@ -203,14 +203,16 @@ var harteBusSkip816 = map[byte]string{}
 
 // TestHarte65816BusTrace validates 65816 per-cycle bus exactness against the
 // Harte 65816 set — the 16-bit/24-bit sibling of TestHarte65C02BusTrace. Chunk
-// 1 covers the register/flag/transfer/immediate opcodes; later chunks expand
-// to the addressing-mode, RMW, stack, and control-flow ops.
+// 1 covers the register/flag/transfer/immediate opcodes; chunk 2 the
+// addressing-mode / ALU-memory ops; later chunks the RMW, stack, and
+// control-flow ops.
 func TestHarte65816BusTrace(t *testing.T) {
 	maxCases := 0
 	if v := os.Getenv("CHIPPY_HARTE_MAX_CASES"); v != "" {
 		maxCases, _ = strconv.Atoi(v)
 	}
-	for _, op := range chunk1Opcodes816 {
+	ops := append(append([]byte{}, chunk1Opcodes816...), chunk2Opcodes816...)
+	for _, op := range ops {
 		op := op
 		for _, mode := range []string{"e", "n"} {
 			mode := mode

@@ -9,9 +9,19 @@ package cpu
 //   - indexed reads pay +1 when the index is 16-bit OR the add crossed a page;
 //     indexed writes/RMW always pay the extra index cycle.
 
+// indexIO emits the extra indexed-access cycle: a dummy read of the un-fixed
+// (non-carry-corrected) address. Reads pay it only on a page cross / 16-bit
+// index (crossLoad); writes and RMW always pay it (crossStore).
+func (c *CPU) indexIO(e ea816, store bool) {
+	if (store && crossStore(e) != 0) || (!store && c.crossLoad(e) != 0) {
+		c.read24(e.unfixed)
+	}
+}
+
 // accRead reads an accumulator-width operand, applies fn, and returns cycles.
 func (c *CPU) accRead(e ea816, oc int, fn func(uint16)) int {
 	wide := c.mWide()
+	c.indexIO(e, false)
 	fn(c.readEA(e, wide))
 	return oc + 1 + b2i(wide) + c.crossLoad(e)
 }
@@ -19,6 +29,7 @@ func (c *CPU) accRead(e ea816, oc int, fn func(uint16)) int {
 // accWrite stores an accumulator-width value and returns cycles.
 func (c *CPU) accWrite(e ea816, oc int, v uint16) int {
 	wide := c.mWide()
+	c.indexIO(e, true)
 	c.writeEA(e, wide, v)
 	return oc + 1 + b2i(wide) + crossStore(e)
 }
@@ -26,11 +37,13 @@ func (c *CPU) accWrite(e ea816, oc int, v uint16) int {
 // idxRead / idxWrite are the index-width counterparts (LDX/LDY/STX/STY/CPX/CPY).
 func (c *CPU) idxRead(e ea816, oc int, fn func(uint16)) int {
 	wide := c.xWide()
+	c.indexIO(e, false)
 	fn(c.readEA(e, wide))
 	return oc + 1 + b2i(wide) + c.crossLoad(e)
 }
 func (c *CPU) idxWrite(e ea816, oc int, v uint16) int {
 	wide := c.xWide()
+	c.indexIO(e, true)
 	c.writeEA(e, wide, v)
 	return oc + 1 + b2i(wide) + crossStore(e)
 }
