@@ -24,6 +24,7 @@ reversed or refined are marked *Superseded by* with a link.
 | [0009](0009-v1.6.0.md) | v1.6.0 | 2026-06-16 | Accuracy tail (238/238 6502 bus-exact, 65C02 Tom Harte) + debugger UX (struct overlay, DAP array children, dirtyRanges) (epic #438) |
 | [0010](0010-v1.7.0.md) | v1.7.0 | 2026-06-25 | TUI-via-DAP flip + freeze-beyond-RAM + WASM playground + full Tom Harte-validated 65816 core (epic #458) |
 | [0011](0011-v1.8.0.md) | v1.8.0 | 2026-06-26 | Accuracy tail — 2A03 DMA-read open-bus seam (`DmaReadBus`, #481) + DMC-DMA steal timing: `idle()` polls the DMA halt + true-cycle `getCycle` (#493), converging `dmc_dma_during_read4` |
+| [0012](0012-v1.9.0.md) | v1.9.0 | unreleased | Accuracy tail — per-cycle 65816 bus trace (`TestHarte65816BusTrace`, #495) |
 
 ## Conventions captured across releases
 

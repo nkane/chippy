@@ -202,22 +202,24 @@ func (b *busRecorder816) Write24(a uint32, v byte) {
 var harteBusSkip816 = map[byte]string{
 	0xCB: "WAI halts with a no-address (None) bus cycle the recorder can't model",
 	0xDB: "STP halts with a no-address (None) bus cycle the recorder can't model",
+	0x44: "MVN moves the whole block in one Step (debugger model); the corpus caps each case mid-block",
+	0x54: "MVP moves the whole block in one Step (debugger model); the corpus caps each case mid-block",
 }
 
 // TestHarte65816BusTrace validates 65816 per-cycle bus exactness against the
-// Harte 65816 set — the 16-bit/24-bit sibling of TestHarte65C02BusTrace. Chunk
-// 1 covers the register/flag/transfer/immediate opcodes; chunk 2 the
-// addressing-mode / ALU-memory ops; later chunks the RMW, stack, and
-// control-flow ops.
+// Harte 65816 set — the 16-bit/24-bit sibling of TestHarte65C02BusTrace.
+// Every opcode is per-cycle bus-exact in both emulation and native, except the
+// four in harteBusSkip816 (WAI/STP halt with a None-address cycle; MVN/MVP use
+// the whole-block-move debugger model). Like TestHarte65C02BusTrace, this
+// validates addr + value + read/write; the corpus's extra VDA/VPA/E/M/X pin
+// bits are not asserted (a possible future enhancement).
 func TestHarte65816BusTrace(t *testing.T) {
 	maxCases := 0
 	if v := os.Getenv("CHIPPY_HARTE_MAX_CASES"); v != "" {
 		maxCases, _ = strconv.Atoi(v)
 	}
-	ops := append(append([]byte{}, chunk1Opcodes816...), chunk2Opcodes816...)
-	ops = append(ops, chunk3Opcodes816...)
-	for _, op := range ops {
-		op := op
+	for op := 0; op < 256; op++ {
+		op := byte(op)
 		for _, mode := range []string{"e", "n"} {
 			mode := mode
 			name := fmt.Sprintf("%02x.%s", op, mode)
