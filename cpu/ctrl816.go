@@ -166,20 +166,44 @@ func (c *CPU) trb(v uint16, wide bool) uint16 {
 
 // rmwMem reads, transforms, and writes back an accumulator-width memory operand.
 // The 16-bit width penalty applies twice (an extra read byte and write byte).
+// The 65816's internal modify cycle is a dummy WRITE of the original value back
+// to the same address (between the read and the result write), and an indexed
+// RMW always pays the extra index cycle (a read of the un-fixed address).
 func (c *CPU) rmwMem(e ea816, oc int, fn func(uint16, bool) uint16) int {
 	wide := c.mWide()
-	v := fn(c.readEA(e, wide), wide)
-	c.writeEA(e, wide, v)
+	c.indexIO(e, true)
+	if wide {
+		hiAddr := c.eaInc(e.addr, e.bank0)
+		lo := uint16(c.read24(e.addr))
+		hi := uint16(c.read24(hiAddr))
+		v := fn(lo|hi<<8, true)
+		c.read24(hiAddr)              // internal modify cycle: dummy read of the high byte
+		c.write24(hiAddr, byte(v>>8)) // write the result high byte first, then low
+		c.write24(e.addr, byte(v))
+	} else {
+		old := uint16(c.read24(e.addr))
+		v := fn(old, false)
+		// Internal modify cycle: emulation does a dummy WRITE of the original
+		// value; native does a dummy READ.
+		if c.E {
+			c.write24(e.addr, byte(old))
+		} else {
+			c.read24(e.addr)
+		}
+		c.write24(e.addr, byte(v))
+	}
 	return oc + 3 + 2*b2i(wide) + crossStore(e)
 }
 
-// accRMW applies an RMW kernel to the accumulator (2-cycle accumulator form).
+// accRMW applies an RMW kernel to the accumulator (2-cycle accumulator form:
+// opcode fetch + one internal cycle).
 func (c *CPU) accRMW(fn func(uint16, bool) uint16) {
 	if c.mWide() {
 		c.setA16(fn(c.A16(), true))
 	} else {
 		c.A = byte(fn(uint16(c.A), false))
 	}
+	c.io816()
 }
 
 // --- control flow ---
@@ -189,9 +213,11 @@ func (c *CPU) branch816(take bool) int {
 	if !take {
 		return 2
 	}
+	c.ioPC1() // taken branch: internal cycle (dummy read of the operand address)
 	target := uint16(int(c.PC) + int(disp))
 	cyc := 3
 	if c.E && (c.PC&0xFF00) != (target&0xFF00) {
+		c.ioPC1() // emulation page-cross: extra internal cycle (also at the operand address)
 		cyc = 4
 	}
 	c.PC = target
@@ -200,6 +226,7 @@ func (c *CPU) branch816(take bool) int {
 
 func (c *CPU) brl() int {
 	disp := int16(c.fetch16())
+	c.ioPC1() // internal cycle (operand address) before retargeting
 	c.PC = uint16(int(c.PC) + int(disp))
 	return 4
 }
@@ -210,7 +237,7 @@ func (c *CPU) plp816() {
 }
 
 func (c *CPU) brk() int {
-	c.PC++ // skip the signature byte
+	c.fetch816() // read+skip the signature byte
 	cyc := 7
 	if c.E {
 		c.spPush16(c.PC)
@@ -259,7 +286,7 @@ func (c *CPU) blockMove(step int) int {
 }
 
 func (c *CPU) cop() int {
-	c.PC++ // skip the signature byte
+	c.fetch816() // read+skip the signature byte
 	cyc := 7
 	if c.E {
 		c.spPush16(c.PC)

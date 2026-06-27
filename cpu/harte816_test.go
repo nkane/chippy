@@ -199,7 +199,10 @@ func (b *busRecorder816) Write24(a uint32, v byte) {
 // cycles are counted but not yet emitted). Cleared chunk by chunk as step816
 // gains per-cycle bus accuracy. The state+count TestHarte65816 stays the
 // authority for correctness; this test adds per-cycle bus exactness.
-var harteBusSkip816 = map[byte]string{}
+var harteBusSkip816 = map[byte]string{
+	0xCB: "WAI halts with a no-address (None) bus cycle the recorder can't model",
+	0xDB: "STP halts with a no-address (None) bus cycle the recorder can't model",
+}
 
 // TestHarte65816BusTrace validates 65816 per-cycle bus exactness against the
 // Harte 65816 set — the 16-bit/24-bit sibling of TestHarte65C02BusTrace. Chunk
@@ -212,6 +215,7 @@ func TestHarte65816BusTrace(t *testing.T) {
 		maxCases, _ = strconv.Atoi(v)
 	}
 	ops := append(append([]byte{}, chunk1Opcodes816...), chunk2Opcodes816...)
+	ops = append(ops, chunk3Opcodes816...)
 	for _, op := range ops {
 		op := op
 		for _, mode := range []string{"e", "n"} {

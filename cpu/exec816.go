@@ -782,7 +782,10 @@ func (c *CPU) step816() int {
 		cyc = c.rmwMem(e, oc, c.trb)
 
 	// --- stack push/pull ---
+	// Stack pushes: one internal cycle (io @ PC) before the push write.
+	// Stack pulls: two internal cycles before the pull read.
 	case 0x48: // PHA
+		c.io816()
 		if c.mWide() {
 			c.spPush16(c.A16())
 		} else {
@@ -790,6 +793,8 @@ func (c *CPU) step816() int {
 		}
 		cyc = 3 + b2i(c.mWide())
 	case 0x68: // PLA
+		c.io816()
+		c.io816()
 		if c.mWide() {
 			v := c.spPull16()
 			c.setA16(v)
@@ -800,6 +805,7 @@ func (c *CPU) step816() int {
 		}
 		cyc = 4 + b2i(c.mWide())
 	case 0xDA: // PHX
+		c.io816()
 		if c.xWide() {
 			c.spPush16(c.X16())
 		} else {
@@ -807,6 +813,8 @@ func (c *CPU) step816() int {
 		}
 		cyc = 3 + b2i(c.xWide())
 	case 0xFA: // PLX
+		c.io816()
+		c.io816()
 		if c.xWide() {
 			v := c.spPull16()
 			c.setX16(v)
@@ -817,6 +825,7 @@ func (c *CPU) step816() int {
 		}
 		cyc = 4 + b2i(c.xWide())
 	case 0x5A: // PHY
+		c.io816()
 		if c.xWide() {
 			c.spPush16(c.Y16())
 		} else {
@@ -824,6 +833,8 @@ func (c *CPU) step816() int {
 		}
 		cyc = 3 + b2i(c.xWide())
 	case 0x7A: // PLY
+		c.io816()
+		c.io816()
 		if c.xWide() {
 			v := c.spPull16()
 			c.setY16(v)
@@ -834,41 +845,53 @@ func (c *CPU) step816() int {
 		}
 		cyc = 4 + b2i(c.xWide())
 	case 0x08: // PHP
+		c.io816()
 		c.spPush8(c.P)
 		cyc = 3
 	case 0x28: // PLP
+		c.io816()
+		c.io816()
 		c.plp816()
 		cyc = 4
 	case 0x8B: // PHB
+		c.io816()
 		c.spPush8(c.DBR)
 		cyc = 3
 	case 0xAB: // PLB
+		c.io816()
+		c.io816()
 		c.DBR = c.spPull8()
 		c.setZN(c.DBR)
 		cyc = 4
 	case 0x4B: // PHK
+		c.io816()
 		c.spPush8(c.PBR)
 		cyc = 3
 	case 0x0B: // PHD
+		c.io816()
 		c.spPush16New(c.D)
 		c.spReforce()
 		cyc = 4
 	case 0x2B: // PLD
+		c.io816()
+		c.io816()
 		c.D = c.spPull16New()
 		c.spReforce()
 		c.setZN16(c.D)
 		cyc = 5
-	case 0xF4: // PEA
+	case 0xF4: // PEA — fetch the 16-bit operand, then push it (no internal cycle)
 		c.spPush16New(c.fetch16())
 		c.spReforce()
 		cyc = 5
 	case 0xD4: // PEI
 		dp := c.fetch816()
+		c.dpIO()
 		c.spPush16New(c.readDPWordWrap(dp))
 		c.spReforce()
 		cyc = 6 + c.dlPenalty()
 	case 0x62: // PER
 		disp := int16(c.fetch16())
+		c.ioPC1() // internal cycle before the push (at the operand address)
 		c.spPush16New(uint16(int(c.PC) + int(disp)))
 		c.spReforce()
 		cyc = 6
@@ -887,7 +910,9 @@ func (c *CPU) step816() int {
 		c.PC = uint16(c.read24(uint32(ptr))) | uint16(c.read24(uint32((ptr+1)&0xFFFF)))<<8
 		cyc = 5
 	case 0x7C: // JMP (abs,X)
-		a := uint32(c.PBR)<<16 | uint32(c.fetch16()+c.Xidx())
+		base := c.fetch16()
+		c.ioPC1() // internal cycle (operand address) before the pointer read
+		a := uint32(c.PBR)<<16 | uint32(base+c.Xidx())
 		c.PC = uint16(c.read24(a)) | uint16(c.read24(bankInc(a)))<<8
 		cyc = 6
 	case 0xDC: // JML [abs]
@@ -899,32 +924,48 @@ func (c *CPU) step816() int {
 		cyc = 6
 	case 0x20: // JSR abs
 		t := c.fetch16()
+		c.ioPC1() // internal cycle (operand-high address) before the push
 		c.spPush16(c.PC - 1)
 		c.PC = t
 		cyc = 6
-	case 0x22: // JSL long
-		t := c.fetch24()
+	case 0x22: // JSL long — push PBR mid-operand, internal cycle, then fetch bank + push PC
+		lo := uint32(c.fetch816())
+		mid := uint32(c.fetch816())
 		c.spPushNew(c.PBR)
+		c.read24(uint32(uint16(c.SP16()) + 1)) // internal cycle: re-read the pushed stack slot
+		hi := uint32(c.fetch816())
 		c.spPush16New(c.PC - 1)
 		c.spReforce()
+		t := lo | mid<<8 | hi<<16
 		c.PBR = byte(t >> 16)
 		c.PC = uint16(t)
 		cyc = 8
-	case 0xFC: // JSR (abs,X)
-		a := uint32(c.PBR)<<16 | uint32(c.fetch16()+c.Xidx())
-		c.spPush16(c.PC - 1)
+	case 0xFC: // JSR (abs,X) — push the return address mid-operand, then pointer read
+		lo := uint16(c.fetch816())
+		c.spPush16(c.PC) // return = address of the high operand byte
+		hi := uint16(c.fetch816())
+		c.ioPC1()
+		a := uint32(c.PBR)<<16 | uint32((lo|hi<<8)+c.Xidx())
 		c.PC = uint16(c.read24(a)) | uint16(c.read24(bankInc(a)))<<8
 		cyc = 8
-	case 0x60: // RTS
-		c.PC = c.spPull16() + 1
+	case 0x60: // RTS — two internal cycles, pull, one trailing internal cycle
+		c.io816()
+		c.io816()
+		lo := c.spPull16()
+		c.read24(uint32(c.SP16())) // trailing internal cycle (last-pulled stack address)
+		c.PC = lo + 1
 		cyc = 6
 	case 0x6B: // RTL
+		c.io816()
+		c.io816()
 		lo := c.spPull16New()
 		c.PBR = c.spPullNew()
 		c.spReforce()
 		c.PC = lo + 1
 		cyc = 6
 	case 0x40: // RTI
+		c.io816()
+		c.io816()
 		c.plp816()
 		c.PC = c.spPull16()
 		cyc = 6
