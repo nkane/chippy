@@ -17,10 +17,19 @@ package cpu
 
 // ea816 is a resolved 65816 effective address.
 type ea816 struct {
-	addr  uint32 // 24-bit effective data address
-	bank0 bool   // a 16-bit value at addr wraps within bank 0 (dp / stack-rel)
-	idx   bool   // indexed mode subject to the page-cross / extra-index cycle
-	cross bool   // the index add crossed a page boundary (read penalty)
+	addr    uint32 // 24-bit effective data address
+	bank0   bool   // a 16-bit value at addr wraps within bank 0 (dp / stack-rel)
+	idx     bool   // indexed mode subject to the page-cross / extra-index cycle
+	cross   bool   // the index add crossed a page boundary (read penalty)
+	unfixed uint32 // the un-carry-corrected address read on the extra index cycle
+}
+
+// ioPC1 performs an internal (dummy) cycle whose bus address is the operand
+// byte at PBR:PC-1 — the address the 65816 holds during direct-page / stack /
+// pre-index arithmetic. Recorded by the bus-trace harness; functionally a
+// no-op. (The direct-page +1 and the dp-index +1 cycles both land here.)
+func (c *CPU) ioPC1() {
+	c.read24(uint32(c.PBR)<<16 | uint32(c.PC-1))
 }
 
 func b2i(b bool) int {
@@ -62,6 +71,14 @@ func (c *CPU) dlPenalty() int {
 		return 1
 	}
 	return 0
+}
+
+// dpIO emits the direct-page +1 internal cycle (a dummy read at PC-1) when the
+// direct-page register's low byte is non-zero.
+func (c *CPU) dpIO() {
+	if c.D&0xFF != 0 {
+		c.ioPC1()
+	}
 }
 
 // dpBase is the bank-0 direct-page effective address D + dp + idx, honoring the
@@ -134,13 +151,23 @@ func (c *CPU) fetch24() uint32 {
 
 // --- addressing-mode resolvers: return (effective address, overhead cycles) ---
 
+// unfixedAddr is the un-carry-corrected address the 65816 drives during an
+// indexed access's extra cycle: bank from the full address, high byte from the
+// base, low byte from base+idx.
+func unfixedAddr(bank byte, base, idx uint16) uint32 {
+	return uint32(bank)<<16 | uint32(base&0xFF00|(base+idx)&0xFF)
+}
+
 func (c *CPU) amDP() (ea816, int) {
 	dp := c.fetch816()
+	c.dpIO()
 	return ea816{addr: c.dpBase(dp, 0), bank0: true}, 2 + c.dlPenalty()
 }
 
 func (c *CPU) amDPIdx(idx uint16) (ea816, int) {
 	dp := c.fetch816()
+	c.dpIO()
+	c.ioPC1() // the dp-index add takes an internal cycle
 	return ea816{addr: c.dpBase(dp, idx), bank0: true}, 3 + c.dlPenalty()
 }
 
@@ -154,7 +181,7 @@ func (c *CPU) amAbsIdx(idx uint16) (ea816, int) {
 	full := uint32(c.DBR)<<16 | uint32(base)
 	ea := (full + uint32(idx)) & 0xFFFFFF
 	cross := (base & 0xFF00) != (uint16(base+idx) & 0xFF00)
-	return ea816{addr: ea, idx: true, cross: cross}, 3
+	return ea816{addr: ea, idx: true, cross: cross, unfixed: unfixedAddr(c.DBR, base, idx)}, 3
 }
 
 func (c *CPU) amLong() (ea816, int) {
@@ -168,49 +195,59 @@ func (c *CPU) amLongX() (ea816, int) {
 
 func (c *CPU) amIndDP() (ea816, int) {
 	dp := c.fetch816()
+	c.dpIO()
 	ptr := c.readDPWord(dp, 0)
 	return ea816{addr: uint32(c.DBR)<<16 | uint32(ptr)}, 4 + c.dlPenalty()
 }
 
 func (c *CPU) amIndDPY() (ea816, int) {
 	dp := c.fetch816()
+	c.dpIO()
 	ptr := c.readDPWord(dp, 0)
 	full := uint32(c.DBR)<<16 | uint32(ptr)
 	idx := c.Yidx()
 	ea := (full + uint32(idx)) & 0xFFFFFF
 	cross := (ptr & 0xFF00) != (uint16(ptr+idx) & 0xFF00)
-	return ea816{addr: ea, idx: true, cross: cross}, 4 + c.dlPenalty()
+	return ea816{addr: ea, idx: true, cross: cross, unfixed: unfixedAddr(c.DBR, ptr, idx)}, 4 + c.dlPenalty()
 }
 
 func (c *CPU) amIndDPX() (ea816, int) {
 	dp := c.fetch816()
+	c.dpIO()
+	c.ioPC1() // the dp-index add (on the pointer) takes an internal cycle
 	ptr := c.readDPWord(dp, c.Xidx())
 	return ea816{addr: uint32(c.DBR)<<16 | uint32(ptr)}, 5 + c.dlPenalty()
 }
 
 func (c *CPU) amIndLongDP() (ea816, int) {
 	dp := c.fetch816()
+	c.dpIO()
 	return ea816{addr: c.readDPLong(dp)}, 5 + c.dlPenalty()
 }
 
 func (c *CPU) amIndLongDPY() (ea816, int) {
 	dp := c.fetch816()
+	c.dpIO()
 	ptr := c.readDPLongWrap(dp)
 	return ea816{addr: (ptr + uint32(c.Yidx())) & 0xFFFFFF}, 5 + c.dlPenalty()
 }
 
 func (c *CPU) amStackRel() (ea816, int) {
 	sr := c.fetch816()
+	c.ioPC1() // stack-relative add takes an internal cycle
 	return ea816{addr: uint32((c.SP16() + uint16(sr)) & 0xFFFF), bank0: true}, 3
 }
 
 func (c *CPU) amStackRelIndY() (ea816, int) {
 	sr := c.fetch816()
+	c.ioPC1() // stack-relative add
 	p := (c.SP16() + uint16(sr)) & 0xFFFF
 	lo := uint16(c.read24(uint32(p)))
-	hi := uint16(c.read24(uint32((p + 1) & 0xFFFF)))
+	hiAddr := uint32((p + 1) & 0xFFFF)
+	hi := uint16(c.read24(hiAddr))
 	ptr := lo | hi<<8
 	full := uint32(c.DBR)<<16 | uint32(ptr)
+	c.read24(hiAddr) // the +Y index add re-reads the pointer high-byte address
 	return ea816{addr: (full + uint32(c.Yidx())) & 0xFFFFFF}, 6
 }
 
