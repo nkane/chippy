@@ -14,6 +14,12 @@ package cpu
 // fetch816 reads the next instruction byte at PBR:PC and advances PC (16-bit
 // wrap within the bank).
 func (c *CPU) fetch816() byte {
+	if c.opcodeFetch {
+		c.busPins = pinVDA | pinVPA // the opcode fetch asserts both VDA and VPA
+		c.opcodeFetch = false
+	} else {
+		c.pinProg() // operand fetch: VPA
+	}
 	b := c.read24(uint32(c.PBR)<<16 | uint32(c.PC))
 	c.PC++
 	return b
@@ -24,6 +30,7 @@ func (c *CPU) fetch816() byte {
 // byte and does not advance PC. Modeling it keeps the per-cycle bus trace
 // exact (Harte 65816 cycle list); functionally it is a no-op.
 func (c *CPU) io816() {
+	c.pinNone() // internal cycle: neither VDA nor VPA
 	c.read24(uint32(c.PBR)<<16 | uint32(c.PC))
 }
 
@@ -45,6 +52,13 @@ func (c *CPU) readImm(wide bool) (uint16, int) {
 
 // step816 executes one 65816 instruction and returns the cycle count.
 func (c *CPU) step816() int {
+	// Snapshot the E/M/X status pins for the bus trace: they reflect the flags
+	// at instruction start, before any mid-instruction change (SEP/REP/XCE/…).
+	c.busE = c.E
+	c.busM = c.E || c.P&FlagM != 0
+	c.busX = c.E || c.P&FlagX != 0
+	c.opcodeFetch = true
+
 	startPC := c.PC
 	op := c.fetch816()
 	cyc := 2 // most chunk-1 ops are 2 cycles; adjusted per-op below
@@ -220,7 +234,7 @@ func (c *CPU) step816() int {
 		mask := c.fetch816()
 		c.P |= mask
 		c.applyWidthTruncation()
-		c.read24(uint32(c.PBR)<<16 | uint32(c.PC-1))
+		c.ioPC1()
 		cyc = 3
 	case 0xC2: // REP #imm — fetch + operand + 1 internal cycle (3 cycles).
 		mask := c.fetch816()
@@ -228,7 +242,7 @@ func (c *CPU) step816() int {
 		if c.E {
 			c.P |= FlagM | FlagX // M/X locked set in emulation
 		}
-		c.read24(uint32(c.PBR)<<16 | uint32(c.PC-1))
+		c.ioPC1()
 		cyc = 3
 
 	// === chunk 2: data-movement / ALU memory ops ===
@@ -907,18 +921,23 @@ func (c *CPU) step816() int {
 		cyc = 4
 	case 0x6C: // JMP (abs)
 		ptr := c.fetch16()
+		c.pinData()
 		c.PC = uint16(c.read24(uint32(ptr))) | uint16(c.read24(uint32((ptr+1)&0xFFFF)))<<8
 		cyc = 5
 	case 0x7C: // JMP (abs,X)
 		base := c.fetch16()
 		c.ioPC1() // internal cycle (operand address) before the pointer read
 		a := uint32(c.PBR)<<16 | uint32(base+c.Xidx())
+		c.pinData()
 		c.PC = uint16(c.read24(a)) | uint16(c.read24(bankInc(a)))<<8
 		cyc = 6
 	case 0xDC: // JML [abs]
 		ptr := c.fetch16()
+		c.pinData()
 		lo := uint16(c.read24(uint32(ptr)))
+		c.pinData()
 		hi := uint16(c.read24(uint32((ptr + 1) & 0xFFFF)))
+		c.pinData()
 		c.PBR = c.read24(uint32((ptr + 2) & 0xFFFF))
 		c.PC = lo | hi<<8
 		cyc = 6
@@ -932,6 +951,7 @@ func (c *CPU) step816() int {
 		lo := uint32(c.fetch816())
 		mid := uint32(c.fetch816())
 		c.spPushNew(c.PBR)
+		c.pinNone()
 		c.read24(uint32(uint16(c.SP16()) + 1)) // internal cycle: re-read the pushed stack slot
 		hi := uint32(c.fetch816())
 		c.spPush16New(c.PC - 1)
@@ -946,12 +966,14 @@ func (c *CPU) step816() int {
 		hi := uint16(c.fetch816())
 		c.ioPC1()
 		a := uint32(c.PBR)<<16 | uint32((lo|hi<<8)+c.Xidx())
+		c.pinData()
 		c.PC = uint16(c.read24(a)) | uint16(c.read24(bankInc(a)))<<8
 		cyc = 8
 	case 0x60: // RTS — two internal cycles, pull, one trailing internal cycle
 		c.io816()
 		c.io816()
 		lo := c.spPull16()
+		c.pinNone()
 		c.read24(uint32(c.SP16())) // trailing internal cycle (last-pulled stack address)
 		c.PC = lo + 1
 		cyc = 6
@@ -1001,8 +1023,10 @@ func (c *CPU) step816() int {
 		cyc = c.brk()
 	case 0x02: // COP
 		cyc = c.cop()
-	case 0x42: // WDM (2-byte no-op)
-		c.fetch816()
+	case 0x42: // WDM (2-byte no-op); its operand byte is read on an internal cycle
+		c.pinNone()
+		c.read24(uint32(c.PBR)<<16 | uint32(c.PC))
+		c.PC++
 	case 0xCB: // WAI
 		c.Halted = true
 		cyc = 4

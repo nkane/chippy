@@ -29,6 +29,7 @@ type ea816 struct {
 // pre-index arithmetic. Recorded by the bus-trace harness; functionally a
 // no-op. (The direct-page +1 and the dp-index +1 cycles both land here.)
 func (c *CPU) ioPC1() {
+	c.pinNone() // internal cycle: neither VDA nor VPA
 	c.read24(uint32(c.PBR)<<16 | uint32(c.PC-1))
 }
 
@@ -48,16 +49,20 @@ func (c *CPU) eaInc(a uint32, bank0 bool) uint32 {
 }
 
 func (c *CPU) readEA(e ea816, wide bool) uint16 {
+	c.pinData()
 	lo := uint16(c.read24(e.addr))
 	if !wide {
 		return lo
 	}
+	c.pinData()
 	return lo | uint16(c.read24(c.eaInc(e.addr, e.bank0)))<<8
 }
 
 func (c *CPU) writeEA(e ea816, wide bool, v uint16) {
+	c.pinData()
 	c.write24(e.addr, byte(v))
 	if wide {
+		c.pinData()
 		c.write24(c.eaInc(e.addr, e.bank0), byte(v>>8))
 	}
 }
@@ -95,7 +100,9 @@ func (c *CPU) dpBase(dp byte, idx uint16) uint32 {
 // then increment with a flat 16-bit (bank-0) address, which can leave page $xx00.
 func (c *CPU) readDPWord(dp byte, idx uint16) uint16 {
 	base := c.dpBase(dp, idx)
+	c.pinData()
 	lo := uint16(c.read24(base))
+	c.pinData()
 	hi := uint16(c.read24(uint32(uint16(base) + 1)))
 	return lo | hi<<8
 }
@@ -104,8 +111,11 @@ func (c *CPU) readDPWord(dp byte, idx uint16) uint16 {
 // increment from the base — the [dp] form does not page-wrap even in emulation).
 func (c *CPU) readDPLong(dp byte) uint32 {
 	base := c.dpBase(dp, 0)
+	c.pinData()
 	b0 := uint32(c.read24(base))
+	c.pinData()
 	b1 := uint32(c.read24(uint32(uint16(base) + 1)))
+	c.pinData()
 	b2 := uint32(c.read24(uint32(uint16(base) + 2)))
 	return b0 | b1<<8 | b2<<16
 }
@@ -113,7 +123,9 @@ func (c *CPU) readDPLong(dp byte) uint32 {
 // readDPWordWrap reads a 16-bit value from direct page at D+dp with each byte
 // honoring the emulation DL=0 page-wrap (used by PEI).
 func (c *CPU) readDPWordWrap(dp byte) uint16 {
+	c.pinData()
 	lo := uint16(c.read24(c.dpOff(dp, 0)))
+	c.pinData()
 	hi := uint16(c.read24(c.dpOff(dp, 1)))
 	return lo | hi<<8
 }
@@ -122,8 +134,11 @@ func (c *CPU) readDPWordWrap(dp byte) uint16 {
 // of its three bytes honors the emulation DL=0 page-wrap (the pointer stays
 // within page DH:xx); in native mode it is a flat bank-0 increment.
 func (c *CPU) readDPLongWrap(dp byte) uint32 {
+	c.pinData()
 	b0 := uint32(c.read24(c.dpOff(dp, 0)))
+	c.pinData()
 	b1 := uint32(c.read24(c.dpOff(dp, 1)))
+	c.pinData()
 	b2 := uint32(c.read24(c.dpOff(dp, 2)))
 	return b0 | b1<<8 | b2<<16
 }
@@ -242,12 +257,15 @@ func (c *CPU) amStackRelIndY() (ea816, int) {
 	sr := c.fetch816()
 	c.ioPC1() // stack-relative add
 	p := (c.SP16() + uint16(sr)) & 0xFFFF
+	c.pinData()
 	lo := uint16(c.read24(uint32(p)))
 	hiAddr := uint32((p + 1) & 0xFFFF)
+	c.pinData()
 	hi := uint16(c.read24(hiAddr))
 	ptr := lo | hi<<8
 	full := uint32(c.DBR)<<16 | uint32(ptr)
-	c.read24(hiAddr) // the +Y index add re-reads the pointer high-byte address
+	c.pinNone() // the +Y index add re-reads the pointer high-byte address (internal)
+	c.read24(hiAddr)
 	return ea816{addr: (full + uint32(c.Yidx())) & 0xFFFFFF}, 6
 }
 

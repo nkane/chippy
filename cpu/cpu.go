@@ -119,6 +119,15 @@ type CPU struct {
 	E               bool   // emulation mode (true on reset)
 	bus24           Bus24  // 24-bit memory for the 65816 core (SetBus24)
 
+	// Per-access pin state for the 65816 bus trace (#495). busPins is the
+	// VDA/VPA/VPB/MLB bitfield the active access sets just before read24/
+	// write24; busE/busM/busX snapshot the E/M/X status pins at instruction
+	// start (they reflect the flags before any mid-instruction change). Read
+	// by the bus-trace recorder; functionally inert.
+	busPins          byte
+	busE, busM, busX bool
+	opcodeFetch      bool // the next fetch816 is the opcode (asserts VDA+VPA)
+
 	// extraCycles is set by handlers (e.g. taken branches) to add to the
 	// instruction's base cycle count for the current Step. Reset each Step.
 	extraCycles int
