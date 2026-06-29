@@ -17,7 +17,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -47,7 +47,7 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -64,7 +64,7 @@ jobs:
     name: klaus + allsuite cpu tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -89,7 +89,7 @@ jobs:
     name: wolfgang lorenz suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -104,7 +104,7 @@ jobs:
     name: tom harte tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -116,7 +116,7 @@ jobs:
       # it downloads at most once.
       - name: Cache Tom Harte 6502 data
         id: harte-cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: harte-data
           key: harte-6502-bb117564
@@ -136,7 +136,7 @@ jobs:
       # WDC 65C02 set (CMOS variant, #426), cached + run the same way.
       - name: Cache Tom Harte 65C02 data
         id: harte-cache-65c02
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: harte-data-65c02
           key: harte-wdc65c02-bb117564
@@ -159,7 +159,7 @@ jobs:
       # corpus. Validates final state + cycle count.
       - name: Cache Tom Harte 65816 data
         id: harte-cache-65816
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: harte-data-65816
           key: harte-wdc65816-dff67125-chunk3
@@ -197,7 +197,7 @@ jobs:
     name: dap integration
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -212,7 +212,7 @@ jobs:
     name: exhaustive BCD test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -227,7 +227,7 @@ jobs:
     name: perf baseline
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -242,7 +242,7 @@ jobs:
     name: govulncheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -260,7 +260,7 @@ jobs:
     name: wasm build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -291,7 +291,7 @@ jobs:
       contents: write       # push to smoke-gifs branch
       pull-requests: write  # post/update sticky comment
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -372,7 +372,7 @@ jobs:
     name: cmos e2e demo
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
