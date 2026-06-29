@@ -22,6 +22,7 @@ type AttachConfig struct {
 	CPU     *cpu.CPU
 	RAM     *cpu.RAM
 	MMIO    *cpu.MMIO
+	Banked  *cpu.Banked24 // 65816 bank-aware bus; nil for 8/16-bit variants
 	Tracer  *cpu.FileTracer
 	Syms    *symbols.Table
 	SrcMap  *symbols.SourceMap
@@ -74,6 +75,7 @@ func (s *Server) AttachExisting(cfg AttachConfig) error {
 	s.ram = cfg.RAM
 	s.ram.EnableShadow() // CoW page tracking powers stepBack (issue #66).
 	s.mmio = cfg.MMIO
+	s.banked = cfg.Banked
 	s.tracer = cfg.Tracer
 	s.syms = cfg.Syms
 	s.srcMap = cfg.SrcMap

@@ -155,6 +155,46 @@ func (s *Server) peekByte(addr uint16) byte {
 	return s.ram.Read(addr)
 }
 
+// peekByte24 is the bank-aware side-effect-free read. Bank 0 routes through the
+// MMIO-aware peekByte; banks 1-255 read the 65816's flat store (Banked24.Read24
+// has no side effects beyond bank 0). When no bank-aware bus is wired (8/16-bit
+// variants), any address masks back into bank 0 — the pre-#505 behavior.
+func (s *Server) peekByte24(addr uint32) byte {
+	if addr < 0x10000 || s.banked == nil {
+		return s.peekByte(uint16(addr))
+	}
+	return s.banked.Read24(addr)
+}
+
+// writeByte24 is the bank-aware DAP poke. Bank 0 writes ram directly (bypassing
+// MMIO, as writeMemory always has); banks 1-255 write the flat store. Without a
+// bank-aware bus, the address masks into bank 0.
+func (s *Server) writeByte24(addr uint32, v byte) {
+	if addr < 0x10000 || s.banked == nil {
+		s.ram.Write(uint16(addr), v)
+		return
+	}
+	s.banked.Write24(addr, v)
+}
+
+// memMax is the inclusive top address the debuggee can address: 16 MB for the
+// 65816 (bank-aware bus wired), else the 64 KiB 6502 space.
+func (s *Server) memMax() int {
+	if s.banked != nil {
+		return 0xFFFFFF
+	}
+	return 0xFFFF
+}
+
+// fmtAddr renders a DAP address — 6 hex digits for the bank-aware 65816 space,
+// 4 for the 64 KiB 6502 space.
+func (s *Server) fmtAddr(a int) string {
+	if s.banked != nil {
+		return fmt.Sprintf("$%06X", a)
+	}
+	return fmt.Sprintf("$%04X", a)
+}
+
 // handleReadMemory returns a byte window starting at MemoryReference (+
 // Offset). Reads go through MMIO.Peek (or ram directly when no MMIO is
 // wired) so peripherals' state shows up to inspectors without
@@ -174,8 +214,9 @@ func (s *Server) handleReadMemory(req Request) {
 		s.sendErrorResponse(req, fmt.Sprintf("bad memoryReference %q: %v", args.MemoryReference, err))
 		return
 	}
+	top := s.memMax()
 	start := int(base) + args.Offset
-	if start < 0 || start > 0xFFFF {
+	if start < 0 || start > top {
 		s.sendErrorResponse(req, fmt.Sprintf("address out of range: %d", start))
 		return
 	}
@@ -184,12 +225,12 @@ func (s *Server) handleReadMemory(req Request) {
 		return
 	}
 	n := args.Count
-	if start+n > 0x10000 {
-		n = 0x10000 - start
+	if start+n > top+1 {
+		n = top + 1 - start
 	}
 	raw := make([]byte, n)
 	for i := 0; i < n; i++ {
-		raw[i] = s.peekByte(uint16(start + i))
+		raw[i] = s.peekByte24(uint32(start + i))
 	}
 
 	type body struct {
@@ -197,7 +238,7 @@ func (s *Server) handleReadMemory(req Request) {
 		Data    string `json:"data"`
 	}
 	s.sendResponse(req, body{
-		Address: fmt.Sprintf("$%04X", start),
+		Address: s.fmtAddr(start),
 		Data:    base64.StdEncoding.EncodeToString(raw),
 	})
 }
@@ -225,28 +266,29 @@ func (s *Server) handleWriteMemory(req Request) {
 		s.sendErrorResponse(req, fmt.Sprintf("bad base64 data: %v", err))
 		return
 	}
+	top := s.memMax()
 	start := int(base) + args.Offset
-	if start < 0 || start > 0xFFFF {
+	if start < 0 || start > top {
 		s.sendErrorResponse(req, fmt.Sprintf("address out of range: %d", start))
 		return
 	}
 	end := start + len(data)
 	// AllowPartial = false (the spec default): the entire payload must
-	// fit within the 64 KiB address space, otherwise reject before
-	// writing anything. With AllowPartial = true, write what fits.
-	if !args.AllowPartial && end > 0x10000 {
+	// fit within the address space, otherwise reject before writing
+	// anything. With AllowPartial = true, write what fits.
+	if !args.AllowPartial && end > top+1 {
 		s.sendErrorResponse(req, fmt.Sprintf(
-			"write of %d bytes at $%04X would overflow 64KB; set allowPartial=true to accept truncation",
-			len(data), start))
+			"write of %d bytes at %s would overflow the address space; set allowPartial=true to accept truncation",
+			len(data), s.fmtAddr(start)))
 		return
 	}
 	written := 0
 	for i, b := range data {
 		a := start + i
-		if a > 0xFFFF {
+		if a > top {
 			break
 		}
-		s.ram.Write(uint16(a), b)
+		s.writeByte24(uint32(a), b)
 		written++
 	}
 
