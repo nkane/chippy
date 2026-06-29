@@ -218,6 +218,20 @@ func (m *Model) runCommand(line string) string {
 		m.MemViewAddr = addr & 0xFFF0
 		m.MemCursor = addr
 		return fmt.Sprintf("mem -> $%04X", addr)
+	case "bank":
+		if m.Banked == nil {
+			return "bank select needs -cpu 65816"
+		}
+		if len(args) == 0 {
+			return fmt.Sprintf("mem bank $%02X", m.MemViewBank)
+		}
+		n, err := parseByte(args[0])
+		if err != nil {
+			return "usage: :bank $00..$FF"
+		}
+		m.MemViewBank = n
+		m.refreshMemWindow()
+		return fmt.Sprintf("mem bank -> $%02X", m.MemViewBank)
 	case "pc":
 		if len(args) == 0 {
 			return "usage: :pc $XXXX"
@@ -641,6 +655,12 @@ func parseByte(s string) (byte, error) {
 // Direct RAM.Write is the last fallback for the legacy in-process
 // case where no bus is configured.
 func (m *Model) memWrite(addr uint16, v byte) {
+	// Banks 1-255 (65816) write through the bank-aware bus; bank 0 keeps the
+	// 16-bit chain so watchpoints still see the poke (#505).
+	if m.MemViewBank != 0 && m.Banked != nil {
+		m.Banked.Write24(uint32(m.MemViewBank)<<16|uint32(addr), v)
+		return
+	}
 	switch {
 	case m.WBus != nil:
 		m.WBus.Write(addr, v)

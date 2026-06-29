@@ -103,6 +103,12 @@ func (s *Server) SetSymbols(syms *symbols.Table, srcMap *symbols.SourceMap) {
 	}
 }
 
+// SetBanked installs the 65816 bank-aware bus after attach, so the in-process
+// LocalSource (which attaches in New, before main.go knows the variant's bus)
+// can make readMemory/writeMemory reach banks 1-255 (#505). Same
+// before-Serve()/dispatch safety as SetSymbols.
+func (s *Server) SetBanked(b *cpu.Banked24) { s.banked = b }
+
 // handleAttach acknowledges an editor's attach request. v1 supports
 // only the "attach to the debuggee already wired by AttachExisting"
 // flow. Cross-process attach (a separate chippy connecting to a

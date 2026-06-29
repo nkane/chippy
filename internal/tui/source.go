@@ -119,7 +119,7 @@ type Source interface {
 	// `readMemory`; RemoteSource serves from its DAP-fed RAM mirror (kept
 	// current by RefreshMemory on stop + #440 dirtyRanges during a run), so
 	// a remote free-run needs no per-frame round-trip.
-	ReadMemory(addr uint16, count int) ([]byte, error)
+	ReadMemory(addr uint32, count int) ([]byte, error)
 
 	// Disassemble returns instruction lines spanning [anchor-above,
 	// anchor+below] via a DAP `disassemble` round-trip — the data path the
@@ -294,11 +294,20 @@ func (s *LocalSource) Flags() (FlagsSnapshot, error) {
 // ReadMemory reads a window through the in-process DAP server (issue #451) —
 // the inproc server is attached to the same RAM, so this returns live bytes
 // over the protocol rather than a direct core read.
-func (s *LocalSource) ReadMemory(addr uint16, count int) ([]byte, error) {
+func (s *LocalSource) ReadMemory(addr uint32, count int) ([]byte, error) {
 	if s.dapClient == nil {
 		return nil, fmt.Errorf("local source: no dap client")
 	}
 	return fetchMem(s.dapClient, addr, count)
+}
+
+// SetBanked shares the 65816 bank-aware bus with the in-process DAP server so
+// the memory panel can inspect banks 1-255 (#505). Called by Model.WithBanked24
+// after New attaches the server.
+func (s *LocalSource) SetBanked(b *cpu.Banked24) {
+	if s.dapServer != nil {
+		s.dapServer.SetBanked(b)
+	}
 }
 
 // Disassemble renders instructions around anchor through the in-process DAP

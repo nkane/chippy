@@ -228,7 +228,8 @@ func main() {
 		WithRunOnStart(*runOnStart).
 		WithTheme(*theme).
 		WithTraceReplay(replay).
-		WithReplayDiff(diffReplay)
+		WithReplayDiff(diffReplay).
+		WithBanked24(banked)
 	if syms != nil {
 		model = model.WithSymbols(syms)
 	}

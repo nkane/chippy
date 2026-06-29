@@ -243,10 +243,12 @@ func (s *RemoteSource) Flags() (FlagsSnapshot, error) {
 // (issue #451). The mirror is reconciled by RefreshMemory on every stop and
 // updated by #440 dirtyRanges during a run, so the panel needs no per-frame
 // wire round-trip — reading the mirror IS reading DAP-sourced bytes.
-func (s *RemoteSource) ReadMemory(addr uint16, count int) ([]byte, error) {
+func (s *RemoteSource) ReadMemory(addr uint32, count int) ([]byte, error) {
+	// Remote debuggees are 6502/NES (no 65816 host), so the mirror is bank 0;
+	// a 24-bit address masks into it.
 	buf := make([]byte, count)
 	for i := 0; i < count; i++ {
-		buf[i] = s.ram.Read(addr + uint16(i))
+		buf[i] = s.ram.Read(uint16(addr) + uint16(i))
 	}
 	return buf, nil
 }
