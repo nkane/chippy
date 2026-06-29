@@ -87,13 +87,63 @@ func main() {
 	}
 
 	ram := cpu.NewRAM()
-	var loaded *loader.Result
 
+	// MMIO bus sits between WBus and RAM. Peripherals registered here
+	// intercept reads/writes to their claimed regions; everything else
+	// falls through to RAM. Note: the loader and the reset-vector helpers
+	// below write directly to `ram`, deliberately bypassing MMIO, so a
+	// program loaded at $F001 would land in RAM and never reach the
+	// peripheral — peripherals live in addresses no ROM should occupy.
+	mmio := cpu.NewMMIO(ram)
+	textOut := peripheral.NewTextOutputWithCap(0xF001, *textBufCap)
+	keyIn := peripheral.NewKeyboardInput(0xF004, 0xF005)
+	if err := mmio.Register(textOut); err != nil {
+		fmt.Fprintln(os.Stderr, "register text output:", err)
+		os.Exit(1)
+	}
+	if err := mmio.Register(keyIn); err != nil {
+		fmt.Fprintln(os.Stderr, "register keyboard:", err)
+		os.Exit(1)
+	}
+
+	c := cpu.NewVariant(mmio, variant)
+
+	tracer := cpu.NewFileTracer()
+	c.Tracer = tracer
+	defer func() { _ = tracer.Close() }()
+	if *tracePath != "" {
+		if err := tracer.SetPath(*tracePath); err != nil {
+			fmt.Fprintln(os.Stderr, "trace:", err)
+			os.Exit(1)
+		}
+		tracer.Enable()
+	}
+
+	// Wrap the bus with WBus so memory watchpoints can intercept reads/writes.
+	// We construct CPU on MMIO first (to keep cpu.New's signature simple),
+	// then swap c.Bus to the wrapper. WithWBus attaches the CPU pointer and
+	// hands the watch map to the wrapper.
+	wbus := tui.NewWBus(mmio)
+	c.SetBus(wbus)
+
+	// The 65816 core reads/writes through a 24-bit bus. Banked24 routes bank 0
+	// through the 16-bit MMIO/watchpoint chain (so peripherals, watchpoints, and
+	// the TUI's bank-0 panels stay accurate) and backs banks 1-255 with real
+	// storage, so a program that touches a bank ≠ 0 reaches distinct memory
+	// instead of aliasing onto bank 0 (#505).
+	var banked *cpu.Banked24
+	if variant == cpu.VariantW65816 {
+		banked = cpu.NewBanked24(wbus)
+		c.SetBus24(banked)
+	}
+
+	var loaded *loader.Result
 	if *romPath != "" {
 		var err error
 		loaded, err = loader.Load(ram, *romPath, loader.Options{
 			Addr:      uint16(*loadAddr),
 			LinkerCfg: *cfg,
+			Bus24:     banked,
 		})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "load:", err)
@@ -156,56 +206,6 @@ func main() {
 			srcMap = sm
 		}
 	}
-
-	// MMIO bus sits between WBus and RAM. Peripherals registered here
-	// intercept reads/writes to their claimed regions; everything else
-	// falls through to RAM. Note: the loader and the reset-vector helpers
-	// above write directly to `ram`, deliberately bypassing MMIO, so a
-	// program loaded at $F001 would land in RAM and never reach the
-	// peripheral — peripherals live in addresses no ROM should occupy.
-	mmio := cpu.NewMMIO(ram)
-	textOut := peripheral.NewTextOutputWithCap(0xF001, *textBufCap)
-	keyIn := peripheral.NewKeyboardInput(0xF004, 0xF005)
-	if err := mmio.Register(textOut); err != nil {
-		fmt.Fprintln(os.Stderr, "register text output:", err)
-		os.Exit(1)
-	}
-	if err := mmio.Register(keyIn); err != nil {
-		fmt.Fprintln(os.Stderr, "register keyboard:", err)
-		os.Exit(1)
-	}
-
-	c := cpu.NewVariant(mmio, variant)
-
-	tracer := cpu.NewFileTracer()
-	c.Tracer = tracer
-	defer func() { _ = tracer.Close() }()
-	if *tracePath != "" {
-		if err := tracer.SetPath(*tracePath); err != nil {
-			fmt.Fprintln(os.Stderr, "trace:", err)
-			os.Exit(1)
-		}
-		tracer.Enable()
-	}
-
-	// Wrap the bus with WBus so memory watchpoints can intercept reads/writes.
-	// We construct CPU on MMIO first (to keep cpu.New's signature simple),
-	// then swap c.Bus to the wrapper. WithWBus attaches the CPU pointer and
-	// hands the watch map to the wrapper.
-	wbus := tui.NewWBus(mmio)
-	c.SetBus(wbus)
-
-	// The 65816 core reads/writes through a 24-bit bus. Banked24 routes bank 0
-	// through the 16-bit MMIO/watchpoint chain (so peripherals, watchpoints, and
-	// the TUI's bank-0 panels stay accurate) and backs banks 1-255 with real
-	// storage, so a program that touches a bank ≠ 0 reaches distinct memory
-	// instead of aliasing onto bank 0 (#505).
-	var banked *cpu.Banked24
-	if variant == cpu.VariantW65816 {
-		banked = cpu.NewBanked24(wbus)
-		c.SetBus24(banked)
-	}
-	_ = banked // threaded into the loader / DAP / TUI in later chunks (#505)
 
 	var replay, diffReplay *trace.Replay
 	if *traceReplay != "" {
