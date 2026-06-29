@@ -195,12 +195,17 @@ func main() {
 	wbus := tui.NewWBus(mmio)
 	c.SetBus(wbus)
 
-	// The 65816 core reads/writes through a 24-bit bus. Mirror the 16-bit
-	// MMIO/watchpoint bus into bank 0 so -cpu 65816 runs bank-0 programs
-	// through the same RAM the TUI panels render (#456).
+	// The 65816 core reads/writes through a 24-bit bus. Banked24 routes bank 0
+	// through the 16-bit MMIO/watchpoint chain (so peripherals, watchpoints, and
+	// the TUI's bank-0 panels stay accurate) and backs banks 1-255 with real
+	// storage, so a program that touches a bank ≠ 0 reaches distinct memory
+	// instead of aliasing onto bank 0 (#505).
+	var banked *cpu.Banked24
 	if variant == cpu.VariantW65816 {
-		c.SetBus24(cpu.Bus24From16(wbus))
+		banked = cpu.NewBanked24(wbus)
+		c.SetBus24(banked)
 	}
+	_ = banked // threaded into the loader / DAP / TUI in later chunks (#505)
 
 	var replay, diffReplay *trace.Replay
 	if *traceReplay != "" {
