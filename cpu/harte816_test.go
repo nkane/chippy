@@ -176,22 +176,63 @@ func harte816Diff(c *CPU, mem mem24, tc *harte816Case, cyc int) string {
 // busRecorder816 is the 24-bit sibling of busRecorder: a sparse 24-bit memory
 // that records every Read24/Write24 as a [addr, value, rw] triple so the
 // per-cycle bus trace can be compared against the 65816 corpus cycle list.
+// pinString renders the 8-char Harte cycle pin string for the current access
+// (write = whether it is a write). E/M/X come from the instruction-start
+// snapshot; VDA/VPA/VPB/MLB from the access type. Test-only.
+func (c *CPU) pinString(write bool) string {
+	b := []byte("--------")
+	if c.busPins&pinVDA != 0 {
+		b[0] = 'd'
+	}
+	if c.busPins&pinVPA != 0 {
+		b[1] = 'p'
+	}
+	if c.busPins&pinVPB != 0 {
+		b[2] = 'v'
+	}
+	if write {
+		b[3] = 'w'
+	} else {
+		b[3] = 'r'
+	}
+	if c.busE {
+		b[4] = 'e'
+	}
+	if c.busM {
+		b[5] = 'm'
+	}
+	if c.busX {
+		b[6] = 'x'
+	}
+	if c.busPins&pinMLB != 0 {
+		b[7] = 'l'
+	}
+	return string(b)
+}
+
+type busCycle816 struct {
+	addr int
+	val  int
+	pin  string // the 8-char Harte pin string (VDA/VPA/VPB/RW/E/M/X/MLB)
+}
+
 type busRecorder816 struct {
 	ram   mem24
-	trace [][3]int // [24-bit addr, value, rw] — rw 0=read, 1=write
+	cpu   *CPU
+	trace []busCycle816
 }
 
 func (b *busRecorder816) Read24(a uint32) byte {
 	a &= 0xFFFFFF
 	v := b.ram[a]
-	b.trace = append(b.trace, [3]int{int(a), int(v), 0})
+	b.trace = append(b.trace, busCycle816{int(a), int(v), b.cpu.pinString(false)})
 	return v
 }
 
 func (b *busRecorder816) Write24(a uint32, v byte) {
 	a &= 0xFFFFFF
 	b.ram[a] = v
-	b.trace = append(b.trace, [3]int{int(a), int(v), 1})
+	b.trace = append(b.trace, busCycle816{int(a), int(v), b.cpu.pinString(true)})
 }
 
 // harteBusSkip816 lists 65816 opcodes whose per-cycle bus TRACE is not yet
@@ -251,6 +292,7 @@ func runHarte816BusTrace(t *testing.T, op string, cases []harte816Case, maxCases
 			bus.ram[uint32(kv[0])] = byte(kv[1])
 		}
 		c := NewVariant(NewRAM(), VariantW65816)
+		bus.cpu = c
 		c.SetBus24(bus)
 		ini := &tc.Initial
 		c.E = ini.E == 1
@@ -275,7 +317,7 @@ func runHarte816BusTrace(t *testing.T, op string, cases []harte816Case, maxCases
 // corpus per-cycle trace. Each corpus cycle is [addr, value, pin-string]; the
 // pin string's index-3 char is 'w' for a write (else read), and a null value
 // marks an internal cycle whose data byte is don't-care (wildcard match).
-func harte816BusDiff(got [][3]int, want [][]interface{}) string {
+func harte816BusDiff(got []busCycle816, want [][]interface{}) string {
 	if len(got) != len(want) {
 		return fmt.Sprintf("length got %d want %d", len(got), len(want))
 	}
@@ -286,24 +328,14 @@ func harte816BusDiff(got [][3]int, want [][]interface{}) string {
 		if !wvWild {
 			wv = int(want[i][1].(float64))
 		}
-		pin, _ := want[i][2].(string)
-		wrw := 0
-		if len(pin) > 3 && pin[3] == 'w' {
-			wrw = 1
-		}
-		if got[i][0] != wa || got[i][2] != wrw || (!wvWild && got[i][1] != wv) {
-			rw := func(x int) string {
-				if x == 1 {
-					return "write"
-				}
-				return "read"
-			}
+		wpin, _ := want[i][2].(string)
+		if got[i].addr != wa || got[i].pin != wpin || (!wvWild && got[i].val != wv) {
 			wvStr := "??"
 			if !wvWild {
 				wvStr = fmt.Sprintf("%02X", wv)
 			}
 			return fmt.Sprintf("cycle %d got [%06X %02X %s] want [%06X %s %s]",
-				i, got[i][0], got[i][1], rw(got[i][2]), wa, wvStr, rw(wrw))
+				i, got[i].addr, got[i].val, got[i].pin, wa, wvStr, wpin)
 		}
 	}
 	return ""

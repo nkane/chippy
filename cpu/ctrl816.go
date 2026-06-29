@@ -7,6 +7,7 @@ package cpu
 // in native mode SP is a full 16-bit bank-0 pointer.
 
 func (c *CPU) spPush8(v byte) {
+	c.pinData()
 	c.write24(uint32(c.SP16()), v)
 	if c.E {
 		c.SP--
@@ -21,6 +22,7 @@ func (c *CPU) spPull8() byte {
 	} else {
 		c.setSP16(c.SP16() + 1)
 	}
+	c.pinData()
 	return c.read24(uint32(c.SP16()))
 }
 
@@ -41,11 +43,13 @@ func (c *CPU) spReforce() {
 	}
 }
 func (c *CPU) spPushNew(v byte) {
+	c.pinData()
 	c.write24(uint32(c.SP16()), v)
 	c.spSetRaw(c.SP16() - 1)
 }
 func (c *CPU) spPullNew() byte {
 	c.spSetRaw(c.SP16() + 1)
+	c.pinData()
 	return c.read24(uint32(c.SP16()))
 }
 func (c *CPU) spPush16New(v uint16) { c.spPushNew(byte(v >> 8)); c.spPushNew(byte(v)) }
@@ -172,24 +176,37 @@ func (c *CPU) trb(v uint16, wide bool) uint16 {
 func (c *CPU) rmwMem(e ea816, oc int, fn func(uint16, bool) uint16) int {
 	wide := c.mWide()
 	c.indexIO(e, true)
+	// RMW asserts the memory-lock pin (MLB) for the whole read-modify-write.
+	// The real read/write accesses are VDA+MLB; the internal modify cycle is
+	// MLB-only (VDA off — the address bus holds but the access is internal).
+	data := func() { c.busPins = pinVDA | pinMLB }
+	modify := func() { c.busPins = pinMLB }
 	if wide {
 		hiAddr := c.eaInc(e.addr, e.bank0)
+		data()
 		lo := uint16(c.read24(e.addr))
+		data()
 		hi := uint16(c.read24(hiAddr))
 		v := fn(lo|hi<<8, true)
-		c.read24(hiAddr)              // internal modify cycle: dummy read of the high byte
+		modify()
+		c.read24(hiAddr) // internal modify cycle: dummy read of the high byte
+		data()
 		c.write24(hiAddr, byte(v>>8)) // write the result high byte first, then low
+		data()
 		c.write24(e.addr, byte(v))
 	} else {
+		data()
 		old := uint16(c.read24(e.addr))
 		v := fn(old, false)
 		// Internal modify cycle: emulation does a dummy WRITE of the original
 		// value; native does a dummy READ.
+		modify()
 		if c.E {
 			c.write24(e.addr, byte(old))
 		} else {
 			c.read24(e.addr)
 		}
+		data()
 		c.write24(e.addr, byte(v))
 	}
 	return oc + 3 + 2*b2i(wide) + crossStore(e)
@@ -255,6 +272,7 @@ func (c *CPU) brk() int {
 	if !c.E {
 		vec = 0xFFE6
 	}
+	c.pinVector()
 	c.PC = uint16(c.read24(vec)) | uint16(c.read24(vec+1))<<8
 	return cyc
 }
@@ -304,6 +322,7 @@ func (c *CPU) cop() int {
 	if !c.E {
 		vec = 0xFFE4
 	}
+	c.pinVector()
 	c.PC = uint16(c.read24(vec)) | uint16(c.read24(vec+1))<<8
 	return cyc
 }

@@ -71,8 +71,29 @@ func (m bus24From16) Write24(a uint32, v byte) { m.b.Write(uint16(a), v) }
 // Bus24From16 adapts a 16-bit Bus for the 65816 core (bank-0 mirror).
 func Bus24From16(b Bus) Bus24 { return bus24From16{b} }
 
+// 65816 bus-cycle pin bits (Tom Harte cycle-string positions 0-2 and 7). The
+// active access sets c.busPins to the OR of these just before read24/write24;
+// the bus-trace recorder reads them. VDA/VPA = valid data/program address,
+// VPB = vector pull, MLB = memory lock (asserted across an RMW).
+const (
+	pinVDA = 1 << iota // valid data address (data accesses; also the opcode fetch)
+	pinVPA             // valid program address (opcode + operand fetches)
+	pinVPB             // vector pull (BRK/COP/interrupt vector reads)
+	pinMLB             // memory lock (RMW read-modify-write)
+)
+
+// pinData / pinProg / pinNone / pinVector set the access-type pins for the next
+// bus access. The opcode fetch asserts both VDA and VPA; operand fetches VPA;
+// data accesses VDA; internal cycles none; vector reads VDA+VPB.
+func (c *CPU) pinData()   { c.busPins = pinVDA }
+func (c *CPU) pinProg()   { c.busPins = pinVPA }
+func (c *CPU) pinNone()   { c.busPins = 0 }
+func (c *CPU) pinVector() { c.busPins = pinVDA | pinVPB }
+
 // read24 / write24 are the 65816 core's memory primitives (24-bit, wrapping at
-// 16 MB).
+// 16 MB). The caller sets c.busPins (via pinData/pinProg/pinNone/pinVector) to
+// the access type before calling; read24/write24 leave it untouched so the
+// bus-trace recorder can read it.
 func (c *CPU) read24(addr uint32) byte     { return c.bus24.Read24(addr & 0xFFFFFF) }
 func (c *CPU) write24(addr uint32, v byte) { c.bus24.Write24(addr&0xFFFFFF, v) }
 

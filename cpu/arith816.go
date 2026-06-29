@@ -14,6 +14,7 @@ package cpu
 // index (crossLoad); writes and RMW always pay it (crossStore).
 func (c *CPU) indexIO(e ea816, store bool) {
 	if (store && crossStore(e) != 0) || (!store && c.crossLoad(e) != 0) {
+		c.pinNone() // the extra index cycle is internal (dummy read of the un-fixed address)
 		c.read24(e.unfixed)
 	}
 }
