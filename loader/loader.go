@@ -23,7 +23,8 @@ import (
 
 // Result describes what was loaded and where.
 type Result struct {
-	LoadAddr uint16 // address bytes were placed at
+	LoadAddr uint16 // 16-bit offset (within Bank) bytes were placed at
+	Bank     byte   // 65816 bank of the first byte (0 for 16-bit formats)
 	Size     int    // number of bytes loaded
 	Format   string // detected format, for status display
 	// LinkedBin is set when a .o was linked; points to the produced .bin file
@@ -37,6 +38,11 @@ type Options struct {
 	Addr uint16
 	// LinkerCfg is the path to a ld65 .cfg file. Required for .o input.
 	LinkerCfg string
+	// Bus24, when set, is the 65816's bank-aware bus. Intel HEX records beyond
+	// bank 0 (via type-04 Extended Linear Address) load through it; bank 0 still
+	// loads into ram directly (bypassing MMIO, per the loader invariant). nil
+	// for non-65816 runs — a beyond-bank-0 record then errors.
+	Bus24 cpu.Bus24
 }
 
 // Load reads `path`, detects format, and writes bytes into `ram`.
@@ -48,7 +54,7 @@ func Load(ram *cpu.RAM, path string, opt Options) (*Result, error) {
 	case ".prg":
 		return loadPRG(ram, path)
 	case ".hex":
-		return loadHEX(ram, path)
+		return loadHEX(ram, path, opt)
 	case ".o":
 		return loadObject(ram, path, opt)
 	default:
@@ -86,17 +92,21 @@ func loadPRG(ram *cpu.RAM, path string) (*Result, error) {
 	return &Result{LoadAddr: addr, Size: len(body), Format: "prg"}, nil
 }
 
-// loadHEX parses Intel HEX. Supported record types: 00 (data), 01 (EOF).
-// Other types (extended segment/linear address) are ignored — 6502 is 16-bit.
-func loadHEX(ram *cpu.RAM, path string) (*Result, error) {
+// loadHEX parses Intel HEX. Supported record types: 00 (data), 01 (EOF),
+// 04 (Extended Linear Address — the upper 16 bits of a 24-bit address). A
+// type-04 base lifts subsequent data records into banks 1-255: bank 0 loads
+// into ram directly (bypassing MMIO, per the loader invariant); beyond bank 0
+// loads through opt.Bus24 (the 65816 bank-aware bus). Without Bus24 a
+// beyond-bank-0 record is an error.
+func loadHEX(ram *cpu.RAM, path string, opt Options) (*Result, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
+	var base uint32 // upper bits from the most recent type-04 record
 	var minAddr uint32 = 0xFFFFFFFF
-	var maxAddr uint32
 	total := 0
 	scan := bufio.NewScanner(f)
 	lineNo := 0
@@ -133,34 +143,46 @@ func loadHEX(ram *cpu.RAM, path string) (*Result, error) {
 		switch rec {
 		case 0x00: // data
 			data := raw[4 : 4+count]
-			if int(addr)+len(data) > 0x10000 {
-				return nil, fmt.Errorf("hex: line %d data overflows 64KB", lineNo)
+			eff := base + uint32(addr)
+			if eff>>24 != 0 || (eff&0xFFFF)+uint32(len(data)) > 0x10000 {
+				return nil, fmt.Errorf("hex: line %d data overflows its bank at $%06X", lineNo, eff)
 			}
-			ram.Load(addr, data)
+			if eff < 0x10000 {
+				ram.Load(uint16(eff), data)
+			} else {
+				if opt.Bus24 == nil {
+					return nil, fmt.Errorf("hex: line %d targets bank $%02X but no 65816 bus is wired (use -cpu 65816)", lineNo, eff>>16)
+				}
+				for i, b := range data {
+					opt.Bus24.Write24(eff+uint32(i), b)
+				}
+			}
 			total += len(data)
-			a := uint32(addr)
-			if a < minAddr {
-				minAddr = a
+			if eff < minAddr {
+				minAddr = eff
 			}
-			if a+uint32(len(data)) > maxAddr {
-				maxAddr = a + uint32(len(data))
+		case 0x04: // extended linear address: upper 16 bits of a 32-bit base
+			if count != 2 {
+				return nil, fmt.Errorf("hex: line %d type-04 must carry 2 bytes", lineNo)
 			}
+			base = uint32(raw[4])<<24 | uint32(raw[5])<<16
 		case 0x01: // EOF
-			if minAddr == 0xFFFFFFFF {
-				minAddr = 0
-			}
-			return &Result{LoadAddr: uint16(minAddr), Size: total, Format: "hex"}, nil
+			return hexResult(minAddr, total), nil
 		default:
-			// ignore record types we don't care about for 6502
+			// ignore record types we don't model (e.g. 02/03/05)
 		}
 	}
 	if err := scan.Err(); err != nil {
 		return nil, err
 	}
+	return hexResult(minAddr, total), nil
+}
+
+func hexResult(minAddr uint32, total int) *Result {
 	if minAddr == 0xFFFFFFFF {
 		minAddr = 0
 	}
-	return &Result{LoadAddr: uint16(minAddr), Size: total, Format: "hex"}, nil
+	return &Result{LoadAddr: uint16(minAddr), Bank: byte(minAddr >> 16), Size: total, Format: "hex"}
 }
 
 // loadObject links a ca65/cc65 .o using ld65 and loads the resulting binary.

@@ -50,6 +50,7 @@ type Server struct {
 	cpu     *cpu.CPU
 	ram     *cpu.RAM
 	mmio    *cpu.MMIO
+	banked  *cpu.Banked24 // 65816 24-bit bus; nil for 8/16-bit variants
 	tracer  *cpu.FileTracer
 	syms    *symbols.Table
 	srcMap  *symbols.SourceMap
@@ -485,6 +486,10 @@ func (s *Server) bootDebuggee(args LaunchArguments) error {
 	}
 
 	c := cpu.NewVariant(mmio, variant)
+	if variant == cpu.VariantW65816 {
+		s.banked = cpu.NewBanked24(mmio)
+		c.SetBus24(s.banked)
+	}
 	tracer := cpu.NewFileTracer()
 	c.Tracer = tracer
 	if args.TracePath != "" {

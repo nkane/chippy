@@ -142,6 +142,11 @@ type Model struct {
 	Breakpoints map[uint16]*Breakpoint
 	MemBPs      map[uint16]*MemBP
 	MemViewAddr uint16
+	// MemViewBank is the 65816 bank the memory panel views (0 for the 6502
+	// 64 KiB space). The panel addresses MemViewBank:MemViewAddr; `:bank N`
+	// selects it (#505). Banked is the bank-aware bus used for bank>0 edits.
+	MemViewBank byte
+	Banked      *cpu.Banked24
 	Status      string
 
 	// Modals
@@ -377,6 +382,21 @@ func (m Model) WithSource(s Source) Model {
 	m.syncFlags()
 	m.syncMem()
 	m.syncDisasm()
+	return m
+}
+
+// WithBanked24 shares the 65816 bank-aware bus with the Model (for bank>0
+// memory-panel edits) and its in-process DAP server (for bank>0 reads), so the
+// memory panel can inspect and edit banks 1-255 (#505). No-op for non-65816.
+func (m Model) WithBanked24(b *cpu.Banked24) Model {
+	if b == nil {
+		return m
+	}
+	m.Banked = b
+	if ls, ok := m.Source.(*LocalSource); ok {
+		ls.SetBanked(b)
+	}
+	m.syncMem()
 	return m
 }
 
@@ -1608,6 +1628,7 @@ func helpPages() [][]helpSection {
 			}},
 			{"Prompt verbs", [][2]string{
 				{":goto X", "scroll memory pane to addr/symbol"},
+				{":bank N", "select 65816 memory-panel bank $00-$FF (#505)"},
 				{":pc X", "set CPU PC"},
 				{":run X", "run until addr (one-shot bp + go)"},
 				{":watch X [byte|word] [xN] [label]", "add value watch (xN expands an array; also :watch reg <name>)"},
@@ -2351,7 +2372,7 @@ func (m Model) memView(w, h int) string {
 	var b strings.Builder
 	for row := 0; row < rows; row++ {
 		base := addr + uint16(row*16)
-		b.WriteString(dimAddr.Render(fmt.Sprintf("$%04X:", base)))
+		b.WriteString(dimAddr.Render(m.fmtMemAddr(base) + ":"))
 		var ascii strings.Builder
 		for col := 0; col < 16; col++ {
 			a := base + uint16(col)
@@ -2393,6 +2414,19 @@ func (m Model) memView(w, h int) string {
 		}
 		b.WriteString("  " + ascii.String() + "\n")
 	}
-	hint := help.Render(fmt.Sprintf("  (cur $%04X  arrows move  e edit)", m.MemCursor))
-	return fitPanel("Memory"+hint, strings.TrimRight(b.String(), "\n"), w, h)
+	hint := help.Render(fmt.Sprintf("  (cur %s  arrows move  e edit)", m.fmtMemAddr(m.MemCursor)))
+	title := "Memory"
+	if m.MemViewBank != 0 {
+		title = fmt.Sprintf("Memory (bank $%02X)", m.MemViewBank)
+	}
+	return fitPanel(title+hint, strings.TrimRight(b.String(), "\n"), w, h)
+}
+
+// fmtMemAddr renders a memory-panel address, prefixed with the bank when the
+// panel is viewing a 65816 bank ≠ 0 (#505).
+func (m Model) fmtMemAddr(a uint16) string {
+	if m.MemViewBank != 0 {
+		return fmt.Sprintf("$%02X:%04X", m.MemViewBank, a)
+	}
+	return fmt.Sprintf("$%04X", a)
 }

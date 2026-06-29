@@ -21,9 +21,9 @@ func memWindowFor(base uint16) int {
 
 // fetchMem issues one `readMemory` request for [addr, addr+count) and decodes
 // the base64 payload (issue #451). Transport-agnostic via the dapRequester.
-func fetchMem(c dapRequester, addr uint16, count int) ([]byte, error) {
+func fetchMem(c dapRequester, addr uint32, count int) ([]byte, error) {
 	resp, err := c.Request("readMemory", map[string]any{
-		"memoryReference": fmt.Sprintf("$%04X", addr),
+		"memoryReference": fmt.Sprintf("$%06X", addr),
 		"offset":          0,
 		"count":           count,
 	})
@@ -55,7 +55,8 @@ func (m *Model) refreshMemWindow() {
 		return
 	}
 	base := m.MemViewAddr & 0xFFF0
-	if buf, err := m.Source.ReadMemory(base, memWindowFor(base)); err == nil {
+	base24 := uint32(m.MemViewBank)<<16 | uint32(base)
+	if buf, err := m.Source.ReadMemory(base24, memWindowFor(base)); err == nil {
 		m.MemView = buf
 		m.MemViewBase = base
 	}

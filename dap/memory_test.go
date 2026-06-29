@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nkane/chippy/cpu"
 	"github.com/nkane/chippy/symbols"
 )
 
@@ -82,6 +83,44 @@ func TestMem_ReadMemoryRoundTrip(t *testing.T) {
 		t.Fatalf("missing address: %s", body)
 	}
 	want := base64.StdEncoding.EncodeToString([]byte{0xDE, 0xAD, 0xBE, 0xEF})
+	if !strings.Contains(body, `"data":"`+want+`"`) {
+		t.Fatalf("expected data=%q in body:\n%s", want, body)
+	}
+}
+
+func TestMem_BankAwareReadWrite(t *testing.T) {
+	s, _, out := newStoppedServer(t, nil)
+	// Promote the server to the bank-aware 65816 bus.
+	s.banked = cpu.NewBanked24(s.ram)
+
+	// Write 3 bytes into bank 2 via DAP writeMemory ($028000).
+	payload := base64.StdEncoding.EncodeToString([]byte{0x11, 0x22, 0x33})
+	wreq := Request{
+		ProtocolMessage: ProtocolMessage{Seq: 1, Type: "request"},
+		Command:         "writeMemory",
+		Arguments:       json.RawMessage(`{"memoryReference":"$028000","data":"` + payload + `"}`),
+	}
+	s.handleWriteMemory(wreq)
+	if got := s.banked.Read24(0x028000); got != 0x11 {
+		t.Fatalf("bank-2 write: $%02X want $11", got)
+	}
+	// Bank 0 at the same 16-bit offset is untouched.
+	if got := s.ram.Read(0x8000); got != 0x00 {
+		t.Fatalf("bank-2 write leaked into bank 0: $%02X", got)
+	}
+
+	out.Reset()
+	rreq := Request{
+		ProtocolMessage: ProtocolMessage{Seq: 2, Type: "request"},
+		Command:         "readMemory",
+		Arguments:       json.RawMessage(`{"memoryReference":"$028000","count":3}`),
+	}
+	s.handleReadMemory(rreq)
+	body := out.String()
+	if !strings.Contains(body, `"address":"$028000"`) {
+		t.Fatalf("expected 6-digit bank address: %s", body)
+	}
+	want := base64.StdEncoding.EncodeToString([]byte{0x11, 0x22, 0x33})
 	if !strings.Contains(body, `"data":"`+want+`"`) {
 		t.Fatalf("expected data=%q in body:\n%s", want, body)
 	}

@@ -205,6 +205,37 @@ func TestW65816_Bus24From16Bridge(t *testing.T) {
 	}
 }
 
+func TestBanked24_BankIsolation(t *testing.T) {
+	ram := NewRAM()
+	b := NewBanked24(ram)
+
+	// Bank 0 routes through the 16-bit chain: a Banked24 write is visible on the
+	// underlying RAM and vice-versa.
+	b.Write24(0x000010, 0x11)
+	if got := ram.Read(0x0010); got != 0x11 {
+		t.Fatalf("bank-0 write should hit the 16-bit chain: ram[$0010]=$%02X want $11", got)
+	}
+	ram.Write(0x0020, 0x22)
+	if got := b.Read24(0x000020); got != 0x22 {
+		t.Fatalf("bank-0 read should see the 16-bit chain: $%02X want $22", got)
+	}
+
+	// Banks 1-255 are distinct storage — the same offset in different banks does
+	// not alias (the bug the bank-0 mirror had).
+	b.Write24(0x010010, 0xAA)
+	b.Write24(0x020010, 0xBB)
+	if got := b.Read24(0x010010); got != 0xAA {
+		t.Fatalf("bank 1 offset $0010 = $%02X want $AA", got)
+	}
+	if got := b.Read24(0x020010); got != 0xBB {
+		t.Fatalf("bank 2 offset $0010 = $%02X want $BB", got)
+	}
+	// And a banked write never leaks into bank 0.
+	if got := ram.Read(0x0010); got != 0x11 {
+		t.Fatalf("banked write leaked into bank 0: ram[$0010]=$%02X want $11", got)
+	}
+}
+
 func TestW65816_BlockMoveMVP(t *testing.T) {
 	// MVP moves descending. Move 3 bytes ending at src $2002 -> dst $3002.
 	c, mem := new816(0x44, 0x00, 0x00)

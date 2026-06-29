@@ -163,7 +163,7 @@ command line.
 |-----------|---------------------------------------------------------------|
 | `.bin`    | Raw bytes — placed at `-addr` (default `$8000`)               |
 | `.prg`    | Commodore-style: first 2 bytes = LE load address              |
-| `.hex`    | Intel HEX (record types `00` data, `01` EOF)                  |
+| `.hex`    | Intel HEX (record types `00` data, `01` EOF, `04` extended linear address → loads into 65816 banks >0) |
 | `.o`      | ca65/cc65 object — linked via `ld65` (requires `-cfg`)        |
 
 Flags:
@@ -175,7 +175,7 @@ Flags:
 | `-cfg`   | —       | ld65 linker config (required for `.o`)                 |
 | `-dbg`   | auto    | cc65 `.dbg` symbol file; `<rom>.dbg` is tried by default |
 | `-reset` | `0`     | Override reset vector. `0` keeps the existing `$FFFC/D` bytes (or falls back to the load address if those are zero) |
-| `--cpu`  | `nmos`  | CPU variant: `nmos` (MOS 6502), `65c02` (WDC/Rockwell CMOS), `nes` (Ricoh 2A03 — NMOS minus decimal-mode arithmetic), or `65816` (WDC 65C816 — full 16-bit core, emulation + native, Tom Harte-validated; runs bank-0 programs through the TUI) |
+| `--cpu`  | `nmos`  | CPU variant: `nmos` (MOS 6502), `65c02` (WDC/Rockwell CMOS), `nes` (Ricoh 2A03 — NMOS minus decimal-mode arithmetic), or `65816` (WDC 65C816 — full 16-bit core, emulation + native, Tom Harte-validated; full 24-bit bank-aware address space — `:bank N` inspects banks >0) |
 | `-trace` | —       | Write per-instruction execution trace to this file. Also toggleable at runtime via `:trace PATH \| :trace on \| :trace off`. |
 | `-run-on-start` | `false` | Start the CPU running instead of paused. Pair with `-trace` for non-interactive capture (`chippy -rom prog.bin -trace t.log -run-on-start`). |
 | `-dap`  | —       | Run as a [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) server instead of the TUI. Accepts `stdio` (editor pipes stdin/stdout), `tcp:PORT` (server listens, editor connects out), `unix:PATH` (unix-domain socket, lowest-overhead local), or `inproc` (in-process loopback self-check). See [`docs/dap.md`](docs/dap.md) for the request list, transport benchmarks, and VS Code / nvim-dap onboarding. |
@@ -285,6 +285,7 @@ Type `:` to open the command line, then any of:
 | Command                     | Effect                                       |
 |-----------------------------|----------------------------------------------|
 | `:goto $XXXX` / `:g $XXXX`  | Jump memory view to address (or symbol)      |
+| `:bank $NN`                 | Select 65816 memory-panel bank `$00`–`$FF`   |
 | `:pc $XXXX`                 | Force `PC` to address                        |
 | `:run $XXXX`                | Set one-shot bp at address and start running |
 | `:speed N`                  | Throttle to N Hz (`0` = unthrottled)         |

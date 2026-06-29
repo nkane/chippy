@@ -71,6 +71,44 @@ func (m bus24From16) Write24(a uint32, v byte) { m.b.Write(uint16(a), v) }
 // Bus24From16 adapts a 16-bit Bus for the 65816 core (bank-0 mirror).
 func Bus24From16(b Bus) Bus24 { return bus24From16{b} }
 
+// Banked24 is the production 24-bit bus for the 65816. Bank 0 routes through
+// the supplied 16-bit Bus — chippy's MMIO/watchpoint/RAM chain — so peripherals
+// and watchpoints stay live and the TUI's bank-0 panels render the real RAM.
+// Banks 1-255 are backed by a flat 16 MB store. This is the real address space
+// that replaces the bank-0 mirror (bus24From16), which aliased every bank onto
+// bank 0; a 65816 program that touches a bank ≠ 0 now reaches distinct storage.
+//
+// The flat store spans the whole 16 MB so a 24-bit address indexes it directly;
+// the bank-0 slice (mem[:0x10000]) is never read or written — bank 0 always
+// goes through bank0. Cross-bank MMIO is out of scope: only bank 0 has
+// peripherals (chippy's documented memory model).
+type Banked24 struct {
+	bank0 Bus
+	mem   []byte
+}
+
+// NewBanked24 builds a bank-aware 24-bit bus over the given bank-0 chain.
+func NewBanked24(bank0 Bus) *Banked24 {
+	return &Banked24{bank0: bank0, mem: make([]byte, 1<<24)}
+}
+
+func (b *Banked24) Read24(a uint32) byte {
+	a &= 0xFFFFFF
+	if a < 0x10000 {
+		return b.bank0.Read(uint16(a))
+	}
+	return b.mem[a]
+}
+
+func (b *Banked24) Write24(a uint32, v byte) {
+	a &= 0xFFFFFF
+	if a < 0x10000 {
+		b.bank0.Write(uint16(a), v)
+		return
+	}
+	b.mem[a] = v
+}
+
 // 65816 bus-cycle pin bits (Tom Harte cycle-string positions 0-2 and 7). The
 // active access sets c.busPins to the OR of these just before read24/write24;
 // the bus-trace recorder reads them. VDA/VPA = valid data/program address,

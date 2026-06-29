@@ -22,6 +22,7 @@ type AttachConfig struct {
 	CPU     *cpu.CPU
 	RAM     *cpu.RAM
 	MMIO    *cpu.MMIO
+	Banked  *cpu.Banked24 // 65816 bank-aware bus; nil for 8/16-bit variants
 	Tracer  *cpu.FileTracer
 	Syms    *symbols.Table
 	SrcMap  *symbols.SourceMap
@@ -74,6 +75,7 @@ func (s *Server) AttachExisting(cfg AttachConfig) error {
 	s.ram = cfg.RAM
 	s.ram.EnableShadow() // CoW page tracking powers stepBack (issue #66).
 	s.mmio = cfg.MMIO
+	s.banked = cfg.Banked
 	s.tracer = cfg.Tracer
 	s.syms = cfg.Syms
 	s.srcMap = cfg.SrcMap
@@ -100,6 +102,12 @@ func (s *Server) SetSymbols(syms *symbols.Table, srcMap *symbols.SourceMap) {
 		s.srcMap = srcMap
 	}
 }
+
+// SetBanked installs the 65816 bank-aware bus after attach, so the in-process
+// LocalSource (which attaches in New, before main.go knows the variant's bus)
+// can make readMemory/writeMemory reach banks 1-255 (#505). Same
+// before-Serve()/dispatch safety as SetSymbols.
+func (s *Server) SetBanked(b *cpu.Banked24) { s.banked = b }
 
 // handleAttach acknowledges an editor's attach request. v1 supports
 // only the "attach to the debuggee already wired by AttachExisting"
