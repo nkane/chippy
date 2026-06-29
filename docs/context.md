@@ -1,13 +1,14 @@
 # chippy — Project Context Dump
 
 > Snapshot of the running understanding of this project. Generated 2026-05-11;
-> last refreshed 2026-06-16 (post-v1.6.0, v1.7 planned).
+> last refreshed 2026-06-29 (post-v1.9.0).
 > Treat this as a handoff document — anything not visible from `git log` or
 > the code itself should live here.
 
 ## 0. Where we are right now (session handoff)
 
 - **v1.6.0 shipped** 2026-06-16 (tag `v1.6.0`, GitHub release + Homebrew **cask** live, ADR `0009-v1.6.0.md`). Closed epic #438: ARR decimal (#424), 238/238 6502 bus-exact (#428), 65C02 Tom Harte + 5 CMOS fixes (#426), struct overlay watch (#409), DAP array children (#410), chippy-state dirtyRanges (#440), goreleaser cask (#413).
+- **v1.9.0 shipped** 2026-06-29 (tag `v1.9.0`, ADR `0012-v1.9.0.md`). Accuracy tail: per-cycle 65816 bus trace (`TestHarte65816BusTrace`, #495) completed — chunks 2–4 + full pin-string validation. All 256 opcodes in both emulation and native are per-cycle bus-exact (addr + value + the 8 pin bits VDA/VPA/VPB/RWB/E/M/X/MLB — stricter than the 6502/65C02 traces) except four in `harteBusSkip816` (WAI/STP None-address halt, MVN/MVP whole-block-move model). Minor bump — test-only + `step816`-path internal-cycle emission; state/count harness and 8-bit cores unaffected.
 - **v1.8.0 shipped** 2026-06-26 (tag `v1.8.0`, ADR `0011-v1.8.0.md`). Accuracy tail closing `dmc_dma_during_read4` / nessy #20: D1 the `DmaReadBus` tagged-DMA-read seam (#481/#492); D2 `idle()` polls `ProcessPendingDma` so a DMA halt drains on a taken-branch dummy-read cycle (#493/#497) — root-caused by a from-boot `(PC, cycle)` diff vs a headless MesenCE reference (bit-identical 62,741 instructions, then chippy halts at the branch target `$E062`/even/steal-3 where MesenCE halts on the branch dummy read `$E078`/odd/steal-4); D3 true-cycle `getCycle` (`(Cycles+instrCycles)&1`, #493/#494). Also 65816 per-cycle bus-trace chunk 1 (#495/#496). With nessy's host-side `dmaBus` conflict formula, `dma_2007_read` now reaches the same `$E72F` terminal as MesenCE. Minor bump — `DmaReadBus` is additive; D2/D3 are NES-DMA-path behavior fixes (non-NES variants gated out, Klaus/Harte/Lorenz green).
 - **v1.7.0 shipped** 2026-06-25 (tag `v1.7.0`, ADR `0010-v1.7.0.md`). Closed epic #458 + all sub-issues: full Tom Harte-validated WDC 65C816 core (#456, 256 opcodes emulation + native; #462 native folded in), TUI-via-DAP render+control flip (#449–452, #461, #471), freeze beyond RAM (#463), DAP data breakpoints + setVariable (#453, #454), 65C02 per-cycle bus trace (#455, #475), hosted WASM playground drag-drop (#457). Minor bump — TUI flip is `internal/`-only so the public Go API stayed additive.
   - Theme A (TUI-via-DAP migration + default flip, the v2.0 arc): #449 stack→`stackTrace`, #450 flags→`variables`, #451 memory→`readMemory`+dirtyRanges, #452 disasm→`disassemble`, then #461 flip default to DAP-only + delete the dead direct-render path (depends on #449–#452).
