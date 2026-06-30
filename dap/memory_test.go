@@ -1,6 +1,7 @@
 package dap
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -123,6 +124,46 @@ func TestMem_BankAwareReadWrite(t *testing.T) {
 	want := base64.StdEncoding.EncodeToString([]byte{0x11, 0x22, 0x33})
 	if !strings.Contains(body, `"data":"`+want+`"`) {
 		t.Fatalf("expected data=%q in body:\n%s", want, body)
+	}
+}
+
+func TestMem_DisassembleCrossBank(t *testing.T) {
+	// A 65816 server with code in bank 2: disassembling $02xxxx decodes the
+	// bank-2 bytes, not bank 0 at the same offset.
+	ram := cpu.NewRAM()
+	c := cpu.NewVariant(ram, cpu.VariantW65816)
+	banked := cpu.NewBanked24(ram)
+	c.SetBus24(banked)
+
+	var in, out bytes.Buffer
+	s := NewServer(&in, &out)
+	s.cpu = c
+	s.ram = ram
+	s.banked = banked
+
+	// LDA #$42 (A9 42) ; NOP (EA) at bank 2 / $9000.
+	banked.Write24(0x029000, 0xA9)
+	banked.Write24(0x029001, 0x42)
+	banked.Write24(0x029002, 0xEA)
+	// Bank 0 at $9000 is zero (BRK) — proves we're not reading bank 0.
+
+	req := Request{
+		ProtocolMessage: ProtocolMessage{Seq: 1, Type: "request"},
+		Command:         "disassemble",
+		Arguments:       json.RawMessage(`{"memoryReference":"$029000","instructionCount":2}`),
+	}
+	s.handleDisassemble(req)
+
+	body := out.String()
+	for _, want := range []string{
+		`"address":"$029000"`,
+		`"instructionBytes":"A9 42"`,
+		`"address":"$029002"`,
+		`"instructionBytes":"EA"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected %s in body:\n%s", want, body)
+		}
 	}
 }
 

@@ -2046,6 +2046,18 @@ func (m Model) disasmView(w, h int) string {
 	above := rows / 3
 	lines := m.Disasm.Lines
 
+	// 65816 programs running in a bank ≠ 0 disassemble that bank; show it (#505).
+	var pbr byte
+	if m.CPU != nil && m.CPU.Variant == cpu.VariantW65816 {
+		pbr = m.CPU.PBR
+	}
+	rowAddr := func(a uint16) string {
+		if pbr != 0 {
+			return fmt.Sprintf("$%02X:%04X", pbr, a)
+		}
+		return fmt.Sprintf("$%04X", a)
+	}
+
 	// Locate the anchor line so the slice keeps it ~1/3 down the panel.
 	ai := 0
 	for i, ln := range lines {
@@ -2087,14 +2099,18 @@ func (m Model) disasmView(w, h int) string {
 				marker = "  "
 			}
 		}
-		line := fmt.Sprintf("%s %s  %s", marker, dimAddr.Render(fmt.Sprintf("$%04X", ln.addr)), ln.text)
+		line := fmt.Sprintf("%s %s  %s", marker, dimAddr.Render(rowAddr(ln.addr)), ln.text)
 		if ln.addr == pc {
 			line = curLine.Render(line)
 		}
 		b.WriteString(line + "\n")
 		written++
 	}
-	return fitPanel("Disassembly", strings.TrimRight(b.String(), "\n"), w, h)
+	title := "Disassembly"
+	if pbr != 0 {
+		title = fmt.Sprintf("Disassembly (bank $%02X)", pbr)
+	}
+	return fitPanel(title, strings.TrimRight(b.String(), "\n"), w, h)
 }
 
 // disasmScroll moves the disassembly anchor by delta instruction lines using
