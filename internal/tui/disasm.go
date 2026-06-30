@@ -1,6 +1,10 @@
 package tui
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/nkane/chippy/cpu"
+)
 
 // disasmCtx is how many instructions the disassembly snapshot fetches above and
 // below the anchor. Generous enough that any panel height finds the anchor plus
@@ -26,9 +30,9 @@ type disasmLine struct {
 
 // fetchDisasm issues one `disassemble` request for [anchor-above, anchor+below]
 // and parses the instruction lines. Transport-agnostic via remarshal.
-func fetchDisasm(c dapRequester, anchor uint16, above, below int) (DisasmSnapshot, error) {
+func fetchDisasm(c dapRequester, anchor uint32, above, below int) (DisasmSnapshot, error) {
 	resp, err := c.Request("disassemble", map[string]any{
-		"memoryReference":   fmt.Sprintf("$%04X", anchor),
+		"memoryReference":   fmt.Sprintf("$%06X", anchor),
 		"instructionOffset": -above,
 		"instructionCount":  above + 1 + below,
 	})
@@ -48,13 +52,16 @@ func fetchDisasm(c dapRequester, anchor uint16, above, below int) (DisasmSnapsho
 	if err := remarshal(resp.Body, &db); err != nil {
 		return DisasmSnapshot{}, fmt.Errorf("disassemble body: %w", err)
 	}
-	ds := DisasmSnapshot{Anchor: anchor}
+	ds := DisasmSnapshot{Anchor: uint16(anchor)}
 	for _, in := range db.Instructions {
-		addr, ok := parseDollarHex16(in.Address)
+		full, ok := parseDollarHex24(in.Address)
 		if !ok {
 			continue
 		}
-		ds.Lines = append(ds.Lines, disasmLine{addr: addr, text: in.Instruction, symbol: in.Symbol})
+		// Lines carry the 16-bit within-bank offset (the bank is constant
+		// across the window and matches the program bank PC the panel
+		// highlights, #505).
+		ds.Lines = append(ds.Lines, disasmLine{addr: uint16(full), text: in.Instruction, symbol: in.Symbol})
 	}
 	return ds, nil
 }
@@ -68,9 +75,16 @@ func (m *Model) syncDisasm() {
 	if m.Source == nil {
 		return
 	}
-	anchor := m.Regs.PC
+	pc := m.Regs.PC
 	if !m.DisasmFollow {
-		anchor = m.DisasmAnchor
+		pc = m.DisasmAnchor
+	}
+	// The 65816 fetches from the program bank PBR; anchor the window there so a
+	// program executing in a bank ≠ 0 disassembles its own bytes (#505). PBR is
+	// read from the live core (local mode); remote 65816 is unsupported.
+	anchor := uint32(pc)
+	if m.CPU != nil && m.CPU.Variant == cpu.VariantW65816 {
+		anchor |= uint32(m.CPU.PBR) << 16
 	}
 	if ds, err := m.Source.Disassemble(anchor, disasmCtx, disasmCtx); err == nil {
 		m.Disasm = ds

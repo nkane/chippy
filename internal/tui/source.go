@@ -126,7 +126,7 @@ type Source interface {
 	// disassembly panel renders from (issue #452). LocalSource disassembles
 	// the live core via its inproc server; RemoteSource disassembles the
 	// DAP-fed mirror via its own inproc server (no per-tick wire round-trip).
-	Disassemble(anchor uint16, above, below int) (DisasmSnapshot, error)
+	Disassemble(anchor uint32, above, below int) (DisasmSnapshot, error)
 
 	// SetDataBreakpoints (re)installs the memory watchpoint set on the source
 	// via DAP `setDataBreakpoints` (issue #471) so the server enforces them
@@ -312,7 +312,7 @@ func (s *LocalSource) SetBanked(b *cpu.Banked24) {
 
 // Disassemble renders instructions around anchor through the in-process DAP
 // server attached to the live core (issue #452).
-func (s *LocalSource) Disassemble(anchor uint16, above, below int) (DisasmSnapshot, error) {
+func (s *LocalSource) Disassemble(anchor uint32, above, below int) (DisasmSnapshot, error) {
 	if s.dapClient == nil {
 		return DisasmSnapshot{}, fmt.Errorf("local source: no dap client")
 	}

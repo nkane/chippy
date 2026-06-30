@@ -36,9 +36,13 @@ func (s *Server) handleDisassemble(req Request) {
 		s.sendErrorResponse(req, fmt.Sprintf("bad memoryReference %q: %v", args.MemoryReference, err))
 		return
 	}
+	// The disassembly window lives within one bank (the program bank); the
+	// high bits select the bank, the low 16 carry the within-bank PC and all
+	// the operand-fetch wrap arithmetic (#505).
+	view := bankView{s: s, bank: uint32(base) & 0xFF0000}
 	// Offset is signed; large negatives would wrap the uint16 conversion
-	// to an unpredictable PC. Clamp to the 16-bit address space.
-	pc := int(base) + args.Offset
+	// to an unpredictable PC. Clamp to the 16-bit within-bank space.
+	pc := int(base&0xFFFF) + args.Offset
 	if pc < 0 {
 		pc = 0
 	}
@@ -60,12 +64,12 @@ func (s *Server) handleDisassemble(req Request) {
 	// Pre-context: if instructionOffset is negative, walk back |offset|
 	// instructions from refPC and emit them first.
 	if args.InstructionOffset < 0 {
-		back := cpu.WalkBack(s.cpu, refPC, -args.InstructionOffset)
+		back := cpu.WalkBackAt(s.cpu, view, refPC, -args.InstructionOffset)
 		for _, a := range back {
 			if len(instructions) >= count {
 				break
 			}
-			instructions = append(instructions, s.disasmOne(a))
+			instructions = append(instructions, s.disasmOne(view, a))
 		}
 	}
 
@@ -74,9 +78,9 @@ func (s *Server) handleDisassemble(req Request) {
 	// at refPC).
 	addr := refPC
 	for len(instructions) < count {
-		ins := s.disasmOne(addr)
+		ins := s.disasmOne(view, addr)
 		instructions = append(instructions, ins)
-		next := uint32(addr) + uint32(s.instrLen(addr))
+		next := uint32(addr) + uint32(s.instrLen(view, addr))
 		if next > 0xFFFF {
 			break
 		}
@@ -96,40 +100,53 @@ func (s *Server) isDataAddr(addr uint16) bool {
 	return s.srcMap.IsData(addr)
 }
 
+// bankView is a 16-bit Bus reading one 65816 bank through the side-effect-free
+// peek path (#505). Disassembly reads operand bytes within a fixed bank, so the
+// bank's high bits stay constant while the 16-bit offset (and its operand-fetch
+// wrap) varies. bank == 0 is the ordinary 6502 / bank-0 space.
+type bankView struct {
+	s    *Server
+	bank uint32
+}
+
+func (v bankView) Read(a uint16) byte     { return v.s.peekByte24(v.bank | uint32(a)) }
+func (v bankView) Write(_ uint16, _ byte) {} // disassembly never writes
+
 // instrLen is the byte stride to the next disassembly line at addr: 1 for a
-// data byte, the decoded instruction length otherwise.
-func (s *Server) instrLen(addr uint16) int {
-	if s.isDataAddr(addr) {
+// data byte, the decoded instruction length otherwise. Data ranges are a
+// bank-0 source-map concept, so they only apply in bank 0.
+func (s *Server) instrLen(v bankView, addr uint16) int {
+	if v.bank == 0 && s.isDataAddr(addr) {
 		return 1
 	}
-	_, n := cpu.DisasmCPU(s.cpu, addr)
+	_, n := cpu.DisasmCPUAt(s.cpu, v, addr)
 	return n
 }
 
-// disasmOne formats one DisassembledInstruction at addr with bytes,
-// symbol, and source location filled in when available. Data-range addresses
-// render as `.byte $XX` (one byte) instead of a decoded instruction.
-func (s *Server) disasmOne(addr uint16) DisassembledInstruction {
+// disasmOne formats one DisassembledInstruction at v.bank:addr with bytes,
+// symbol, and source location filled in when available. Symbols / source /
+// data ranges are bank-0 concepts (the source map addresses bank 0).
+func (s *Server) disasmOne(v bankView, addr uint16) DisassembledInstruction {
 	var text string
 	var n int
-	if s.isDataAddr(addr) {
-		text, n = fmt.Sprintf(".byte $%02X", s.peekByte(addr)), 1
+	if v.bank == 0 && s.isDataAddr(addr) {
+		text, n = fmt.Sprintf(".byte $%02X", v.Read(addr)), 1
 	} else {
-		text, n = cpu.DisasmCPU(s.cpu, addr)
+		text, n = cpu.DisasmCPUAt(s.cpu, v, addr)
 	}
 	bytesHex := make([]string, n)
 	for j := 0; j < n; j++ {
-		bytesHex[j] = fmt.Sprintf("%02X", s.peekByte(addr+uint16(j)))
+		bytesHex[j] = fmt.Sprintf("%02X", v.Read(addr+uint16(j)))
 	}
 	ins := DisassembledInstruction{
-		Address:          fmt.Sprintf("$%04X", addr),
+		Address:          s.fmtAddr(int(v.bank | uint32(addr))),
 		InstructionBytes: strings.Join(bytesHex, " "),
 		Instruction:      text,
 	}
-	if s.syms != nil {
+	if v.bank == 0 && s.syms != nil {
 		ins.Symbol = s.syms.Lookup(addr)
 	}
-	if s.srcMap != nil {
+	if v.bank == 0 && s.srcMap != nil {
 		if loc, ok := s.srcMap.PCToSrc[addr]; ok {
 			ins.Location = &Source{Name: filepath.Base(loc.File), Path: loc.File}
 			ins.Line = loc.Line

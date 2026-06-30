@@ -27,10 +27,18 @@ func DisasmWithSyms(bus Bus, addr uint16, sym SymLookup) (string, int) {
 // (STZ, PHX, BRA, BBR0-7, …) instead of whatever the NMOS slot happens
 // to be (often an illegal NOP).
 func DisasmCPU(c *CPU, addr uint16) (string, int) {
+	return DisasmCPUAt(c, c.Bus, addr)
+}
+
+// DisasmCPUAt is DisasmCPU reading instruction bytes through the supplied bus
+// instead of c.Bus. It lets a caller disassemble a 65816 bank other than the
+// one c.Bus exposes by passing a bank view (#505 cross-bank disassembly); addr
+// is the 16-bit offset within that bank.
+func DisasmCPUAt(c *CPU, bus Bus, addr uint16) (string, int) {
 	if c.Variant == VariantW65816 {
-		return Disasm816(c, c.Bus, addr)
+		return Disasm816(c, bus, addr)
 	}
-	return disasmWithTable(c.Bus, addr, c.opcodes, nil)
+	return disasmWithTable(bus, addr, c.opcodes, nil)
 }
 
 // DisasmCPUWithSyms is the symbol-aware variant of DisasmCPU.
@@ -51,6 +59,13 @@ func DisasmCPUWithSyms(c *CPU, addr uint16, sym SymLookup) (string, int) {
 // server's `disassemble` handler when the editor requests pre-context
 // (negative instructionOffset).
 func WalkBack(c *CPU, pc uint16, n int) []uint16 {
+	return WalkBackAt(c, c.Bus, pc, n)
+}
+
+// WalkBackAt is WalkBack reading through the supplied bus — the bus-explicit
+// sibling DisasmCPUAt is to DisasmCPU, used for 65816 cross-bank pre-context
+// (#505).
+func WalkBackAt(c *CPU, bus Bus, pc uint16, n int) []uint16 {
 	if n <= 0 || pc == 0 {
 		return nil
 	}
@@ -66,7 +81,7 @@ func WalkBack(c *CPU, pc uint16, n int) []uint16 {
 		ok := true
 		for cur < pc {
 			seq = append(seq, cur)
-			_, sz := DisasmCPUWithSyms(c, cur, nil)
+			_, sz := DisasmCPUAt(c, bus, cur)
 			next := uint32(cur) + uint32(sz)
 			if next > uint32(pc) {
 				ok = false

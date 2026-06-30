@@ -91,7 +91,7 @@ func (s *RemoteSource) SetSymbols(syms *symbols.Table, srcMap *symbols.SourceMap
 
 // Disassemble renders instructions around anchor from the mirror via the
 // in-process DAP server (issue #452).
-func (s *RemoteSource) Disassemble(anchor uint16, above, below int) (DisasmSnapshot, error) {
+func (s *RemoteSource) Disassemble(anchor uint32, above, below int) (DisasmSnapshot, error) {
 	if s.mirrorClient == nil {
 		return DisasmSnapshot{}, fmt.Errorf("remote source: no mirror dap client")
 	}
@@ -438,6 +438,17 @@ func parseDollarHex16(s string) (uint16, bool) {
 		return 0, false
 	}
 	return uint16(n), true
+}
+
+// parseDollarHex24 parses "$XXXXXX" → uint32 (24-bit); returns false on
+// malformed input. Used for the 65816's bank-aware addresses.
+func parseDollarHex24(s string) (uint32, bool) {
+	s = strings.TrimPrefix(s, "$")
+	n, err := strconv.ParseUint(s, 16, 32)
+	if err != nil || n > 0xFFFFFF {
+		return 0, false
+	}
+	return uint32(n), true
 }
 
 // parseDollarHex8 parses "$XX" → byte; returns false on malformed
