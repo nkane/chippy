@@ -1,7 +1,7 @@
 # chippy — WebAssembly playground
 
-Browser shell that runs the same NMOS 6502 / 65C02 emulator chippy's
-TUI and DAP server use, compiled to WebAssembly. Drop in a `.bin`,
+Browser shell that runs the same NMOS 6502 / 65C02 / WDC 65C816 emulator
+chippy's TUI and DAP server use, compiled to WebAssembly. Drop in a `.bin`,
 `.prg`, or `.hex` (or pick a canned demo), and step through it with
 registers + disassembly + memory + the Apple-1-style text peripheral
 visible.
@@ -60,7 +60,7 @@ banner above the panes shows the underlying error and a hint to use
 | `textOutput()`             | the $F001 sink as a string                                |
 | `clearTextOutput()`        | empty the sink                                            |
 | `pushKey(byte)`            | queue a key for the $F004/$F005 PIA                       |
-| `setVariant(name)`         | `"nmos"` or `"65c02"` — rebuilds the world                |
+| `setVariant(name)`         | `"nmos"`, `"65c02"`, or `"65816"` — rebuilds the world     |
 
 ## What's missing vs. the desktop binary
 

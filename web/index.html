@@ -17,7 +17,7 @@
   <header>
     <h1>chippy <span class="tag">wasm playground</span></h1>
     <p class="sub">
-      The same NMOS 6502 / 65C02 emulator that drives chippy's TUI + DAP server,
+      The same NMOS 6502 / 65C02 / WDC 65C816 emulator that drives chippy's TUI + DAP server,
       compiled to WebAssembly. Pick a canned demo or drop your own .bin / .prg / .hex.
       <a href="https://github.com/nkane/chippy" target="_blank" rel="noopener">repo</a>.
     </p>
@@ -53,6 +53,7 @@
         <select id="variant">
           <option value="nmos">NMOS 6502</option>
           <option value="65c02">CMOS 65C02</option>
+          <option value="65816">WDC 65C816</option>
         </select>
       </label>
     </section>

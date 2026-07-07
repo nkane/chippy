@@ -25,7 +25,7 @@ breakpoints can resolve to source lines.
 
 Plenty of 6502 emulators exist. chippy's pitch is **debugger-first**:
 
-- **TUI + DAP + WASM, one engine.** Same NMOS / 65C02 core powers the
+- **TUI + DAP + WASM, one engine.** Same NMOS / 65C02 / 65C816 core powers the
   terminal UI, the [Debug Adapter Protocol](docs/dap.md) server (so
   VS Code / nvim-dap / JetBrains can drive it), and the in-browser
   [WASM playground](https://nkane.dev/chippy/). One implementation, three
