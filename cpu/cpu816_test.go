@@ -236,6 +236,67 @@ func TestBanked24_BankIsolation(t *testing.T) {
 	}
 }
 
+func TestW65816_IRQEmulation(t *testing.T) {
+	c, mem := new816(0xEA) // NOP at $8000; resets in emulation mode
+	mem[0xFFFE] = 0x00
+	mem[0xFFFF] = 0x90 // emulation IRQ vector -> $9000
+	c.setSP16(0x01FF)
+	c.setFlag(FlagI, false) // I clear so the IRQ is taken
+	c.setFlag(FlagD, true)  // must be cleared by interrupt entry
+	c.AssertIRQ()
+
+	c.Step()
+
+	if c.PC != 0x9000 {
+		t.Fatalf("IRQ emu vector: PC=$%04X want $9000", c.PC)
+	}
+	if !c.hasFlag(FlagI) {
+		t.Fatal("I should be set after interrupt entry")
+	}
+	if c.hasFlag(FlagD) {
+		t.Fatal("D should be cleared on interrupt entry")
+	}
+	// Emulation stack: PCH@$01FF, PCL@$01FE, P@$01FD; SP -> $01FC.
+	if c.SP16() != 0x01FC {
+		t.Fatalf("SP=$%04X want $01FC", c.SP16())
+	}
+	if mem[0x01FF] != 0x80 || mem[0x01FE] != 0x00 {
+		t.Fatalf("pushed PC wrong: hi=$%02X lo=$%02X want 80 00", mem[0x01FF], mem[0x01FE])
+	}
+	if p := mem[0x01FD]; p&FlagB != 0 {
+		t.Fatalf("hardware IRQ must push P with B clear, got $%02X", p)
+	}
+}
+
+func TestW65816_NMINative(t *testing.T) {
+	c, mem := new816(0xEA)
+	c.E = false       // native mode
+	c.PBR = 0x12      // running in bank $12
+	c.setSP16(0x1FFF) // native stack outside page 1
+	mem[0xFFEA] = 0x34
+	mem[0xFFEB] = 0x56 // native NMI vector -> $5634
+	c.TriggerNMI()
+
+	c.Step()
+
+	if c.PC != 0x5634 {
+		t.Fatalf("NMI native vector: PC=$%04X want $5634", c.PC)
+	}
+	if c.PBR != 0 {
+		t.Fatalf("PBR should be 0 in the handler, got $%02X", c.PBR)
+	}
+	// Native stack: PBR@$1FFF, PCH@$1FFE, PCL@$1FFD, P@$1FFC; SP -> $1FFB.
+	if c.SP16() != 0x1FFB {
+		t.Fatalf("SP=$%04X want $1FFB", c.SP16())
+	}
+	if mem[0x1FFF] != 0x12 {
+		t.Fatalf("native interrupt must push PBR, got $%02X want $12", mem[0x1FFF])
+	}
+	if mem[0x1FFE] != 0x80 || mem[0x1FFD] != 0x00 {
+		t.Fatalf("pushed PC wrong: hi=$%02X lo=$%02X want 80 00", mem[0x1FFE], mem[0x1FFD])
+	}
+}
+
 func TestW65816_BlockMoveMVP(t *testing.T) {
 	// MVP moves descending. Move 3 bytes ending at src $2002 -> dst $3002.
 	c, mem := new816(0x44, 0x00, 0x00)

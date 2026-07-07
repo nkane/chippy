@@ -608,7 +608,41 @@ func (c *CPU) serviceNMI() {
 	// itself may stay asserted (flag + bit 7); nmiLinePrev holds, so no
 	// new edge fires until the line drops and rises again.
 	c.nmiPending = false
+	if c.Variant == VariantW65816 {
+		c.serviceInterrupt816(0xFFFA, 0xFFEA)
+		return
+	}
 	c.serviceVector(VecNMI)
+}
+
+// serviceInterrupt816 dispatches a 65816 hardware interrupt (NMI/IRQ) to its
+// emulation (vecEmu) or native (vecNat) vector. It mirrors brk/cop but reads no
+// signature byte and pushes P with the B bit clear — a hardware interrupt, not
+// a software BRK. Native mode pushes PBR (one extra cycle); both modes run the
+// handler in bank 0 with D cleared and I set. Vector reads drive the 24-bit bus
+// (pinVector), matching brk/cop. Adds its own cycles so Step's before/after
+// delta accounts the entry.
+func (c *CPU) serviceInterrupt816(vecEmu, vecNat uint32) {
+	cyc := 7
+	if c.E {
+		c.spPush16(c.PC)
+		c.spPush8((c.P | FlagU) &^ FlagB)
+	} else {
+		c.spPush8(c.PBR)
+		c.spPush16(c.PC)
+		c.spPush8(c.P)
+		cyc = 8
+	}
+	c.PBR = 0
+	c.setFlag(FlagI, true)
+	c.setFlag(FlagD, false)
+	vec := vecEmu
+	if !c.E {
+		vec = vecNat
+	}
+	c.pinVector()
+	c.PC = uint16(c.read24(vec)) | uint16(c.read24(vec+1))<<8
+	c.Cycles += uint64(cyc)
 }
 
 // serviceVector runs the shared 7-cycle interrupt dispatch (NMI/IRQ).
@@ -657,5 +691,9 @@ func (c *CPU) serviceVector(vec uint16) {
 // serviceIRQ performs the 7-cycle IRQ vector dispatch. Caller must have
 // already verified FlagI is clear.
 func (c *CPU) serviceIRQ() {
+	if c.Variant == VariantW65816 {
+		c.serviceInterrupt816(0xFFFE, 0xFFEE)
+		return
+	}
 	c.serviceVector(VecIRQ)
 }
