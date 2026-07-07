@@ -92,6 +92,13 @@ func (s *RemoteSource) SetSymbols(syms *symbols.Table, srcMap *symbols.SourceMap
 // Disassemble renders instructions around anchor from the mirror via the
 // in-process DAP server (issue #452).
 func (s *RemoteSource) Disassemble(anchor uint32, above, below int) (DisasmSnapshot, error) {
+	// Bank 0 disassembles the local mirror (no per-tick wire round-trip). A
+	// remote 65816 running in a bank ≠ 0 (PBR ≠ 0) isn't mirrored, so
+	// disassemble it lazily over the wire — the remote server is bank-aware
+	// (#507/#510).
+	if anchor>>16 != 0 {
+		return fetchDisasm(s.client, anchor, above, below)
+	}
 	if s.mirrorClient == nil {
 		return DisasmSnapshot{}, fmt.Errorf("remote source: no mirror dap client")
 	}
@@ -244,8 +251,14 @@ func (s *RemoteSource) Flags() (FlagsSnapshot, error) {
 // updated by #440 dirtyRanges during a run, so the panel needs no per-frame
 // wire round-trip — reading the mirror IS reading DAP-sourced bytes.
 func (s *RemoteSource) ReadMemory(addr uint32, count int) ([]byte, error) {
-	// Remote debuggees are 6502/NES (no 65816 host), so the mirror is bank 0;
-	// a 24-bit address masks into it.
+	// The mirror is bank 0 (reconciled by RefreshMemory + #440 dirtyRanges), so
+	// bank 0 serves locally with no per-frame round-trip. Banks 1-255 (a remote
+	// 65816) aren't mirrored — fetch them lazily over the wire; the remote
+	// server is bank-aware (#505/#510). Memory-panel windows never straddle a
+	// bank (memWindowFor clamps within 64 KiB), so the bank test is per-window.
+	if addr>>16 != 0 {
+		return fetchMem(s.client, addr, count)
+	}
 	buf := make([]byte, count)
 	for i := 0; i < count; i++ {
 		buf[i] = s.ram.Read(uint16(addr) + uint16(i))
