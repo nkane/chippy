@@ -108,6 +108,52 @@ func TestRemoteSource_Step_SyncsMirrorFromServer(t *testing.T) {
 // SetBreakpoints round-trips. We don't have a way to assert the
 // server's internal bp set without exposing it, so the smoke test is
 // just "the request succeeds and returns without error".
+// TestRemoteSource_ReadMemory_BankOverWire proves a remote 65816's banks 1-255
+// (which the local bank-0 mirror doesn't hold) are fetched over the wire, while
+// bank 0 still serves from the mirror (#510).
+func TestRemoteSource_ReadMemory_BankOverWire(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+
+	ram := cpu.NewRAM()
+	c := cpu.NewVariant(ram, cpu.VariantW65816)
+	banked := cpu.NewBanked24(ram)
+	c.SetBus24(banked)
+	banked.Write24(0x028000, 0x5A) // bank 2 — not in the bank-0 mirror
+	ram.Write(cpu.VecReset, 0x00)
+	ram.Write(cpu.VecReset+1, 0x80)
+	c.Reset()
+
+	srv := dap.NewServer(serverConn, serverConn)
+	if err := srv.AttachExisting(dap.AttachConfig{CPU: c, RAM: ram, Banked: banked}); err != nil {
+		t.Fatalf("AttachExisting: %v", err)
+	}
+	go func() {
+		_ = srv.Serve()
+		_ = serverConn.Close()
+	}()
+	t.Cleanup(func() { _ = serverConn.Close() })
+
+	client := initAttachedClient(t, clientConn)
+	src := NewRemoteSource(client, cpu.NewVariant(cpu.NewRAM(), cpu.VariantW65816), cpu.NewRAM(), "tcp:test")
+
+	// Bank 2 read goes over the wire to the bank-aware server.
+	buf, err := src.ReadMemory(0x028000, 1)
+	if err != nil {
+		t.Fatalf("bank-2 ReadMemory: %v", err)
+	}
+	if buf[0] != 0x5A {
+		t.Fatalf("bank-2 wire read = $%02X want $5A", buf[0])
+	}
+	// Bank 0 serves from the (empty) mirror — no wire round-trip.
+	b0, err := src.ReadMemory(0x0000, 1)
+	if err != nil {
+		t.Fatalf("bank-0 ReadMemory: %v", err)
+	}
+	if b0[0] != 0x00 {
+		t.Fatalf("bank-0 mirror read = $%02X want $00", b0[0])
+	}
+}
+
 func TestRemoteSource_SetBreakpoints_NoError(t *testing.T) {
 	conn, _ := spinUpServerCPU(t)
 	client := initAttachedClient(t, conn)
