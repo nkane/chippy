@@ -19,6 +19,7 @@ const DEMOS = [
   { name: 'count to ten', file: 'demos/count_to_ten.bin', format: 'bin', addr: 0x8000 },
   { name: 'fibonacci', file: 'demos/fibonacci.bin', format: 'bin', addr: 0x8000 },
   { name: 'hello (Apple-1 style)', file: 'demos/hello.bin', format: 'bin', addr: 0x8000 },
+  { name: '65816 hello (native mode)', file: 'demos/hello816.bin', format: 'bin', addr: 0x8000, variant: '65816' },
 ];
 
 function fmtHex(n, width) {
@@ -103,13 +104,21 @@ async function loadDemo() {
     const r = await fetch(demo.file);
     if (!r.ok) throw new Error(`fetch ${demo.file}: ${r.status}`);
     const bytes = new Uint8Array(await r.arrayBuffer());
+    // Some demos require a specific CPU variant (e.g. the 65816 demo); select
+    // it (and rebuild the core) before loading so the ROM runs on the right CPU.
+    const variant = demo.variant || 'nmos';
+    const vsel = document.getElementById('variant');
+    if (vsel.value !== variant) {
+      vsel.value = variant;
+      window.chippy.setVariant(variant);
+    }
     const opts = { format: demo.format, addr: demo.addr };
     const result = window.chippy.load(bytes, opts);
     if (!result.ok) {
       status('load failed: ' + result.error);
       return;
     }
-    lastLoaded = { bytes, opts: { ...opts, variant: document.getElementById('variant').value } };
+    lastLoaded = { bytes, opts: { ...opts, variant } };
     status(`loaded ${demo.name} (${result.format}, $${result.loadAddr.toString(16).toUpperCase()}, ${result.size}B)`);
     renderState();
   } catch (err) {
