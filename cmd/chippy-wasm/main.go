@@ -26,6 +26,7 @@ var (
 	ram     *cpu.RAM
 	mmio    *cpu.MMIO
 	c       *cpu.CPU
+	banked  *cpu.Banked24 // 65816 bank-aware bus; nil for 8/16-bit variants
 	textOut *peripheral.TextOutput
 	keyIn   *peripheral.KeyboardInput
 	variant = cpu.VariantNMOS
@@ -49,6 +50,14 @@ func rebuild() {
 	_ = mmio.Register(textOut)
 	_ = mmio.Register(keyIn)
 	c = cpu.NewVariant(mmio, variant)
+	// The 65816 reads/writes through a 24-bit bus. Banked24 routes bank 0
+	// through MMIO (so the playground's readMem/disasm panes stay accurate) and
+	// backs banks 1-255 with real storage (#505).
+	banked = nil
+	if variant == cpu.VariantW65816 {
+		banked = cpu.NewBanked24(mmio)
+		c.SetBus24(banked)
+	}
 }
 
 func makeAPI() js.Value {
@@ -287,8 +296,9 @@ func jsPushKey(this js.Value, args []js.Value) interface{} {
 	return nil
 }
 
-// jsSetVariant: (string "nmos"|"65c02") — rebuilds the world so the new
-// opcode table takes effect. The caller is expected to re-load the ROM.
+// jsSetVariant: (string "nmos"|"65c02"|"nes"|"65816") — rebuilds the world so
+// the new opcode table (and, for the 65816, the bank-aware 24-bit bus) takes
+// effect. The caller is expected to re-load the ROM.
 func jsSetVariant(this js.Value, args []js.Value) interface{} {
 	if len(args) < 1 {
 		return errObj("setVariant expects a name")
@@ -300,6 +310,8 @@ func jsSetVariant(this js.Value, args []js.Value) interface{} {
 		variant = cpu.VariantCMOS65C02
 	case "nes", "2a03", "ricoh":
 		variant = cpu.VariantNES
+	case "65816", "65c816", "w65816":
+		variant = cpu.VariantW65816
 	default:
 		return errObj("unknown variant " + args[0].String())
 	}
