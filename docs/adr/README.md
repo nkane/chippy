@@ -26,6 +26,7 @@ reversed or refined are marked *Superseded by* with a link.
 | [0011](0011-v1.8.0.md) | v1.8.0 | 2026-06-26 | Accuracy tail — 2A03 DMA-read open-bus seam (`DmaReadBus`, #481) + DMC-DMA steal timing: `idle()` polls the DMA halt + true-cycle `getCycle` (#493), converging `dmc_dma_during_read4` |
 | [0012](0012-v1.9.0.md) | v1.9.0 | 2026-06-29 | Accuracy tail — per-cycle 65816 bus trace (`TestHarte65816BusTrace`, #495) |
 | [0013](0013-v1.10.0.md) | v1.10.0 | 2026-06-30 | Bank-aware 24-bit bus for the 65816 (`Banked24`) — kill the bank-0 mirror; Intel HEX type-04, DAP/TUI bank-awareness, `:bank` (#505); cross-bank PBR-relative disassembly (#507) |
+| [0014](0014-v1.11.0.md) | v1.11.0 | 2026-07-08 | 65816 hardware interrupts (native/emulation vectors, #511), remote 65816 bank reads over DAP (#510), 65816 in the WASM playground + native-mode demo (#514/#515) |
 
 ## Conventions captured across releases
 
