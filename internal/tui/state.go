@@ -42,7 +42,8 @@ type savedState struct {
 	DisasmAnchor     uint16           `json:"disasm_anchor,omitempty"`
 	ImmediateHistory []ImmediateEntry `json:"immediate_history,omitempty"`
 	Theme            string           `json:"theme,omitempty"`
-	MemViewBank      byte             `json:"mem_view_bank,omitempty"` // 65816 memory-panel bank (#505)
+	MemViewBank      byte             `json:"mem_view_bank,omitempty"`      // 65816 memory-panel bank (#505)
+	DisasmAnchorBank byte             `json:"disasm_anchor_bank,omitempty"` // pinned 65816 disasm bank (#520)
 }
 
 func loadState(m *Model, path string) {
@@ -80,6 +81,7 @@ func loadState(m *Model, path string) {
 		m.DisasmAnchor = s.DisasmAnchor
 		m.ImmediateHistory = s.ImmediateHistory
 		m.MemViewBank = s.MemViewBank
+		m.DisasmAnchorBank = s.DisasmAnchorBank
 		if s.Theme != "" {
 			t := resolveTheme(s.Theme)
 			applyTheme(t)
@@ -204,6 +206,7 @@ func (m *Model) saveState() {
 		ImmediateHistory: m.ImmediateHistory,
 		Theme:            m.Theme,
 		MemViewBank:      m.MemViewBank,
+		DisasmAnchorBank: m.DisasmAnchorBank,
 	}
 	data, err := json.MarshalIndent(&s, "", "  ")
 	if err != nil {

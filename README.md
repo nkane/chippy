@@ -286,6 +286,7 @@ Type `:` to open the command line, then any of:
 |-----------------------------|----------------------------------------------|
 | `:goto $XXXX` / `:g $XXXX`  | Jump memory view to address (or symbol)      |
 | `:bank $NN`                 | Select 65816 memory-panel bank `$00`–`$FF`   |
+| `:da $XXXX` / `:da $BB:XXXX`| Pin disassembly to addr/symbol (65816 banks) |
 | `:pc $XXXX`                 | Force `PC` to address                        |
 | `:run $XXXX`                | Set one-shot bp at address and start running |
 | `:speed N`                  | Throttle to N Hz (`0` = unthrottled)         |

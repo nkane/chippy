@@ -232,6 +232,25 @@ func (m *Model) runCommand(line string) string {
 		m.MemViewBank = n
 		m.refreshMemWindow()
 		return fmt.Sprintf("mem bank -> $%02X", m.MemViewBank)
+	case "da", "disasm":
+		if len(args) == 0 {
+			return "usage: :da $XXXX | $BB:XXXX | symbol"
+		}
+		bank, off, err := m.parseDisasmTarget(args[0])
+		if err != nil {
+			return err.Error()
+		}
+		if bank != 0 && m.Banked == nil {
+			return "bank addressing needs -cpu 65816"
+		}
+		m.DisasmFollow = false
+		m.DisasmAnchor = off
+		m.DisasmAnchorBank = bank
+		m.syncDisasm()
+		if bank != 0 {
+			return fmt.Sprintf("disasm -> $%02X:%04X (' to follow PC)", bank, off)
+		}
+		return fmt.Sprintf("disasm -> $%04X (' to follow PC)", off)
 	case "pc":
 		if len(args) == 0 {
 			return "usage: :pc $XXXX"
@@ -654,6 +673,35 @@ func parseByte(s string) (byte, error) {
 // in chippy-as-library use cases) so peripherals see the write.
 // Direct RAM.Write is the last fallback for the legacy in-process
 // case where no bus is configured.
+// parseDisasmTarget resolves a `:da` argument to a (bank, offset) pair.
+// Accepts `$BB:XXXX` (bank + 16-bit offset), a bare 24-bit hex like `$029000`
+// (split into bank + offset), or a symbol / 16-bit address (bank 0).
+func (m *Model) parseDisasmTarget(s string) (byte, uint16, error) {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, ':'); i > 0 {
+		b, err := parseByte(s[:i])
+		if err != nil {
+			return 0, 0, fmt.Errorf("bad bank %q", s[:i])
+		}
+		off, err := m.parseAddrSym(s[i+1:])
+		if err != nil {
+			return 0, 0, err
+		}
+		return b, off, nil
+	}
+	// A bare 24-bit hex ($029000) splits into bank + offset; smaller values and
+	// symbols fall through to the 16-bit / symbol resolver (bank 0).
+	hex := strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(s), "$"), "0x")
+	if v, err := strconv.ParseUint(hex, 16, 32); err == nil && v > 0xFFFF && v <= 0xFFFFFF {
+		return byte(v >> 16), uint16(v), nil
+	}
+	off, err := m.parseAddrSym(s)
+	if err != nil {
+		return 0, 0, err
+	}
+	return 0, off, nil
+}
+
 func (m *Model) memWrite(addr uint16, v byte) {
 	// Banks 1-255 (65816) write through the bank-aware bus; bank 0 keeps the
 	// 16-bit chain so watchpoints still see the poke (#505).

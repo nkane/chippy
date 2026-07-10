@@ -276,8 +276,11 @@ type Model struct {
 	// Disassembly viewport: when DisasmFollow is true (default), the panel
 	// re-anchors on PC each frame. User scroll keys flip it off and pin
 	// DisasmAnchor as the address shown at the top of the window.
-	DisasmFollow bool
-	DisasmAnchor uint16
+	// DisasmAnchorBank is the pinned 65816 program bank (0 for the 8-bit cores);
+	// it lets the pinned view sit in a bank ≠ the live PBR (#520).
+	DisasmFollow     bool
+	DisasmAnchor     uint16
+	DisasmAnchorBank byte
 
 	// Disasm is the DAP-sourced instruction window the disassembly panel
 	// renders (issue #452), refreshed by m.syncDisasm — disasmView no longer
@@ -1629,6 +1632,7 @@ func helpPages() [][]helpSection {
 			{"Prompt verbs", [][2]string{
 				{":goto X", "scroll memory pane to addr/symbol"},
 				{":bank N", "select 65816 memory-panel bank $00-$FF (#505)"},
+				{":da X", "pin disassembly to addr/$BB:XXXX/symbol (65816 banks, #520)"},
 				{":pc X", "set CPU PC"},
 				{":run X", "run until addr (one-shot bp + go)"},
 				{":watch X [byte|word] [xN] [label]", "add value watch (xN expands an array; also :watch reg <name>)"},
@@ -2046,11 +2050,9 @@ func (m Model) disasmView(w, h int) string {
 	above := rows / 3
 	lines := m.Disasm.Lines
 
-	// 65816 programs running in a bank ≠ 0 disassemble that bank; show it (#505).
-	var pbr byte
-	if m.CPU != nil && m.CPU.Variant == cpu.VariantW65816 {
-		pbr = m.CPU.PBR
-	}
+	// 65816 programs running in a bank ≠ 0 disassemble that bank; show it. When
+	// pinned, the bank is the pinned one, not the live PBR (#505/#520).
+	pbr := m.disasmBank()
 	rowAddr := func(a uint16) string {
 		if pbr != 0 {
 			return fmt.Sprintf("$%02X:%04X", pbr, a)
@@ -2113,6 +2115,19 @@ func (m Model) disasmView(w, h int) string {
 	return fitPanel(title, strings.TrimRight(b.String(), "\n"), w, h)
 }
 
+// disasmBank is the 65816 bank the disassembly panel is viewing: the live
+// program bank PBR when following PC, else the pinned bank. 0 for the 8-bit
+// cores (non-65816), so their panel stays plain-16-bit.
+func (m Model) disasmBank() byte {
+	if m.CPU == nil || m.CPU.Variant != cpu.VariantW65816 {
+		return 0
+	}
+	if m.DisasmFollow {
+		return m.CPU.PBR
+	}
+	return m.DisasmAnchorBank
+}
+
 // disasmScroll moves the disassembly anchor by delta instruction lines using
 // the DAP-sourced snapshot (issue #461) — no direct cpu.WalkBack /
 // cpu.DisasmWithSyms. The snapshot is centered on the anchor and re-fetched by
@@ -2121,8 +2136,11 @@ func (m Model) disasmView(w, h int) string {
 // re-centers there.
 func (m *Model) disasmScroll(delta int) {
 	if m.DisasmFollow {
-		// First scroll: pin to current PC, then move from there.
+		// First scroll: pin to current PC (and its program bank), then move.
 		m.DisasmAnchor = m.Regs.PC
+		if m.CPU != nil && m.CPU.Variant == cpu.VariantW65816 {
+			m.DisasmAnchorBank = m.CPU.PBR
+		}
 		m.DisasmFollow = false
 	}
 	lines := m.Disasm.Lines
@@ -2143,7 +2161,11 @@ func (m *Model) disasmScroll(delta int) {
 		}
 		m.DisasmAnchor = lines[ni].addr
 	}
-	m.Status = fmt.Sprintf("disasm @ $%04X (' to follow PC)", m.DisasmAnchor)
+	if b := m.disasmBank(); b != 0 {
+		m.Status = fmt.Sprintf("disasm @ $%02X:%04X (' to follow PC)", b, m.DisasmAnchor)
+	} else {
+		m.Status = fmt.Sprintf("disasm @ $%04X (' to follow PC)", m.DisasmAnchor)
+	}
 }
 
 // sourceScroll moves the source anchor by `delta` lines (sign matters).

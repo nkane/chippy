@@ -1,10 +1,6 @@
 package tui
 
-import (
-	"fmt"
-
-	"github.com/nkane/chippy/cpu"
-)
+import "fmt"
 
 // disasmCtx is how many instructions the disassembly snapshot fetches above and
 // below the anchor. Generous enough that any panel height finds the anchor plus
@@ -79,13 +75,11 @@ func (m *Model) syncDisasm() {
 	if !m.DisasmFollow {
 		pc = m.DisasmAnchor
 	}
-	// The 65816 fetches from the program bank PBR; anchor the window there so a
-	// program executing in a bank ≠ 0 disassembles its own bytes (#505). PBR is
-	// read from the live core (local mode); remote 65816 is unsupported.
-	anchor := uint32(pc)
-	if m.CPU != nil && m.CPU.Variant == cpu.VariantW65816 {
-		anchor |= uint32(m.CPU.PBR) << 16
-	}
+	// The 65816 fetches from the program bank; anchor the window there so a
+	// program in a bank ≠ 0 disassembles its own bytes. disasmBank is the live
+	// PBR when following, else the pinned bank — so a pinned view can sit in a
+	// bank ≠ the live PBR (#505/#520). 0 for the 8-bit cores.
+	anchor := uint32(m.disasmBank())<<16 | uint32(pc)
 	if ds, err := m.Source.Disassemble(anchor, disasmCtx, disasmCtx); err == nil {
 		m.Disasm = ds
 	}

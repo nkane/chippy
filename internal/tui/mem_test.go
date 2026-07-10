@@ -1,10 +1,44 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/nkane/chippy/cpu"
 )
+
+// TestDisasm_PinnedCrossBank proves `:da $BB:XXXX` pins the disassembly to a
+// 65816 bank ≠ the live program bank, decoding that bank's bytes (#520).
+func TestDisasm_PinnedCrossBank(t *testing.T) {
+	ram := cpu.NewRAM()
+	c := cpu.NewVariant(ram, cpu.VariantW65816)
+	banked := cpu.NewBanked24(ram)
+	c.SetBus24(banked)
+	banked.Write24(0x029000, 0xEA) // NOP in bank 2
+	ram.Write(0x9000, 0x00)        // BRK in bank 0 (same offset)
+
+	m := New(c, ram).WithBanked24(banked)
+
+	if got := m.runCommand("da 02:9000"); got != "disasm -> $02:9000 (' to follow PC)" {
+		t.Fatalf("da status: %q", got)
+	}
+	if m.DisasmFollow || m.DisasmAnchor != 0x9000 || m.DisasmAnchorBank != 0x02 {
+		t.Fatalf("pinned anchor: follow=%v addr=$%04X bank=$%02X", m.DisasmFollow, m.DisasmAnchor, m.DisasmAnchorBank)
+	}
+	if m.disasmBank() != 0x02 {
+		t.Fatalf("disasmBank=$%02X want $02", m.disasmBank())
+	}
+	var first string
+	for _, ln := range m.Disasm.Lines {
+		if ln.addr == 0x9000 {
+			first = ln.text
+			break
+		}
+	}
+	if !strings.Contains(first, "NOP") {
+		t.Fatalf("bank-2 disasm @ $9000 = %q want NOP (bank 0 would be BRK)", first)
+	}
+}
 
 // TestSyncMem_FromDAP proves the memory panel reads DAP-sourced bytes (issue
 // #451): New seeds m.MemView through the in-process readMemory, so memByte
