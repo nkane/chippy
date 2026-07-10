@@ -491,10 +491,16 @@ chippy -rom <file> [-addr 0x8000] [-reset 0xADDR] [-cfg linker.cfg] [-dbg syms.d
 
 ## 8. Next Steps (immediate)
 
-1. **No open issues.** 65816 accuracy/feature tail is closed out (bank-aware bus, cross-bank disasm, interrupts, remote-DAP bank reads, WASM 65816 + demo).
-2. **65816 accuracy tail candidates:** ABORT interrupt ($FFF8/$FFE8 — no abort source yet), interrupt-timing per-cycle bus trace (Harte corpus is opcodes-only), or cross-bank pinned disasm scroll (ADR 0013 D2 follow-up).
-3. **Possible:** integrate Bruce Clark's BCD timing test or 6502_decimal_test as a klaus-style build-tagged suite — would also exercise the CMOS BCD path.
-4. **User-side:** mascot image generation (prompts in `docs/mascot-prompts.md`).
+The entire 6502/65C02/2A03/65816 accuracy arc is complete (all Tom Harte-validated; 65816 bank-aware bus + full IRQ/NMI/ABORT model + cross-bank disasm + remote-DAP bank reads + WASM playground). Epic #517 closed. Next work is a new lane — **epic #529 (peripheral expansion + 65816 accuracy):**
+
+1. **#531 6551 ACIA** (serial UART — smallest, unblocks Ben-Eater-style serial-console ROMs).
+2. **#530 6522 VIA** (timers T1/T2, ports + DDR, shift register, IFR/IER interrupts via `AssertIRQSource`).
+3. **#532 cycle-accurate 65816** (per-cycle bus interleave like the NES core — enables 65816 peripheral timing; large).
+4. **#533 65816 functional-test suite** (program-level, build-tagged; defense-in-depth, deprioritized).
+
+Also open: **#528** mascot image generation (user-side art, prompts in `docs/mascot-prompts.md`).
+
+Already done (were stale here): Bruce Clark BCD / `6502_decimal_test` → in-tree `cpu/decimal_exhaustive_test.go` (`-tags=decimal`, CI); CMOS e2e CI → the `cmos-e2e` job in `ci.yml`; homebrew-core → #22 closed NOT_PLANNED.
 
 ---
 
