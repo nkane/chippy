@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -35,6 +36,7 @@ func main() {
 		nessyROM    = flag.String("nessy", "", "spawn nessy with this iNES ROM + attach the TUI to it (paused at reset)")
 		nessyBinary = flag.String("nessy-binary", "", "path to the nessy binary (overrides $PATH lookup + chippy-sibling fallback)")
 		textBufCap  = flag.Int("text-buf-cap", peripheral.DefaultTextOutputCap, "TextOutput ($F001) buffer cap in bytes; 0 = unbounded")
+		aciaBase    = flag.String("acia", "", "map a 6551 ACIA (serial UART) at this base address, e.g. $5000 (the Ben Eater kit convention); empty = off. Coexists with the $F001/$F004 devices.")
 		theme       = flag.String("theme", "", "color palette: default (Catppuccin Mocha) | mocha | macchiato | frappe | latte | neon | protan | tritan | mono. NO_COLOR=1 forces mono.")
 		traceReplay = flag.String("trace-replay", "", "open a prior trace file in replay mode (step keys scroll through recorded frames; CPU stays paused)")
 		traceDiff   = flag.String("diff", "", "with -trace-replay: load a second trace and mark the first cycle where the two runs diverge (press d to toggle the side-by-side view)")
@@ -110,7 +112,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	var acia *peripheral.ACIA
+	if *aciaBase != "" {
+		base, err := parseHex16(*aciaBase)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "chippy: -acia %q: %v\n", *aciaBase, err)
+			os.Exit(2)
+		}
+		acia = peripheral.NewACIA(base)
+		if err := mmio.Register(acia); err != nil {
+			fmt.Fprintln(os.Stderr, "register acia:", err)
+			os.Exit(1)
+		}
+	}
+
 	c := cpu.NewVariant(mmio, variant)
+	if acia != nil {
+		acia.SetIRQ(c) // receiver interrupts reach the CPU IRQ line
+	}
 
 	tracer := cpu.NewFileTracer()
 	c.Tracer = tracer
@@ -227,6 +246,7 @@ func main() {
 		WithWBus(wbus).
 		WithTextOutput(textOut).
 		WithKeyboard(keyIn).
+		WithACIA(acia).
 		WithTracer(tracer).
 		WithHistoryPath(tui.DefaultHistoryPath()).
 		WithRunOnStart(*runOnStart).
@@ -249,6 +269,19 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// parseHex16 parses a 16-bit address written as `$XXXX`, `0xXXXX`, or bare
+// hex `XXXX`. Used by -acia.
+func parseHex16(s string) (uint16, error) {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "$")
+	s = strings.TrimPrefix(strings.ToLower(s), "0x")
+	v, err := strconv.ParseUint(s, 16, 16)
+	if err != nil {
+		return 0, fmt.Errorf("not a 16-bit hex address")
+	}
+	return uint16(v), nil
 }
 
 // mustParseTrace opens and parses a trace file, exiting with a labelled

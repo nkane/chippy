@@ -223,6 +223,11 @@ type Model struct {
 	Keyboard  *peripheral.KeyboardInput
 	InputMode bool
 
+	// ACIA is an optional 6551 serial UART (the Ben Eater kit's console). When
+	// set, the Output panel renders its TX sink and InputMode routes keystrokes
+	// to its RX queue (alongside Keyboard if both are wired).
+	ACIA *peripheral.ACIA
+
 	// Optional CPU execution tracer. The CPU does the actual logging; the
 	// Model holds a reference so `:trace on/off [path]` can flip it at
 	// runtime and so quit can flush the buffer.
@@ -470,6 +475,14 @@ func (m Model) WithKeyboard(k *peripheral.KeyboardInput) Model {
 	return m
 }
 
+// WithACIA attaches a 6551 ACIA so the TUI renders its serial output and
+// routes InputMode keystrokes into its RX queue. The peripheral must already
+// be registered with the MMIO bus; this only wires display + input.
+func (m Model) WithACIA(a *peripheral.ACIA) Model {
+	m.ACIA = a
+	return m
+}
+
 // WithTracer attaches a CPU execution tracer for runtime control via :trace.
 func (m Model) WithTracer(t *cpu.FileTracer) Model {
 	m.Tracer = t
@@ -693,11 +706,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.appendConsole("Esc or ` closes.")
 			}
 		case "i":
-			if m.Keyboard != nil {
+			if m.Keyboard != nil || m.ACIA != nil {
 				m.InputMode = true
 				m.Status = "input mode — Esc to exit"
 			} else {
-				m.Status = "no keyboard peripheral registered"
+				m.Status = "no keyboard/ACIA peripheral registered"
 			}
 		case "?", "h":
 			m.ShowHelp = true
@@ -1024,7 +1037,12 @@ func (m Model) updateInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.scheduleTick()
 	}
 	if b, ok := keyMsgToByte(msg); ok {
-		m.Keyboard.Push(b)
+		if m.Keyboard != nil {
+			m.Keyboard.Push(b)
+		}
+		if m.ACIA != nil {
+			m.ACIA.Receive(b)
+		}
 		m.Status = fmt.Sprintf("key -> $%02X", b)
 	}
 	return m, m.scheduleTick()
@@ -1119,7 +1137,7 @@ func (m *Model) maybeKeyframe() {
 // base MMIO address as `"$XXXX"` so restore can route bytes back to
 // the right device.
 func (m *Model) captureperipherals(s *cpu.Snapshot) {
-	if m.TextOut == nil && m.Keyboard == nil {
+	if m.TextOut == nil && m.Keyboard == nil && m.ACIA == nil {
 		return
 	}
 	s.Peripherals = map[string][]byte{}
@@ -1128,6 +1146,9 @@ func (m *Model) captureperipherals(s *cpu.Snapshot) {
 	}
 	if m.Keyboard != nil {
 		s.Peripherals[fmt.Sprintf("$%04X", m.Keyboard.DataAddr)] = m.Keyboard.Snapshot()
+	}
+	if m.ACIA != nil {
+		s.Peripherals[fmt.Sprintf("$%04X", m.ACIA.Base)] = m.ACIA.Snapshot()
 	}
 }
 
@@ -1145,6 +1166,11 @@ func (m *Model) restoreperipherals(s cpu.Snapshot) {
 	if m.Keyboard != nil {
 		if state, ok := s.Peripherals[fmt.Sprintf("$%04X", m.Keyboard.DataAddr)]; ok {
 			m.Keyboard.Restore(state)
+		}
+	}
+	if m.ACIA != nil {
+		if state, ok := s.Peripherals[fmt.Sprintf("$%04X", m.ACIA.Base)]; ok {
+			m.ACIA.Restore(state)
 		}
 	}
 }
@@ -1479,7 +1505,7 @@ func (m Model) View() string {
 	}
 
 	outH := 0
-	if m.TextOut != nil {
+	if m.hasOutput() {
 		outH = 8
 	}
 	disH := innerH * 6 / 10
@@ -1509,7 +1535,7 @@ func (m Model) View() string {
 		topRight = m.disasmView(rightW, disH)
 	}
 	rightPanels := []string{topRight, m.memView(rightW, memH)}
-	if m.TextOut != nil {
+	if m.hasOutput() {
 		rightPanels = append(rightPanels, m.outputView(rightW, outH))
 	}
 	right := lipgloss.JoinVertical(lipgloss.Left, rightPanels...)
@@ -1625,7 +1651,7 @@ func helpPages() [][]helpSection {
 			{"General", [][2]string{
 				{":", "command line — see Prompt verbs page for the full list"},
 				{"v", "toggle source / disassembly view"},
-				{"i", "input mode → keystrokes go to keyboard peripheral (Esc exits)"},
+				{"i", "input mode → keystrokes go to keyboard/ACIA peripheral (Esc exits)"},
 				{"? / h", "toggle this help"},
 				{"q / ^C", "quit"},
 			}},
@@ -2370,7 +2396,7 @@ func (m Model) outputView(w, h int) string {
 		innerW = 1
 	}
 
-	out := m.TextOut.String()
+	out := m.outputText()
 	lines := strings.Split(out, "\n")
 	// Wrap any line wider than the panel.
 	wrapped := make([]string, 0, len(lines))
@@ -2391,10 +2417,29 @@ func (m Model) outputView(w, h int) string {
 	}
 
 	title := "Output"
+	if m.TextOut == nil && m.ACIA != nil {
+		title = "Serial"
+	}
 	if m.InputMode {
-		title = "Output  " + lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true).Render("[INPUT]")
+		title += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true).Render("[INPUT]")
 	}
 	return fitPanel(title, strings.Join(wrapped, "\n"), w, h)
+}
+
+// hasOutput reports whether an output pane should be shown: either the
+// TextOutput ($F001) display or an ACIA serial sink is wired.
+func (m Model) hasOutput() bool { return m.TextOut != nil || m.ACIA != nil }
+
+// outputText is the Output panel's content: the TextOutput buffer when wired,
+// otherwise the ACIA's serial TX sink. TextOutput wins when both are present.
+func (m Model) outputText() string {
+	if m.TextOut != nil {
+		return m.TextOut.String()
+	}
+	if m.ACIA != nil {
+		return m.ACIA.TxString()
+	}
+	return ""
 }
 
 func (m Model) memView(w, h int) string {
