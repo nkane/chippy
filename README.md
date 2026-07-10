@@ -40,7 +40,8 @@ Plenty of 6502 emulators exist. chippy's pitch is **debugger-first**:
   in <1 MiB).
 - **MMIO peripherals you can poke from BASIC-era ROMs.** Apple-1 style
   TextOutput at $F001 and KeyboardInput at $F004/$F005 ship out of the
-  box; the same `peripheral` package will host VIA 6522 next.
+  box; the `peripheral` package also carries a 6551 ACIA (serial UART, with
+  receiver interrupts), with the 6522 VIA next.
 - **Real 6502 + 65C02 compliance.** Klaus Dormann's functional tests pass
   end-to-end for both variants; an exhaustive BCD sweep covers every
   ADC/SBC input combination.
