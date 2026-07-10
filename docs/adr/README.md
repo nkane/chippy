@@ -28,6 +28,7 @@ reversed or refined are marked *Superseded by* with a link.
 | [0013](0013-v1.10.0.md) | v1.10.0 | 2026-06-30 | Bank-aware 24-bit bus for the 65816 (`Banked24`) — kill the bank-0 mirror; Intel HEX type-04, DAP/TUI bank-awareness, `:bank` (#505); cross-bank PBR-relative disassembly (#507) |
 | [0014](0014-v1.11.0.md) | v1.11.0 | 2026-07-08 | 65816 hardware interrupts (native/emulation vectors, #511), remote 65816 bank reads over DAP (#510), 65816 in the WASM playground + native-mode demo (#514/#515) |
 | [0015](0015-v1.12.0.md) | v1.12.0 | 2026-07-10 | 65816 tail (epic #517) — playground bank selector (#521), pinned cross-bank disasm + `:da` (#520), hardware-interrupt per-cycle bus trace (#519) |
+| [0016](0016-v1.13.0.md) | v1.13.0 | unreleased | 65816 ABORT interrupt ($FFF8/$FFE8), boundary-recognized — closes epic #517 (#518) |
 
 ## Conventions captured across releases
 
