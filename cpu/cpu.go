@@ -623,6 +623,11 @@ func (c *CPU) serviceNMI() {
 // (pinVector), matching brk/cop. Adds its own cycles so Step's before/after
 // delta accounts the entry.
 func (c *CPU) serviceInterrupt816(vecEmu, vecNat uint32) {
+	// Two leading internal cycles at PBR:PC (VDA=VPA=0) before the stack writes,
+	// per the WDC hardware-interrupt sequence. These are dummy reads — the cycle
+	// count is added abstractly below, so they only surface on the bus trace.
+	c.io816()
+	c.io816()
 	cyc := 7
 	if c.E {
 		c.spPush16(c.PC)
