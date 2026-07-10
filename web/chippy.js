@@ -54,30 +54,44 @@ function renderState() {
   document.getElementById('reg-p').textContent =
     fmtHex(s.p, 2) + '\nNV-BDIZC\n' + flagBits(s.p);
 
-  renderDisasm(s.pc);
+  renderDisasm(s.pc, s.pbr || 0);
   renderMemory();
   document.getElementById('text-out').textContent = window.chippy.textOutput();
   status(s.halted ? 'halted' : `pc=${fmtHex(s.pc, 4)} cyc=${s.cycles}`);
 }
 
-function renderDisasm(pc) {
-  const rows = window.chippy.disasm(pc, 16);
+// fmtBankAddr renders a 65816 address as $BB:XXXX when the bank is non-zero,
+// else the plain 16-bit $XXXX.
+function fmtBankAddr(bank, off) {
+  const lo = '$' + off.toString(16).toUpperCase().padStart(4, '0');
+  if (!bank) return lo;
+  return '$' + bank.toString(16).toUpperCase().padStart(2, '0') + ':' + off.toString(16).toUpperCase().padStart(4, '0');
+}
+
+// renderDisasm anchors at the program bank PBR:PC so a 65816 program running in
+// a bank != 0 disassembles its own bytes (#521). pbr is 0 for the 8-bit cores.
+function renderDisasm(pc, pbr) {
+  const anchor = (pbr << 16) | pc;
+  const fullPC = anchor;
+  const rows = window.chippy.disasm(anchor, 16);
   const lines = [];
   for (const r of rows) {
     const bytes = Array.from(r.bytes).map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
-    const isPC = r.addr === pc ? '>' : ' ';
-    lines.push(`${isPC} ${fmtHex(r.addr, 4)}: ${bytes.padEnd(10)} ${r.text}`);
+    const isPC = r.addr === fullPC ? '>' : ' ';
+    lines.push(`${isPC} ${fmtBankAddr(pbr, r.addr & 0xFFFF)}: ${bytes.padEnd(10)} ${r.text}`);
   }
   document.getElementById('disasm-view').textContent = lines.join('\n');
 }
 
 function renderMemory() {
   const addrInput = document.getElementById('mem-addr').value.trim();
-  const addr = parseAddr(addrInput) & 0xFFF0; // align to 16-byte row
-  const bytes = window.chippy.readMem(addr, 256);
+  const bank = memBank();
+  const off = parseAddr(addrInput) & 0xFFF0; // align to 16-byte row
+  const addr24 = (bank << 16) | off;
+  const bytes = window.chippy.readMem(addr24, 256);
   const lines = [];
   for (let row = 0; row < 16; row++) {
-    const base = (addr + row * 16) & 0xFFFF;
+    const base = (off + row * 16) & 0xFFFF;
     const hex = [];
     const ascii = [];
     for (let i = 0; i < 16; i++) {
@@ -85,9 +99,24 @@ function renderMemory() {
       hex.push(b.toString(16).toUpperCase().padStart(2, '0'));
       ascii.push(b >= 0x20 && b < 0x7F ? String.fromCharCode(b) : '.');
     }
-    lines.push(`${fmtHex(base, 4)}  ${hex.slice(0, 8).join(' ')}  ${hex.slice(8).join(' ')}  ${ascii.join('')}`);
+    lines.push(`${fmtBankAddr(bank, base)}  ${hex.slice(0, 8).join(' ')}  ${hex.slice(8).join(' ')}  ${ascii.join('')}`);
   }
   document.getElementById('mem-view').textContent = lines.join('\n');
+}
+
+// memBank reads the memory-pane bank selector (0-255), 0 when hidden/empty.
+function memBank() {
+  const el = document.getElementById('mem-bank');
+  if (!el) return 0;
+  const v = parseInt(el.value.trim(), 16);
+  return Number.isNaN(v) ? 0 : v & 0xFF;
+}
+
+// updateBankVisibility shows the bank selector only for the 65816 (the 8-bit
+// cores have a single 64 KiB space).
+function updateBankVisibility() {
+  const is816 = document.getElementById('variant').value === '65816';
+  document.getElementById('mem-bank-label').hidden = !is816;
 }
 
 function parseAddr(s) {
@@ -111,6 +140,7 @@ async function loadDemo() {
     if (vsel.value !== variant) {
       vsel.value = variant;
       window.chippy.setVariant(variant);
+      updateBankVisibility();
     }
     const opts = { format: demo.format, addr: demo.addr };
     const result = window.chippy.load(bytes, opts);
@@ -160,6 +190,7 @@ function resetCPU() {
 function variantChanged() {
   const v = document.getElementById('variant').value;
   window.chippy.setVariant(v);
+  updateBankVisibility();
   status(`variant -> ${v} (load a ROM to run)`);
   renderState();
 }
@@ -225,6 +256,7 @@ function bindUI() {
   });
   document.getElementById('variant').addEventListener('change', variantChanged);
   document.getElementById('mem-addr').addEventListener('change', renderState);
+  document.getElementById('mem-bank').addEventListener('change', renderState);
   document.getElementById('share').addEventListener('click', copyShareLink);
 
   // Keyboard shortcut: lower-case "s" steps when not in an input.
@@ -327,6 +359,7 @@ async function maybeLoadFromHash() {
   const variant = params.get('variant') || 'nmos';
   document.getElementById('variant').value = variant;
   window.chippy.setVariant(variant);
+  updateBankVisibility();
   const opts = { format, addr };
   const result = window.chippy.load(bytes, opts);
   if (!result.ok) {

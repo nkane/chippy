@@ -194,6 +194,7 @@ func jsState(this js.Value, args []js.Value) interface{} {
 	out.Set("sp", int(c.SP))
 	out.Set("p", int(c.P))
 	out.Set("pc", int(c.PC))
+	out.Set("pbr", int(c.PBR)) // program bank (0 for non-65816) — disasm anchor
 	out.Set("cycles", float64(c.Cycles))
 	out.Set("halted", c.Halted)
 	flags := js.Global().Get("Object").New()
@@ -209,18 +210,35 @@ func jsState(this js.Value, args []js.Value) interface{} {
 }
 
 // jsReadMem: (addr, len) -> Uint8Array
+// readByte24 is the bank-aware side-effect-free playground read. Banks 1-255
+// come from the 65816's flat store; bank 0 (and every non-65816 read) comes
+// from RAM directly (raw, no MMIO side effects), matching the old behavior.
+func readByte24(a uint32) byte {
+	if a >= 0x10000 && banked != nil {
+		return banked.Read24(a)
+	}
+	return ram.Read(uint16(a))
+}
+
+// bankBus is a 16-bit cpu.Bus reading one 65816 bank via readByte24, so
+// DisasmCPUAt can disassemble a bank other than 0. Disassembly never writes.
+type bankBus struct{ bank uint32 }
+
+func (b bankBus) Read(a uint16) byte     { return readByte24(b.bank | uint32(a)) }
+func (b bankBus) Write(_ uint16, _ byte) {}
+
 func jsReadMem(this js.Value, args []js.Value) interface{} {
 	if len(args) < 2 {
 		return js.Null()
 	}
-	addr := args[0].Int() & 0xFFFF
+	addr := args[0].Int() & 0xFFFFFF
 	n := args[1].Int()
 	if n < 0 {
 		n = 0
 	}
 	buf := make([]byte, n)
 	for i := 0; i < n; i++ {
-		buf[i] = ram.Read(uint16((addr + i) & 0xFFFF))
+		buf[i] = readByte24(uint32(addr+i) & 0xFFFFFF)
 	}
 	out := js.Global().Get("Uint8Array").New(n)
 	js.CopyBytesToJS(out, buf)
@@ -253,21 +271,23 @@ func jsDisasm(this js.Value, args []js.Value) interface{} {
 	if len(args) < 1 {
 		return js.Global().Get("Array").New()
 	}
-	addr := uint16(args[0].Int() & 0xFFFF)
+	full := uint32(args[0].Int() & 0xFFFFFF)
+	bank := full & 0xFF0000
 	count := 16
 	if len(args) >= 2 && args[1].Type() == js.TypeNumber {
 		count = args[1].Int()
 	}
+	bus := bankBus{bank: bank}
 	out := js.Global().Get("Array").New()
-	cur := addr
+	cur := uint16(full)
 	for i := 0; i < count; i++ {
-		text, size := cpu.DisasmCPU(c, cur)
+		text, size := cpu.DisasmCPUAt(c, bus, cur)
 		row := js.Global().Get("Object").New()
-		row.Set("addr", int(cur))
+		row.Set("addr", int(bank|uint32(cur))) // 24-bit so JS can show $BB:XXXX
 		bytesArr := js.Global().Get("Uint8Array").New(size)
 		buf := make([]byte, size)
 		for j := 0; j < size; j++ {
-			buf[j] = ram.Read(uint16(int(cur)+j) & 0xFFFF)
+			buf[j] = readByte24(bank | uint32(cur+uint16(j)))
 		}
 		js.CopyBytesToJS(bytesArr, buf)
 		row.Set("bytes", bytesArr)
