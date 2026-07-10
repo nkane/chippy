@@ -2,6 +2,8 @@ package tui
 
 import (
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // resolveTheme: unknown name → default; explicit valid name → that
@@ -19,6 +21,13 @@ func TestResolveTheme_NameRouting(t *testing.T) {
 		{"tritan", ThemeTritan},
 		{"MONO", ThemeMono}, // case insensitive
 		{"banana", ThemeDefault},
+		{"mocha", ThemeMocha},
+		{"catppuccin", ThemeCatppuccin},
+		{"macchiato", ThemeMacchiato},
+		{"frappe", ThemeFrappe},
+		{"latte", ThemeLatte},
+		{"neon", ThemeNeon},
+		{"Latte", ThemeLatte}, // case insensitive
 	}
 	for _, c := range cases {
 		if got := resolveTheme(c.in); got != c.want {
@@ -87,15 +96,40 @@ func TestState_ThemeRoundTrips(t *testing.T) {
 // Smoke: every name resolveTheme accepts is in the slice.
 func TestAvailableThemes_CoversValidNames(t *testing.T) {
 	want := map[string]bool{
-		string(ThemeDefault): true,
-		string(ThemeMono):    true,
-		string(ThemeProtan):  true,
-		string(ThemeTritan):  true,
+		string(ThemeDefault):    true,
+		string(ThemeMocha):      true,
+		string(ThemeMacchiato):  true,
+		string(ThemeFrappe):     true,
+		string(ThemeLatte):      true,
+		string(ThemeCatppuccin): true,
+		string(ThemeNeon):       true,
+		string(ThemeMono):       true,
+		string(ThemeProtan):     true,
+		string(ThemeTritan):     true,
 	}
 	for _, name := range AvailableThemes() {
 		delete(want, name)
 	}
 	if len(want) > 0 {
 		t.Fatalf("AvailableThemes missing entries: %v", want)
+	}
+}
+
+// The default palette is Catppuccin Mocha (mauve title); each flavor is
+// colorful and distinct from the others' status-bar hue.
+func TestCatppuccin_DefaultIsMochaAndFlavorsDiffer(t *testing.T) {
+	if got := paletteFor(ThemeDefault); got != catppuccinPalette(mocha) {
+		t.Fatal("default palette should be Catppuccin Mocha")
+	}
+	seen := map[lipgloss.Color]Theme{}
+	for _, th := range []Theme{ThemeMocha, ThemeMacchiato, ThemeFrappe, ThemeLatte} {
+		p := paletteFor(th)
+		if !p.useColor {
+			t.Fatalf("%s should be colorful", th)
+		}
+		if prev, dup := seen[p.statusBg]; dup {
+			t.Fatalf("%s shares status-bar hue with %s", th, prev)
+		}
+		seen[p.statusBg] = th
 	}
 }

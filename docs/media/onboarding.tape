@@ -18,11 +18,11 @@ Set FontSize 12
 Set Width 1600
 Set Height 1000
 Set Padding 20
-Set Theme "Dracula"
+Set Theme "Catppuccin Mocha"
 Set TypingSpeed 60ms
 
 # Launch chippy on a small ca65 demo. The reset state is paused at $8000.
-Type "chippy -rom example/c/hello.bin"
+Type "export COLORTERM=truecolor && chippy -rom example/c/hello.bin"
 Enter
 Sleep 2s
 

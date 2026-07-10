@@ -12,8 +12,18 @@ import (
 type Theme string
 
 const (
-	// ThemeDefault is the colorful palette chippy shipped with.
+	// ThemeDefault is chippy's shipped default — Catppuccin Mocha.
 	ThemeDefault Theme = "default"
+	// Catppuccin flavors (https://catppuccin.com). Mocha is the default;
+	// "catppuccin" is an alias for it.
+	ThemeCatppuccin Theme = "catppuccin"
+	ThemeMocha      Theme = "mocha"
+	ThemeMacchiato  Theme = "macchiato"
+	ThemeFrappe     Theme = "frappe"
+	ThemeLatte      Theme = "latte"
+	// ThemeNeon is the original high-saturation palette chippy shipped
+	// before Catppuccin became the default.
+	ThemeNeon Theme = "neon"
 	// ThemeMono drops all color. Drives the NO_COLOR fallback and the
 	// `--theme mono` command line. Bold / italic / reverse remain.
 	ThemeMono Theme = "mono"
@@ -33,9 +43,15 @@ const (
 func AvailableThemes() []string {
 	return []string{
 		string(ThemeDefault),
-		string(ThemeMono),
+		string(ThemeMocha),
+		string(ThemeMacchiato),
+		string(ThemeFrappe),
+		string(ThemeLatte),
+		string(ThemeCatppuccin),
+		string(ThemeNeon),
 		string(ThemeProtan),
 		string(ThemeTritan),
+		string(ThemeMono),
 	}
 }
 
@@ -49,19 +65,101 @@ type palette struct {
 	statusBg, statusFg,
 	memBPRead, memBPWrite, memBPRW,
 	memEditBg, memEditFg lipgloss.Color
-	// itemsBold and useColor jointly control whether emphasis is via
-	// color, bold, or both. mono leans on bold + reverse only.
+	// useColor controls whether emphasis is via color (+bold) or, for
+	// mono, bold + reverse only.
 	useColor bool
+}
+
+// catppuccin holds the flavor colors chippy's palette maps onto. Only
+// the slots chippy renders are listed. Values are the official
+// Catppuccin hex codes (https://github.com/catppuccin/catppuccin).
+type catppuccin struct {
+	mauve, blue, green, red, pink, yellow,
+	overlay0, overlay1, surface0, surface1, crust lipgloss.Color
+}
+
+var (
+	mocha = catppuccin{
+		mauve: "#cba6f7", blue: "#89b4fa", green: "#a6e3a1", red: "#f38ba8",
+		pink: "#f5c2e7", yellow: "#f9e2af", overlay0: "#6c7086", overlay1: "#7f849c",
+		surface0: "#313244", surface1: "#45475a", crust: "#11111b",
+	}
+	macchiato = catppuccin{
+		mauve: "#c6a0f6", blue: "#8aadf4", green: "#a6da95", red: "#ed8796",
+		pink: "#f5bde6", yellow: "#eed49f", overlay0: "#6e738d", overlay1: "#8087a2",
+		surface0: "#363a4f", surface1: "#494d64", crust: "#181926",
+	}
+	frappe = catppuccin{
+		mauve: "#ca9ee6", blue: "#8caaee", green: "#a6d189", red: "#e78284",
+		pink: "#f4b8e4", yellow: "#e5c890", overlay0: "#737994", overlay1: "#838ba7",
+		surface0: "#414559", surface1: "#51576d", crust: "#232634",
+	}
+	latte = catppuccin{
+		mauve: "#8839ef", blue: "#1e66f5", green: "#40a02b", red: "#d20f39",
+		pink: "#ea76cb", yellow: "#df8e1d", overlay0: "#9ca0b0", overlay1: "#8c8fa1",
+		surface0: "#ccd0da", surface1: "#bcc0cc", crust: "#dce0e8",
+	}
+)
+
+// catppuccinPalette maps a flavor onto chippy's semantic slots: mauve
+// headings, blue registers, green "on" flags, a mauve status bar with
+// crust text, and the standard watchpoint hues (blue 👁 / red ✏ / pink 🔁).
+func catppuccinPalette(c catppuccin) palette {
+	return palette{
+		useColor:   true,
+		title:      c.mauve,
+		reg:        c.blue,
+		flagOn:     c.green,
+		flagOff:    c.overlay0,
+		help:       c.overlay1,
+		label:      c.pink,
+		dimAddr:    c.overlay1,
+		curLineBg:  c.surface0,
+		curLineFg:  c.yellow,
+		statusBg:   c.mauve,
+		statusFg:   c.crust,
+		memBPRead:  c.blue,
+		memBPWrite: c.red,
+		memBPRW:    c.pink,
+		memEditBg:  c.surface1,
+		memEditFg:  c.yellow,
+	}
 }
 
 func paletteFor(t Theme) palette {
 	switch t {
 	case ThemeMono:
 		return palette{useColor: false}
+	case ThemeMacchiato:
+		return catppuccinPalette(macchiato)
+	case ThemeFrappe:
+		return catppuccinPalette(frappe)
+	case ThemeLatte:
+		return catppuccinPalette(latte)
+	case ThemeNeon:
+		// The original high-saturation palette (pre-Catppuccin default).
+		return palette{
+			useColor:   true,
+			title:      "213",
+			reg:        "39",
+			flagOn:     "46",
+			flagOff:    "240",
+			help:       "245",
+			label:      "207",
+			dimAddr:    "244",
+			curLineBg:  "236",
+			curLineFg:  "226",
+			statusBg:   "57",
+			statusFg:   "231",
+			memBPRead:  "33",
+			memBPWrite: "196",
+			memBPRW:    "213",
+			memEditBg:  "88",
+			memEditFg:  "226",
+		}
 	case ThemeProtan:
 		// Red→blue, green→yellow. Distinguishable under common
-		// red-green deficiencies. ANSI 256-color codes that match
-		// safely on most terminal themes.
+		// red-green deficiencies.
 		return palette{
 			useColor:   true,
 			title:      "33",  // blue
@@ -101,26 +199,8 @@ func paletteFor(t Theme) palette {
 			memEditBg:  "53",
 			memEditFg:  "231",
 		}
-	default: // ThemeDefault
-		return palette{
-			useColor:   true,
-			title:      "213",
-			reg:        "39",
-			flagOn:     "46",
-			flagOff:    "240",
-			help:       "245",
-			label:      "207",
-			dimAddr:    "244",
-			curLineBg:  "236",
-			curLineFg:  "226",
-			statusBg:   "57",
-			statusFg:   "231",
-			memBPRead:  "33",
-			memBPWrite: "196",
-			memBPRW:    "213",
-			memEditBg:  "88",
-			memEditFg:  "226",
-		}
+	default: // ThemeDefault / ThemeMocha / ThemeCatppuccin — Catppuccin Mocha
+		return catppuccinPalette(mocha)
 	}
 }
 
@@ -167,15 +247,17 @@ func applyTheme(t Theme) {
 }
 
 // resolveTheme picks the active theme. Explicit `name` wins; an
-// unrecognized name falls back to default. NO_COLOR (env var) forces
-// mono regardless of the supplied name — that matches the spirit of
-// https://no-color.org, even though chippy's TUI keeps emphasis.
+// unrecognized name falls back to the default (Catppuccin Mocha).
+// NO_COLOR (env var) forces mono regardless of the supplied name — that
+// matches the spirit of https://no-color.org, even though chippy's TUI
+// keeps emphasis.
 func resolveTheme(name string) Theme {
 	if v := os.Getenv("NO_COLOR"); v != "" {
 		return ThemeMono
 	}
 	switch Theme(strings.ToLower(name)) {
-	case ThemeMono, ThemeProtan, ThemeTritan, ThemeDefault:
+	case ThemeMono, ThemeProtan, ThemeTritan, ThemeNeon,
+		ThemeCatppuccin, ThemeMocha, ThemeMacchiato, ThemeFrappe, ThemeLatte, ThemeDefault:
 		return Theme(strings.ToLower(name))
 	}
 	return ThemeDefault

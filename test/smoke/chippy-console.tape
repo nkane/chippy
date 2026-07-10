@@ -15,9 +15,10 @@ Set Width 1400
 Set Height 800
 Set Padding 12
 Set TypingSpeed 30ms
+Set Theme "Catppuccin Mocha"
 
 Hide
-Type "./chippy -rom example/count_to_ten.bin"
+Type "export COLORTERM=truecolor && ./chippy -rom example/count_to_ten.bin"
 Enter
 Sleep 1500ms
 Show
