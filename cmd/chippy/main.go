@@ -35,7 +35,7 @@ func main() {
 		nessyROM    = flag.String("nessy", "", "spawn nessy with this iNES ROM + attach the TUI to it (paused at reset)")
 		nessyBinary = flag.String("nessy-binary", "", "path to the nessy binary (overrides $PATH lookup + chippy-sibling fallback)")
 		textBufCap  = flag.Int("text-buf-cap", peripheral.DefaultTextOutputCap, "TextOutput ($F001) buffer cap in bytes; 0 = unbounded")
-		theme       = flag.String("theme", "", "color palette: default | mono | protan | tritan. NO_COLOR=1 forces mono regardless.")
+		theme       = flag.String("theme", "", "color palette: default (Catppuccin Mocha) | mocha | macchiato | frappe | latte | neon | protan | tritan | mono. NO_COLOR=1 forces mono.")
 		traceReplay = flag.String("trace-replay", "", "open a prior trace file in replay mode (step keys scroll through recorded frames; CPU stays paused)")
 		traceDiff   = flag.String("diff", "", "with -trace-replay: load a second trace and mark the first cycle where the two runs diverge (press d to toggle the side-by-side view)")
 	)
