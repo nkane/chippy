@@ -16,6 +16,10 @@ import (
 	"github.com/nkane/chippy/trace"
 )
 
+// The CPU drives a peripheral's interrupt line: *cpu.CPU satisfies the
+// peripheral IRQ surface the 6551 ACIA uses (#531).
+var _ peripheral.IRQSink = (*cpu.CPU)(nil)
+
 func main() {
 	var (
 		romPath     = flag.String("rom", "", "program to load (.bin .prg .hex .o)")
