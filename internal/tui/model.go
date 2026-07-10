@@ -1634,6 +1634,7 @@ func helpPages() [][]helpSection {
 				{":bank N", "select 65816 memory-panel bank $00-$FF (#505)"},
 				{":da X", "pin disassembly to addr/$BB:XXXX/symbol (65816 banks, #520)"},
 				{":pc X", "set CPU PC"},
+				{":abort", "assert a 65816 ABORT (serviced at next step, #518)"},
 				{":run X", "run until addr (one-shot bp + go)"},
 				{":watch X [byte|word] [xN] [label]", "add value watch (xN expands an array; also :watch reg <name>)"},
 				{":watch X as {f:byte,g:word}", "struct overlay: named member rows at X+offset (#409)"},

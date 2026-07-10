@@ -39,6 +39,18 @@ func (c *CPU) Step() int {
 	// while the vblank flag is already set) is delayed one instruction —
 	// matching the 6502's interrupt-poll timing. NMOS/CMOS keep the
 	// immediate edge-service path.
+	// ABORT (65816) has priority over NMI/IRQ and ignores the I flag. chippy
+	// recognizes it at the boundary, so it aborts the upcoming instruction:
+	// serviceInterrupt816 pushes the current PC (the aborted instruction), so
+	// RTI re-runs it (#518).
+	if c.abortPending {
+		c.Halted = false
+		c.abortPending = false
+		before := c.Cycles
+		c.serviceInterrupt816(0xFFF8, 0xFFE8)
+		return int(c.Cycles - before)
+	}
+
 	nmiTake := c.nmiPending
 	if c.Variant == VariantNES {
 		nmiTake = c.nmiDue

@@ -262,6 +262,12 @@ func (m *Model) runCommand(line string) string {
 		m.CPU.PC = addr
 		m.CPU.Halted = false
 		return fmt.Sprintf("PC -> $%04X", addr)
+	case "abort":
+		if m.Banked == nil {
+			return "abort needs -cpu 65816"
+		}
+		m.CPU.AssertAbort()
+		return "ABORT asserted — serviced at next step ($FFF8/$FFE8)"
 	case "run":
 		if len(args) == 0 {
 			return "usage: :run $XXXX"
