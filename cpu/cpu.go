@@ -144,6 +144,13 @@ type CPU struct {
 	//     again (matching real silicon's edge sensitivity).
 	irqLine    bool
 	nmiPending bool
+	// abortPending latches a 65816 ABORT (edge-triggered, like nmiPending).
+	// chippy recognizes it at the instruction boundary, so it aborts the
+	// upcoming instruction before it executes — pushing that instruction's PC,
+	// so RTI re-runs it. True mid-instruction abort (cycle-accurate rollback,
+	// driven by an MMU asserting mid-op) is out of scope: no such peripheral
+	// exists (#518).
+	abortPending bool
 
 	// nmiDue is the NES-variant interrupt-poll latch (#342). The 6502
 	// samples the NMI line before an instruction's final cycle, so an
@@ -596,6 +603,17 @@ func (c *CPU) IRQAsserted() bool { return c.irqLine }
 // TriggerNMI repeatedly while one is already pending coalesces into a
 // single NMI.
 func (c *CPU) TriggerNMI() { c.nmiPending = true }
+
+// AssertAbort latches a 65816 ABORT (edge-triggered, like TriggerNMI). It is a
+// no-op on the 8-bit cores, which have no ABORT vector. chippy services it at
+// the next instruction boundary — aborting the upcoming instruction before it
+// runs and vectoring through $FFF8 (emulation) / $FFE8 (native) — so no
+// mid-instruction rollback is needed (#518). ABORT ignores the I flag.
+func (c *CPU) AssertAbort() {
+	if c.Variant == VariantW65816 {
+		c.abortPending = true
+	}
+}
 
 // serviceNMI performs the 7-cycle NMI vector dispatch. The two leading
 // idle cycles + the ticked pushes / vector reads keep the PPU in lockstep

@@ -91,6 +91,81 @@ func TestW65816_IRQBusTrace_Emulation(t *testing.T) {
 	}
 }
 
+// TestW65816_AbortEmulation checks ABORT vectors through $FFF8 and pushes the
+// aborted instruction's own PC (RTI re-runs it), even with I set.
+func TestW65816_AbortEmulation(t *testing.T) {
+	c, bus := newIRQTrace()
+	c.E = true
+	c.PBR = 0
+	c.PC = 0x8000 // the instruction that gets aborted
+	c.setSP16(0x01FF)
+	c.setFlag(FlagI, true) // ABORT ignores I
+	bus.ram[0xFFF8] = 0x00
+	bus.ram[0xFFF9] = 0xA0 // ABORT vector -> $A000
+	c.AssertAbort()
+
+	c.Step()
+
+	if c.PC != 0xA000 {
+		t.Fatalf("ABORT vector: PC=$%04X want $A000", c.PC)
+	}
+	// Pushed PC is the aborted instruction ($8000), not the next one.
+	if bus.ram[0x01FF] != 0x80 || bus.ram[0x01FE] != 0x00 {
+		t.Fatalf("pushed PC = $%02X%02X want $8000", bus.ram[0x01FF], bus.ram[0x01FE])
+	}
+	if !c.hasFlag(FlagI) || c.hasFlag(FlagD) {
+		t.Fatalf("after ABORT want I set, D clear; P=$%02X", c.P)
+	}
+}
+
+// TestW65816_AbortNative confirms the native vector ($FFE8) + PBR push.
+func TestW65816_AbortNative(t *testing.T) {
+	c, bus := newIRQTrace()
+	c.E = false
+	c.PBR = 0x07
+	c.PC = 0x8000
+	c.setSP16(0x1FFF)
+	bus.ram[0xFFE8] = 0x00
+	bus.ram[0xFFE9] = 0xB0 // native ABORT vector -> $B000
+	c.AssertAbort()
+
+	c.Step()
+
+	if c.PC != 0xB000 || c.PBR != 0 {
+		t.Fatalf("ABORT native: PC=$%04X PBR=$%02X want $B000/$00", c.PC, c.PBR)
+	}
+	if bus.ram[0x1FFF] != 0x07 {
+		t.Fatalf("native ABORT must push PBR, got $%02X want $07", bus.ram[0x1FFF])
+	}
+}
+
+// TestW65816_AbortPriorityOverNMI checks ABORT is taken before a pending NMI.
+func TestW65816_AbortPriorityOverNMI(t *testing.T) {
+	c, bus := newIRQTrace()
+	c.E = true
+	c.PC = 0x8000
+	c.setSP16(0x01FF)
+	bus.ram[0xFFF8] = 0x00
+	bus.ram[0xFFF9] = 0xA0 // ABORT -> $A000
+	bus.ram[0xFFFA] = 0x00
+	bus.ram[0xFFFB] = 0xC0 // NMI -> $C000
+	c.AssertAbort()
+	c.TriggerNMI()
+
+	c.Step()
+
+	if c.PC != 0xA000 {
+		t.Fatalf("ABORT should win over NMI: PC=$%04X want $A000", c.PC)
+	}
+	if !c.abortPending && c.nmiPending {
+		// NMI still latched, fires on the next step.
+		c.Step()
+		if c.PC != 0xC000 {
+			t.Fatalf("NMI should fire after ABORT: PC=$%04X want $C000", c.PC)
+		}
+	}
+}
+
 // TestW65816_NMIBusTrace_Native pins the 8-cycle native-mode NMI entry: two
 // internal cycles, the PBR push, three more stack writes, two vector reads.
 func TestW65816_NMIBusTrace_Native(t *testing.T) {

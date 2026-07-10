@@ -288,6 +288,7 @@ Type `:` to open the command line, then any of:
 | `:bank $NN`                 | Select 65816 memory-panel bank `$00`–`$FF`   |
 | `:da $XXXX` / `:da $BB:XXXX`| Pin disassembly to addr/symbol (65816 banks) |
 | `:pc $XXXX`                 | Force `PC` to address                        |
+| `:abort`                    | Assert a 65816 ABORT (vectors `$FFF8`/`$FFE8`)|
 | `:run $XXXX`                | Set one-shot bp at address and start running |
 | `:speed N`                  | Throttle to N Hz (`0` = unthrottled)         |
 
