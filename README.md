@@ -40,8 +40,8 @@ Plenty of 6502 emulators exist. chippy's pitch is **debugger-first**:
   in <1 MiB).
 - **MMIO peripherals you can poke from BASIC-era ROMs.** Apple-1 style
   TextOutput at $F001 and KeyboardInput at $F004/$F005 ship out of the
-  box; the `peripheral` package also carries a 6551 ACIA (serial UART, with
-  receiver interrupts), with the 6522 VIA next.
+  box; a 6551 ACIA (serial UART with receiver interrupts) wires in with
+  `-acia $5000` — the Ben Eater kit address. The 6522 VIA is next.
 - **Real 6502 + 65C02 compliance.** Klaus Dormann's functional tests pass
   end-to-end for both variants; an exhaustive BCD sweep covers every
   ADC/SBC input combination.
@@ -182,6 +182,7 @@ Flags:
 | `-dap`  | —       | Run as a [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) server instead of the TUI. Accepts `stdio` (editor pipes stdin/stdout), `tcp:PORT` (server listens, editor connects out), `unix:PATH` (unix-domain socket, lowest-overhead local), or `inproc` (in-process loopback self-check). See [`docs/dap.md`](docs/dap.md) for the request list, transport benchmarks, and VS Code / nvim-dap onboarding. |
 | `-dap-attach` | — | Connect out to a remote DAP server (`tcp:HOST:PORT`). Phase A: drives the `initialize` + `attach` handshake, prints capabilities + the first events, then disconnects. The TUI does not run yet — Phase B/C (CPUSource interface + DAP-backed source) wires the remote into the live TUI in a follow-up PR. Mutually exclusive with `-rom` and `-dap`. |
 | `-text-buf-cap` | `65536` | TextOutput ($F001) buffer cap in bytes. Older bytes are evicted when full. `0` disables the bound. Dump the live buffer with `:textsave PATH`. |
+| `-acia` | _(off)_ | Map a 6551 ACIA (serial UART) at this base address, e.g. `$5000` (the Ben Eater kit convention). Receiver interrupts reach the CPU IRQ line; the Serial pane shows TX and input mode (`i`) feeds RX. Coexists with the $F001/$F004 devices. Try `-rom example/serial_echo.bin -acia '$5000'`. |
 | `-theme` | `default` | Color palette. `default` is **Catppuccin Mocha**; flavors `mocha` / `macchiato` / `frappe` / `latte`; `neon` (the pre-Catppuccin palette); `protan` (red-green safe) / `tritan` (blue-yellow safe); `mono`. `NO_COLOR=1` env forces `mono` regardless. Switch at runtime with `:theme NAME`; the choice persists across launches. |
 | `-trace-replay` | — | Path to a prior `.trace` file. Opens the TUI in replay mode — `s` and `<` scroll through recorded frames instead of running the live CPU. The CPU register state is synced from the active frame so every panel renders as if paused at that PC. |
 | `-diff` | — | With `-trace-replay`: load a second `.trace` and mark the first cycle where the two runs diverge. Press `d` for the side-by-side view, `D` to jump both cursors to the divergence. |

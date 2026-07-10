@@ -30,8 +30,20 @@ make clean
 | `guess`        | Interactive state machine driven by keyboard   | prints `<` / `>` / `!` per guess         |
 | `hello`        | Apple-1 putc loop — write a string to $F001    | "HELLO WORLD\n" in the output pane       |
 | `cmos_demo`    | 65C02-only opcodes (BBR/STZ/BRA/etc.)          | requires `-cpu 65c02`                    |
+| `serial_echo`  | 6551 ACIA serial echo — poll RDRF/TDRE at $5000 | `-acia '$5000'`; type in input mode      |
 
 All programs spin on a `JMP halt` (or an infinite poll loop) so the TUI keeps showing live state.
+
+`serial_echo` is built by a Go generator rather than the ca65 Makefile — it emits a full
+$8000–$FFFF image (reset/IRQ vectors included) and self-verifies the echo on chippy's own
+core. Build it, then run with the ACIA wired:
+
+```
+go run example/gen_serial_echo.go            # writes example/serial_echo.bin
+chippy -rom example/serial_echo.bin -acia '$5000'
+```
+
+then press `i` and type — each key echoes into the Serial pane.
 
 ## Categorized
 
@@ -39,7 +51,7 @@ All programs spin on a `JMP halt` (or an infinite poll loop) so the TUI keeps sh
 |----------------|-----------------------|-------------------------------------|
 | Basic CPU      | `load_five`           | `count_to_ten`, `stack_demo`        |
 | Arithmetic     | `fibonacci`           | `mul16`, `bcd_add`                  |
-| I/O            | `hello`               | `echo`, `guess`                     |
+| I/O            | `hello`               | `echo`, `guess`, `serial_echo`      |
 | Interrupts     | `timer_irq`           | —                                   |
 | CMOS-only      | `cmos_demo`           | —                                   |
 
